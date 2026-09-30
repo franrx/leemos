@@ -1,0 +1,18 @@
+[
+  {"icon":"🌲","id":"bosque","name":"Bosque","nameCa":"Bosc","a":"#BFEBC9","b":"#F0F7C4","deco":"🌲🍄🌳🌼🌲🍄"},
+  {"icon":"🏖️","id":"playa","name":"Playa","nameCa":"Platja","a":"#B5E4FF","b":"#FFEFC0","deco":"🐚🌴⛱️🦀🌴🐚"},
+  {"icon":"☁️","id":"nubes","name":"Nubes","nameCa":"Núvols","a":"#D3E0FF","b":"#F4D6FF","deco":"☁️🌈☁️🎈☁️🌈"},
+  {"icon":"🏔️","id":"montana","name":"Montaña","nameCa":"Muntanya","a":"#FFDCC0","b":"#FFCDD8","deco":"⛰️🏔️🦅⛰️🏔️🐐"},
+  {"icon":"🚀","id":"espacio","name":"Espacio","nameCa":"Espai","a":"#CFC7FF","b":"#FFD1EE","deco":"🪐🌙⭐🛸🪐⭐"},
+  {"icon":"🐠","id":"mar","name":"Fondo del mar","nameCa":"Fons marí","a":"#A8E6F5","b":"#C4CCFF","deco":"🐠🐙🐚🦀🐢🐟"},
+  {"icon":"🐄","id":"granja","name":"Granja","nameCa":"Granja","a":"#FFE9B0","b":"#D9F2B3","deco":"🐄🐖🐓🌾🚜🐑"},
+  {"icon":"🦜","id":"selva","name":"Selva","nameCa":"Selva","a":"#B6EBB0","b":"#E4F5A8","deco":"🌴🦜🐒🌿🐍🦋"},
+  {"icon":"🌵","id":"desierto","name":"Desierto","nameCa":"Desert","a":"#FFE0A3","b":"#FFC9A3","deco":"🌵🐪🏜️🦂🌵☀️"},
+  {"icon":"⛄","id":"nieve","name":"Nieve","nameCa":"Neu","a":"#D6F1FF","b":"#EEF3FF","deco":"⛄❄️🐧🎿❄️⛄"},
+  {"icon":"🏰","id":"castillo","name":"Castillo","nameCa":"Castell","a":"#E5D5FF","b":"#FFD9E6","deco":"🏰🐉👑🛡️🏰🦄"},
+  {"icon":"🎪","id":"circo","name":"Circo","nameCa":"Circ","a":"#FFD6D6","b":"#FFF0B3","deco":"🎪🤡🎈🎠🎡🎈"},
+  {"icon":"🦖","id":"dino","name":"Dinosaurios","nameCa":"Dinosaures","a":"#D8EFB0","b":"#C9E7D6","deco":"🦖🦕🌴🥚🌋🦖"},
+  {"icon":"🌷","id":"jardin","name":"Jardín","nameCa":"Jardí","a":"#FFD9EC","b":"#DFF7C8","deco":"🌷🌻🐝🦋🐞🌼"},
+  {"icon":"🎵","id":"musica","name":"Música","nameCa":"Música","a":"#E3D9FF","b":"#FFD9C7","deco":"🎵🎹🥁🎺🎻🎶"},
+  {"icon":"🏙️","id":"ciudad","name":"Ciudad","nameCa":"Ciutat","a":"#D4DEFF","b":"#FFE3C4","deco":"🏙️🚌🚕🚦🚲🏢"}
+]

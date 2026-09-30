@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leemos: revisar audios</title>
+<style>
+  :root{color-scheme:light dark;font-family:system-ui,sans-serif}
+  body{margin:0 auto;max-width:900px;padding:16px}
+  header{display:flex;gap:12px;flex-wrap:wrap;align-items:center;position:sticky;top:0;background:Canvas;padding:8px 0;border-bottom:1px solid #8884}
+  input[type=search]{flex:1;min-width:160px;padding:8px;font-size:1rem}
+  button,select{padding:8px 12px;font-size:1rem}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  td,th{padding:6px 8px;border-bottom:1px solid #8883;text-align:left}
+  .txt{font-size:1.4rem;font-weight:700}
+  textarea{width:100%;height:5em;font-family:ui-monospace,monospace;margin-top:12px}
+  .muted{opacity:.7}
+</style>
+</head>
+<body>
+<h1>Revisar audios generados</h1>
+<p class="muted">Escucha cada clip, marca los que suenen mal y copia el comando para regenerarlos. Si un clip sigue fallando, prueba otro texto en <code>scripts/spoken.mjs</code> o <code>src/data/pronunciation.&lt;idioma&gt;.json</code>.</p>
+<header>
+  <select id="lang"><option value="es">Castellano</option><option value="ca">Català</option></select>
+  <input id="q" type="search" placeholder="Filtrar (ej. ma, casa, muy bien)">
+  <label><input id="badOnly" type="checkbox"> solo marcados</label>
+  <button id="playAll">▶ Reproducir visibles</button>
+</header>
+<table><thead><tr><th></th><th>Texto</th><th>Archivo</th><th>Regenerar</th></tr></thead><tbody id="rows"></tbody></table>
+<textarea id="cmd" readonly placeholder="Aquí aparece el comando para regenerar los clips marcados"></textarea>
+<script>
+const $=id=>document.getElementById(id);
+let manifest={clips:{es:{},ca:{}}};const bad={es:new Set(),ca:new Set()};let audio=null;
+const play=(lang,file)=>{if(audio)audio.pause();audio=new Audio('../audio/'+lang+'/'+file);return audio.play().catch(()=>{})};
+function render(){
+  const lang=$('lang').value,q=$('q').value.trim().toLowerCase(),only=$('badOnly').checked;
+  const rows=$('rows');rows.innerHTML='';
+  Object.entries(manifest.clips[lang]||{}).filter(([k])=>(!q||k.includes(q))&&(!only||bad[lang].has(k))).forEach(([k,f])=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML='<td><button>▶</button></td><td class="txt"></td><td class="muted"></td><td><input type="checkbox"></td>';
+    tr.children[1].textContent=k;tr.children[2].textContent=f;
+    tr.querySelector('button').onclick=()=>play(lang,f);
+    const cb=tr.querySelector('input');cb.checked=bad[lang].has(k);
+    cb.onchange=()=>{cb.checked?bad[lang].add(k):bad[lang].delete(k);cmd()};
+    rows.appendChild(tr);
+  });
+}
+function cmd(){
+  const parts=['es','ca'].filter(l=>bad[l].size).map(l=>'npm run audio -- --provider <proveedor> --lang '+l+' --only "'+[...bad[l]].join(',')+'"');
+  $('cmd').value=parts.join('\n');
+}
+$('playAll').onclick=async()=>{
+  const lang=$('lang').value;
+  for(const tr of [...$('rows').children]){
+    const f=tr.children[2].textContent;await new Promise(r=>{if(audio)audio.pause();audio=new Audio('../audio/'+lang+'/'+f);audio.onended=r;audio.onerror=r;audio.play().catch(r)});
+    await new Promise(r=>setTimeout(r,350));
+  }
+};
+['lang','q','badOnly'].forEach(id=>$(id).addEventListener('input',render));
+fetch('../audio/manifest.json').then(r=>r.ok?r.json():Promise.reject()).then(m=>{manifest=m;render()}).catch(()=>{$('rows').innerHTML='<tr><td colspan="4">Todavía no hay audio/manifest.json. Ejecuta <code>npm run audio</code> primero.</td></tr>'});
+</script>
+</body>
+</html>

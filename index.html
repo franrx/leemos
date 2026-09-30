@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Leemos: lectura por sílabas</title>
+<meta name="theme-color" content="#6D4AF0">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Leemos">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="hello">¡Hola!</h1>
+    <div class="hdr-actions">
+      <button class="icon-btn" id="albumBtn" data-ia="title:aAlbum;aria-label:aAlbum" title="Mis pegatinas" aria-label="Mis pegatinas">🎖️ <span id="albumCount">0</span></button>
+      <button class="icon-btn" id="soundBtn" aria-pressed="true" data-ia="title:aSound;aria-label:aSound" title="Sonidos y voz de ánimo" aria-label="Sonidos y voz de ánimo">🔔</button>
+      <button class="icon-btn" id="worldBtn" data-ia="title:aWorld;aria-label:aWorld" title="Elegir mundo" aria-label="Elegir mundo">🎨</button>
+      <button class="icon-btn" id="langBtn" data-ia="title:aLang;aria-label:aLang" title="Idioma: castellano o catalán" aria-label="Idioma: castellano o catalán">ES</button>
+      <button class="icon-btn" id="caseBtn" data-ia="title:aCase" aria-pressed="false" title="Cambiar entre minúsculas y mayúsculas">Aa</button>
+    </div>
+  </header>
+
+  <nav class="levels" id="levels" data-ia="aria-label:aLevels" aria-label="Nivel"></nav>
+
+  <div class="modes" role="group" data-ia="aria-label:aModes" aria-label="Modo">
+    <button class="mode" id="mSyl" data-i="mSyl" aria-pressed="true">Sílabas</button>
+    <button class="mode" id="mWord" data-i="mWord" aria-pressed="false">Palabras</button>
+  </div>
+
+  <section class="stage" id="stage" aria-live="polite">
+    <div class="session">
+      <div class="sbar" id="sbar" role="progressbar" data-ia="aria-label:aSess" aria-label="Progreso de la sesión" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0"><i id="sfill"></i></div>
+      <span id="slabel">0 de 10</span>
+    </div>
+    <div class="coach">
+      <svg id="mascot" class="mascot" viewBox="0 0 120 120" role="img" data-ia="aria-label:aMascot" aria-label="Lumi, el búho">
+        <g class="wing wl"><ellipse cx="24" cy="70" rx="13" ry="24" fill="#5233C4"/></g>
+        <g class="wing wr"><ellipse cx="96" cy="70" rx="13" ry="24" fill="#5233C4"/></g>
+        <path d="M30 36 L36 10 L56 28Z" fill="#6D4AF0"/>
+        <path d="M90 36 L84 10 L64 28Z" fill="#6D4AF0"/>
+        <ellipse cx="60" cy="68" rx="38" ry="42" fill="#6D4AF0"/>
+        <ellipse cx="60" cy="84" rx="24" ry="25" fill="#EDE7FF"/>
+        <g class="eyes">
+          <circle cx="45" cy="52" r="14" fill="#fff"/><circle cx="75" cy="52" r="14" fill="#fff"/>
+          <circle cx="47" cy="54" r="7" fill="#1E1B3A"/><circle cx="73" cy="54" r="7" fill="#1E1B3A"/>
+          <circle cx="49.5" cy="51" r="2.5" fill="#fff"/><circle cx="75.5" cy="51" r="2.5" fill="#fff"/>
+        </g>
+        <path d="M53 62 L67 62 L60 74Z" fill="#FFA41B"/>
+        <path d="M60 84 l3 6 6.5 1 -4.7 4.5 1.2 6.5 -6 -3.2 -6 3.2 1.2 -6.5 -4.7 -4.5 6.5 -1z" fill="#FFC53D"/>
+        <path d="M48 109 h10 M64 109 h10" stroke="#FFA41B" stroke-width="5" stroke-linecap="round"/>
+      </svg>
+      <p class="bubble" id="hint"></p>
+    </div>
+    <div class="goal" id="goal" role="img" data-ia="aria-label:aGoal" aria-label="Estrellas para la próxima pegatina"></div>
+    <div class="tiles" id="tiles"></div>
+    <div class="pic q" id="pic" hidden>?</div>
+    <div class="actions">
+      <button class="btn primary" id="joinBtn" data-i="join">Juntar</button>
+      <button class="btn" id="hearBtn" data-i="hear" hidden>🔊 Escuchar</button>
+      <button class="btn ok" id="okBtn" data-i="ok" hidden>✅ La leyó bien</button>
+      <button class="btn retry" id="noBtn" data-i="no" hidden>🔁 Le costó</button>
+    </div>
+  </section>
+
+  <details id="parents">
+    <summary data-i="parents">Para papá y mamá</summary>
+    <p class="small" data-i="pIntro">Que lea ella primero, en voz alta, sílaba por sílaba. Luego pulsa «Juntar» para oír cómo suena y marca si le salió o le costó. Lo que le cuesta vuelve más a menudo.</p>
+    <div class="row">
+      <label for="nm" data-i="lName">Nombre</label>
+      <input type="text" id="nm" maxlength="20" autocomplete="off">
+    </div>
+    <div class="row">
+      <label for="sessionSel" data-i="lSession">Sesión</label>
+      <select id="sessionSel">
+        <option value="5" data-i="n5">5 ejercicios</option>
+        <option value="10" data-i="n10">10 ejercicios</option>
+        <option value="15" data-i="n15">15 ejercicios</option>
+        <option value="20" data-i="n20">20 ejercicios</option>
+      </select>
+    </div>
+    <div class="row">
+      <label for="voiceSel" data-i="lVoice">Voz</label>
+      <select id="voiceSel"></select>
+    </div>
+    <div class="row">
+      <button class="icon-btn" id="recOpen" data-i="recOpen">🎙️ Grabar mi voz</button>
+      <button class="icon-btn" id="recClear" data-i="recClear">Borrar grabaciones</button>
+    </div>
+    <p class="small" id="recInfo"></p>
+    <div class="row">
+      <label for="rate" data-i="lRate">Velocidad</label>
+      <input type="range" id="rate" min="0.5" max="1.1" step="0.05">
+      <button class="icon-btn" id="testVoice" data-i="testVoice">Probar</button>
+    </div>
+    <div class="row"><strong data-i="hardT">Le cuestan ahora</strong></div>
+    <div class="hard" id="hard"></div>
+    <div class="row">
+      <button class="icon-btn" id="resetBtn" data-i="resetBtn">Borrar progreso</button>
+      <button class="icon-btn" id="themeBtn" data-i="theme">Tema</button>
+    </div>
+    <p class="small" id="voiceInfo"></p>
+  </details>
+</main>
+
+<div class="overlay" id="album" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="albumTitle">
+    <h2 id="albumTitle" data-i="albumTitle">Mis pegatinas</h2>
+    <p class="small" id="albumInfo"></p>
+    <div class="stickers" id="stickerGrid"></div>
+    <div class="actions"><button class="btn primary" id="albumClose" data-i="close">Cerrar</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="reward" hidden>
+  <div class="sheet center" role="dialog" aria-modal="true" aria-labelledby="rewardTitle">
+    <div class="big" id="rewardEmoji"></div>
+    <h2 id="rewardTitle"></h2>
+    <p class="small" data-i="rewardSub">Ya está en tu álbum.</p>
+    <div class="actions"><button class="btn primary" id="rewardOk" data-i="rewardOk">¡Genial!</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="worlds" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="worldsTitle">
+    <h2 id="worldsTitle" data-i="worldsTitle">Elige un mundo</h2>
+    <p class="small" data-i="worldsSub">Cambia el paisaje. «Sorpresa» estrena un mundo distinto en cada sesión.</p>
+    <div class="worlds" id="worldGrid"></div>
+    <div class="actions"><button class="btn primary" id="worldsClose" data-i="close">Cerrar</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="end" hidden>
+  <div class="sheet center" role="dialog" aria-modal="true" aria-labelledby="endTitle">
+    <div class="big">🎉</div>
+    <h2 id="endTitle"></h2>
+    <p id="endInfo"></p>
+    <div class="actions">
+      <button class="btn primary" id="endMore" data-i="endMore">Otra sesión</button>
+      <button class="btn" id="endStop" data-i="endStop">Por hoy es suficiente</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="recorder" hidden>
+  <div class="sheet center" role="dialog" aria-modal="true" aria-labelledby="recTitle">
+    <h2 id="recTitle" data-i="recTitle">Grabar mi voz</h2>
+    <p class="small" id="recWorld"></p>
+    <p class="small" data-i="recIntro">Di cada sílaba o palabra de forma clara y natural. Pulsa Grabar, habla y pulsa Parar.</p>
+    <div class="rec-text" id="recText"></div>
+    <p class="small" id="recCount"></p>
+    <p class="small" id="recStatus" aria-live="polite"></p>
+    <div class="actions">
+      <button class="btn" id="recPrev" data-i="recPrev">Anterior</button>
+      <button class="btn primary" id="recBtn">⏺ Grabar</button>
+      <button class="btn" id="recPlay" data-i="recPlay">▶ Escuchar</button>
+      <button class="btn" id="recNext" data-i="recNext">Siguiente</button>
+    </div>
+    <div class="actions" style="margin-top:14px"><button class="btn" id="recClose" data-i="recClose">Terminar</button></div>
+  </div>
+</div>
+
+<script type="module" src="src/app.js"></script>
+</body>
+</html>
