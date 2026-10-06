@@ -62,6 +62,8 @@
   "endInfo": "Has leído bien {o} de {n}.",
   "endOne": " Y has ganado una pegatina nueva.",
   "endMany": " Y has ganado {k} pegatinas nuevas.",
+  "endLevelUp": "¡Dominas casi todo este nivel! ¿Probamos el nivel {n}: {t}?",
+  "endLevelUpBtn": "Sí, siguiente nivel",
   "rest": "¡Hasta mañana, {n}! Si quieres seguir, toca un nivel o un modo.",
   "recWorld": "Nivel actual: {w}. Cambia de nivel en la pantalla principal para grabar otros.",
   "recOf": "{i} de {n}",

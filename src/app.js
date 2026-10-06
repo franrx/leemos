@@ -392,9 +392,15 @@ function showEnd(){
   $('endTitle').textContent=t('endTitle',{n:nm()});
   $('endInfo').textContent=t('endInfo',{o:sOk,n:n})+(sStk?(sStk===1?t('endOne'):t('endMany',{k:sStk})):'');
   $('end').hidden=false;
+  const all=[...itemsFor(S.level,'syl'),...itemsFor(S.level,'word')];
+  const pct=Math.round(100*all.filter(x=>mastered(x.key)).length/all.length);
+  const canLevelUp=pct>=90&&S.level<LEVELS.length-1;
+  $('endLevelUp').hidden=!canLevelUp;
+  $('endLevelUpBtn').hidden=!canLevelUp;
+  if(canLevelUp)$('endLevelUp').textContent=t('endLevelUp',{n:S.level+2,t:LEVELS[S.level+1].name});
   confetti();sfx.win();flash();poke('dance',1600);
   if(S.sound)say(t('endTitle',{n:nm()}));
-  $('endMore').focus();
+  (canLevelUp?$('endLevelUpBtn'):$('endMore')).focus();
 }
 function restState(){
   resting=true;cur=null;phase='wait';
@@ -539,6 +545,7 @@ $('voiceSel').onchange=e=>{S.voiceURIs[S.lang]=e.target.value;save();pickVoice()
 $('sessionSel').value=String(S.sessionLen);
 $('sessionSel').onchange=e=>{S.sessionLen=parseInt(e.target.value,10);save();renderSession()};
 $('endMore').onclick=()=>{$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();next()};
+$('endLevelUpBtn').onclick=()=>{S.level++;save();renderLevels();$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();next()};
 $('endStop').onclick=()=>{$('end').hidden=true;restState()};
 renderSession();
 

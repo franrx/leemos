@@ -62,6 +62,8 @@
   "endInfo": "Has llegit bé {o} de {n}.",
   "endOne": " I has guanyat una enganxina nova.",
   "endMany": " I has guanyat {k} enganxines noves.",
+  "endLevelUp": "Dominas gairebé tot aquest nivell! Provem el nivell {n}: {t}?",
+  "endLevelUpBtn": "Sí, nivell següent",
   "rest": "Fins demà, {n}! Si vols continuar, toca un nivell o un mode.",
   "recWorld": "Nivell actual: {w}. Canvia de nivell a la pantalla principal per gravar-ne d'altres.",
   "recOf": "{i} de {n}",
