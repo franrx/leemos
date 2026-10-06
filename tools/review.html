@@ -15,6 +15,7 @@
   .txt{font-size:1.4rem;font-weight:700}
   textarea{width:100%;height:5em;font-family:ui-monospace,monospace;margin-top:12px}
   .muted{opacity:.7}
+  #status{position:fixed;bottom:0;left:0;right:0;padding:10px 16px;background:#b91c1c;color:#fff;font-size:.9rem;display:none}
 </style>
 </head>
 <body>
@@ -28,10 +29,21 @@
 </header>
 <table><thead><tr><th></th><th>Texto</th><th>Archivo</th><th>Regenerar</th></tr></thead><tbody id="rows"></tbody></table>
 <textarea id="cmd" readonly placeholder="Aquí aparece el comando para regenerar los clips marcados"></textarea>
+<div id="status"></div>
 <script>
 const $=id=>document.getElementById(id);
 let manifest={clips:{es:{},ca:{}}};const bad={es:new Set(),ca:new Set()};let audio=null;
-const play=(lang,file)=>{if(audio)audio.pause();audio=new Audio('../audio/'+lang+'/'+file);return audio.play().catch(()=>{})};
+let statusTimer=null;
+function showStatus(msg){
+  const s=$('status');s.textContent=msg;s.style.display='block';
+  clearTimeout(statusTimer);statusTimer=setTimeout(()=>s.style.display='none',4000);
+}
+const play=(lang,file)=>{
+  if(audio)audio.pause();
+  audio=new Audio('../audio/'+lang+'/'+file);
+  audio.onerror=()=>{const e=audio.error;showStatus('Error al cargar '+file+': '+(e?['','MEDIA_ERR_ABORTED','MEDIA_ERR_NETWORK','MEDIA_ERR_DECODE','MEDIA_ERR_SRC_NOT_SUPPORTED'][e.code]:'desconocido'))};
+  return audio.play().catch(e=>showStatus('No se pudo reproducir '+file+': '+e.name+' '+e.message))
+};
 function render(){
   const lang=$('lang').value,q=$('q').value.trim().toLowerCase(),only=$('badOnly').checked;
   const rows=$('rows');rows.innerHTML='';
