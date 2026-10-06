@@ -120,7 +120,7 @@ await playSession(a, 10);
 check('session-complete screen appears after 10', !a.$('end').hidden && /Sesión completada/.test(a.$('endTitle').textContent));
 a.$('endStop').click();
 check('"enough for today" leaves a goodbye message', /Hasta mañana/.test(a.$('hint').textContent));
-check('sticker earned after 8 correct answers', Number(a.$('albumCount').textContent) >= 1);
+check('sticker earned after completing a session', Number(a.$('albumCount').textContent) >= 1);
 
 // ---------- 6. audio priority: generated clip beats browser voice ----------
 const manifest = { generated: 'test', clips: { es: new Proxy({}, { get: (_, k) => (typeof k === 'string' ? 'x.mp3' : undefined) }), ca: {} } };

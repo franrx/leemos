@@ -9,7 +9,6 @@ const LV={es:LV_ES,ca:LV_CA};
 let LEVELS=LV_ES;
 const T={es:T_ES,ca:T_CA};
 
-const GOAL=8;
 const wn=w=>S.lang==='ca'?w.nameCa:w.name;
 const rnd=a=>a[Math.floor(Math.random()*a.length)];
 const nm=()=>(S.name||'').trim()||'campeona';
@@ -246,31 +245,25 @@ function record(ok){
   phase='wait';
   ['hearBtn','okBtn','noBtn'].forEach(id=>$(id).hidden=true);
   const s=stat(cur.key);ok?s.ok++:s.fail++;
-  let reward=null;
   if(ok){
-    S.total++;S.progress++;
+    S.total++;
     burst();sfx.ok();poke('cheer',900);sparkleBurst($('mascot'),10);
     const tl=$('tiles');tl.classList.remove('win');void tl.getBoundingClientRect();tl.classList.add('win');
     setTimeout(()=>tl.classList.remove('win'),700);
-    if(S.progress>=GOAL){
-      S.progress=0;
-      if(S.stickers<STICKERS.length){S.stickers++;reward=STICKERS[S.stickers-1]}
-    }
   }else{sfx.retry();poke('tilt',800)}
-  save();
-  sDone++;if(ok)sOk++;if(reward)sStk++;
-  renderSession();
+  sDone++;if(ok)sOk++;
   const finished=sDone>=S.sessionLen;
+  let reward=null;
+  if(finished&&S.stickers<STICKERS.length){S.stickers++;reward=STICKERS[S.stickers-1];sStk++}
+  save();
+  renderSession();renderGoal();
   const msg=fmt(rnd(t(ok?'oks':'nos')));
   $('hint').textContent=msg;
   if(reward){
-    renderGoal(GOAL);
-    setTimeout(()=>renderGoal(),800);
     setTimeout(()=>showReward(reward),500);
-    if(finished)pendingEnd=true;
-  }else{
-    renderGoal();
-    if(S.sound&&(!ok||Math.random()<.6))setTimeout(()=>say(msg),200);
+    pendingEnd=true;
+  }else if(S.sound&&(!ok||Math.random()<.6)){
+    setTimeout(()=>say(msg),200);
   }
   renderLevels();renderHard();renderAlbum();
   if(finished){if(!reward)setTimeout(showEnd,ok?1100:900)}
@@ -358,8 +351,8 @@ function flash(){
   document.body.appendChild(f);setTimeout(()=>f.remove(),550);
 }
 function renderGoal(n){
-  const k=n===undefined?S.progress:n,g=$('goal');g.innerHTML='';
-  for(let i=0;i<GOAL;i++){const d=document.createElement('i');if(i<k)d.className='on';g.appendChild(d)}
+  const total=S.sessionLen,k=n===undefined?sDone:n,g=$('goal');g.innerHTML='';
+  for(let i=0;i<total;i++){const d=document.createElement('i');if(i<k)d.className='on';g.appendChild(d)}
 }
 function renderAlbum(){
   $('albumCount').textContent=S.stickers;
@@ -371,7 +364,7 @@ function renderAlbum(){
     d.setAttribute('aria-label',i<S.stickers?t('albumGot',{e:e}):t('albumLocked'));
     g.appendChild(d);
   });
-  $('albumInfo').textContent=t('albumInfo',{s:S.stickers,t:STICKERS.length,x:S.total,g:GOAL});
+  $('albumInfo').textContent=t('albumInfo',{s:S.stickers,t:STICKERS.length,x:S.total});
 }
 function showReward(e){
   $('rewardEmoji').textContent=e;
