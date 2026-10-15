@@ -11,7 +11,7 @@ const T={es:T_ES,ca:T_CA};
 
 const wn=w=>S.lang==='ca'?w.nameCa:w.name;
 const rnd=a=>a[Math.floor(Math.random()*a.length)];
-const nm=()=>(S.name||'').trim()||'campeona';
+const nm=()=>(typeof S.name==='string'?S.name:'').trim()||(PROFILE.kind==='pre'?PROFILE.name:'campeona');
 const fmt=s=>s.replace('{n}',nm());
 
 // ---------- i18n (castellano / català) ----------
@@ -33,11 +33,18 @@ function splitSyl(s){
 // ---------- state ----------
 // ---------- profiles (one saved state per child; Elsa keeps the original key) ----------
 const PKEY='leemos-profiles';
+// Keep the valid entries of a damaged store: drop non-objects, bad or duplicate ids; coerce name and kind.
+const cleanProfiles=p=>{
+  const seen=new Set(),list=[];
+  (p&&Array.isArray(p.list)?p.list:[]).forEach(x=>{
+    if(!x||typeof x.id!=='string'||!x.id||seen.has(x.id))return;
+    seen.add(x.id);
+    list.push({id:x.id,name:typeof x.name==='string'&&x.name.trim()?x.name.trim():x.id,kind:x.kind==='pre'?'pre':'reader'});
+  });
+  return list.some(x=>x.id===p.active)?{active:p.active,list}:null;
+};
 const loadProfiles=()=>{
-  try{
-    const p=JSON.parse(localStorage.getItem(PKEY));
-    if(p&&Array.isArray(p.list)&&p.list.length&&p.list.every(x=>x&&typeof x.id==='string'&&x.id)&&p.list.some(x=>x.id===p.active))return p;
-  }catch(e){}
+  try{const c=cleanProfiles(JSON.parse(localStorage.getItem(PKEY)));if(c)return c}catch(e){}
   return {active:'elsa',list:[{id:'elsa',name:'Elsa',kind:'reader'}]};
 };
 const PROFILES=loadProfiles();
@@ -430,7 +437,7 @@ function showEnd(){
   }
   confetti();sfx.win();flash();poke('dance',1600);
   if(S.sound)say(t('endTitle',{n:nm()}));
-  (canLevelUp?$('endLevelUpBtn'):$('endMore')).focus();
+  (canLevelUp&&!pre?$('endLevelUpBtn'):$('endMore')).focus();
 }
 function restState(){
   resting=true;cur=null;phase='wait';
@@ -501,7 +508,9 @@ function renderProfiles(){
     g.appendChild(b);
   });
 }
-$('profileBtn').onclick=()=>{renderProfiles();$('profiles').hidden=false;$('profilesClose').focus()};
+function openProfiles(){renderProfiles();$('profiles').hidden=false;$('profilesClose').focus()}
+$('profileBtn').onclick=openProfiles;
+$('profileOpen').onclick=openProfiles;
 $('profilesClose').onclick=closeOverlays;
 $('pfAdd').onclick=()=>{const n=$('pfName').value.trim();if(n)addProfile(n,$('pfKind').value)};
 $('rewardOk').onclick=closeOverlays;
@@ -625,15 +634,24 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(
 if(PROFILE.kind==='pre'){
   document.documentElement.classList.add('pre');
   cur=null;phase='wait';
-  const imp=window.__leemosImport||(p=>import(p));
-  const [mod,dEs,dCa]=await Promise.all([imp('./sounds.js'),loadJSON('src/data/sounds.es.json'),loadJSON('src/data/sounds.ca.json')]);
-  const sess={reset(){sDone=sOk=sStk=0;renderSession();renderGoal()},inc(ok){sDone++;if(ok)sOk++},get done(){return sDone},addSticker(){sStk++}};
-  pre=mod.createSounds({doc:document,$,S,save,t,say,sfx,poke,burst,sparkle:sparkleBurst,rnd,fmt,nm,later:(f,ms)=>setTimeout(f,ms),
-    data:{es:dEs,ca:dCa},stickers:STICKERS,sess,renderSession,renderGoal,renderAlbum,renderHard,end:showEnd,
-    hasAudio:x=>!!(clipURL[ck(x)]||genFile(x)),
-    reward:(e,alive)=>{pendingEnd=true;setTimeout(()=>{if(!alive||alive())showReward(e);else pendingEnd=false},500)}});
-  $('pre').hidden=false;
-  document.querySelector('[data-i="pIntro"]').setAttribute('data-i','prePIntro');
-  applyLang();
-  pre.refresh();
+  try{
+    const imp=window.__leemosImport||(p=>import(p));
+    const [mod,dEs,dCa]=await Promise.all([imp('./sounds.js'),loadJSON('src/data/sounds.es.json'),loadJSON('src/data/sounds.ca.json')]);
+    const sess={reset(){sDone=sOk=sStk=0;renderSession();renderGoal()},inc(ok){sDone++;if(ok)sOk++},get done(){return sDone},addSticker(){sStk++}};
+    pre=mod.createSounds({doc:document,$,S,save,t,say,sfx,poke,burst,sparkle:sparkleBurst,rnd,fmt,nm,later:(f,ms)=>setTimeout(f,ms),
+      data:{es:dEs,ca:dCa},stickers:STICKERS,sess,renderSession,renderGoal,renderAlbum,renderHard,end:showEnd,
+      hasAudio:x=>!!(clipURL[ck(x)]||genFile(x)),
+      reward:(e,alive)=>{pendingEnd=true;setTimeout(()=>{if(!alive||alive())showReward(e);else pendingEnd=false},500)}});
+    $('pre').hidden=false;
+    $('profileBtn').hidden=true; // a child must not reach another profile; parents switch from their panel
+    document.querySelector('[data-i="pIntro"]').setAttribute('data-i','prePIntro');
+    applyLang();
+    pre.refresh();
+  }catch(e){
+    // sounds.js or its data did not load (e.g. offline before the service worker cached them): show the normal screen, not a blank stage.
+    pre=null;
+    document.documentElement.classList.remove('pre');
+    $('pre').hidden=true;
+    phase='read';next();
+  }
 }

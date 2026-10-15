@@ -28,13 +28,12 @@
     { "letters": [
       { "l": "v", "w": "vaca", "e": "🐮", "ph": "b" },
       { "l": "j", "w": "joguina", "e": "🧸" },
-      { "l": "z", "w": "zebra", "e": "🦓" },
-      { "l": "x", "w": "xocolata", "e": "🍫" }
+      { "l": "z", "w": "zebra", "e": "🦓" }
     ] },
     { "letters": [
+      { "l": "x", "w": "xocolata", "e": "🍫" },
       { "l": "ll", "w": "lluna", "e": "🌙" },
-      { "l": "ny", "w": "nyu", "e": "🐃" },
-      { "l": "tx", "w": "txec", "e": "🇨🇿" }
+      { "l": "ny", "w": "nyam", "e": "😋" }
     ] }
   ]
 }

@@ -38,6 +38,12 @@ for (const lang of ['es', 'ca']) {
 const reduced = ['avió', 'elefant', 'ocell'];
 check('[ca] vowel picture words do not start with a reduced unstressed vowel', DATA.ca.groups[0].letters.every((x) => !reduced.includes(x.w)));
 
+// Weak or confusing Catalan picks were replaced: no flag emoji, no water buffalo for "nyu", and no "tx" (it sounds like "x" in some dialects).
+const caAll = DATA.ca.groups.flatMap((g) => g.letters);
+check('[ca] no flag emoji and no "tx"', caAll.every((x) => !/\p{Regional_Indicator}/u.test(x.e)) && !caAll.some((x) => x.l === 'tx'));
+check('[ca] "ny" is not paired with the water buffalo', caAll.find((x) => x.l === 'ny').e !== '🐃');
+check('s and z are treated as confusable', pickDistractors({ l: 's' }, [{ l: 's' }, { l: 'z' }, { l: 'x' }], {}, 'es', 1, () => 0.5)[0].l === 'x');
+
 // ---------- keys, weights, mastery ----------
 check('keys: es has no prefix, ca has ca:', sKey('es', 'm') === 'snd:m' && sKey('ca', 'm') === 'ca:snd:m');
 const near = (a, b) => Math.abs(a - b) < 1e-9;

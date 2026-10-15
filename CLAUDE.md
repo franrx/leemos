@@ -41,7 +41,7 @@ Sin frameworks ni bundler, a propósito. No introducir uno sin una razón clara.
 - Sesiones de 5/10/15/20 ejercicios (por defecto 10, unos 5 minutos). La barra de sesión cuenta ejercicios hechos, no aciertos. Pegatina cada 8 aciertos.
 - **Retroalimentación siempre amable:** un fallo suena suave y Lumi anima; nada de sonidos de castigo.
 - Interruptor Aa: minúsculas / MAYÚSCULAS (los libros de inicio suelen ir en mayúsculas).
-- **Leo (4 años, pre-lector):** perfil aparte (`kind:'pre'`). Asocia letra con SONIDO (fonema, no nombre). Tarjeta de presentación (letra grande, sonido, dibujo+palabra) y luego juego: suena el sonido, toca la letra entre 2 opciones (3 si ya la domina). El dibujo sale en la tarjeta a propósito (aquí no se lee). Máximo 2 letras nuevas por sesión. Grupos: vocales, m s l p, t n d c, r b f g, v j z ñ, ch ll qu (en catalán x, ll ny tx). La `h` no entra (no tiene sonido). Dos letras con el mismo `ph` nunca salen juntas. Siguiente grupo cuando ≥75% del actual está dominado.
+- **Leo (4 años, pre-lector):** perfil aparte (`kind:'pre'`). Asocia letra con SONIDO (fonema, no nombre). Tarjeta de presentación (letra grande, sonido, dibujo+palabra) y luego juego: suena el sonido, toca la letra entre 2 opciones (3 si ya la domina). El dibujo sale en la tarjeta a propósito (aquí no se lee). Máximo 2 letras nuevas por sesión. Grupos: vocales, m s l p, t n d c, r b f g, v j z ñ, ch ll qu (en catalán x, ll ny; sin `tx`, suena como `x` en algunos dialectos). La `h` no entra (no tiene sonido). Dos letras con el mismo `ph` nunca salen juntas; m/n, b/d, p/b y s/z solo juntas cuando ambas están dominadas. La carta de presentación no cuenta la letra como vista hasta que responde en el juego. Los padres cambian de perfil desde su panel (Leo no ve el chip 🧒). Siguiente grupo cuando ≥75% del actual está dominado.
 - **Mundos:** el nivel es la dificultad; el mundo (16 paisajes, o 🎲 Sorpresa que rota por sesión) es solo el paisaje. En modo Palabras, se prefieren las palabras etiquetadas con el mundo actual (80% con ≥3 candidatas, 40% con menos). Etiquetas = ids de `worlds.json` en el campo `g`, separadas por espacios.
 
 ## Audio: orden de prioridad (ver `say()` en app.js)
@@ -74,7 +74,7 @@ Los sonidos de letras son clips de tipo `sound` (clave = la letra). Un TTS suele
 6. Pegatinas por mundo (granja, mar, dinosaurios) como razón extra para probar cada uno.
 7. Persistir la sesión en curso; sincronizar perfil entre dispositivos (solo si Fran lo pide).
 8. Pruebas e2e con un navegador real (Playwright). Hoy solo hay jsdom.
-9. **Audio del modo Leo sin generar.** El proveedor `edge` devuelve 403 (2026-10-15), así que no se han podido generar ni escuchar los clips `sound`. Probar `azure`/`google`/`elevenlabs` o grabar con «Grabar mi voz». Revisar con nativo las palabras de `sounds.ca.json` (txec, ull, mà, lupa…) y qué e/o (abierta/cerrada) se quiere enseñar en catalán.
+9. **Audio del modo Leo sin generar.** El proveedor `edge` devuelve 403 (2026-10-15), así que no se han podido generar ni escuchar los clips `sound`. Probar `azure`/`google`/`elevenlabs` o grabar con «Grabar mi voz». Revisar con nativo las palabras de `sounds.ca.json` (nyam, ànec, eina, ós, ull, mà, lupa…) y qué e/o (abierta/cerrada) se quiere enseñar en catalán.
 
 ## Ojo con esto
 - **Nunca se ha probado en un navegador real**, solo en jsdom. Lo primero: `npm run dev` y probarlo en la tablet de Elsa (audio, micrófono, instalación).

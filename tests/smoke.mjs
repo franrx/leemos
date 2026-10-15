@@ -14,7 +14,7 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null } = {}) {
+async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false } = {}) {
   const errors = [];
   const audioCalls = [];
   const vc = new VirtualConsole();
@@ -24,7 +24,7 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
     beforeParse(w) {
       Object.defineProperty(w.navigator, 'language', { value: lang });
       for (const [k, v] of Object.entries(storage)) w.localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
-      w.__leemosImport = (p) => import(pathToFileURL(join(ROOT, 'src', p)).href);
+      w.__leemosImport = importFails ? () => Promise.reject(new Error('offline')) : (p) => import(pathToFileURL(join(ROOT, 'src', p)).href);
       w.matchMedia = () => ({ matches: false, addEventListener() {}, removeListener() {} });
       w.speechSynthesis = { getVoices: () => [{ name: 'Joana Online (Natural)', lang: 'ca-ES', voiceURI: 'j' }, { name: 'Google español', lang: 'es-ES', voiceURI: 'g' }], cancel() {}, speak(u) { (w.__tts ||= []).push(u.text); } };
       w.SpeechSynthesisUtterance = function (t) { this.text = t; };
@@ -333,6 +333,66 @@ a = await boot({ storage: LEO_MSLP, manifest: manifestAny }); await until(() => 
 check('review: no hint when the sounds have clips', !a.$('preNotice'));
 a = await bootLeo();
 check('review: no hint for the vowels alone (the voice reads them correctly)', !a.$('preNotice'));
+
+// ---------- 12. deferred minors from the final review ----------
+// A partly corrupt profile store keeps its valid entries; hostile fields are sanitised.
+a = await boot({ storage: { 'leemos-profiles': { active: 'leo', list: [{ id: 'leo', name: 'Leo', kind: 'pre' }, { id: 5 }, null] } } });
+await until(() => a.$('prePlay'));
+check('minor: a partly corrupt store keeps the valid profiles', a.$('hello').textContent === '¡Hola, Leo!' && !!a.$('prePlay') && a.errors.length === 0, a.errors.join(' | '));
+a = await boot({ storage: { 'leemos-profiles': { active: 'x', list: [{ id: 'x', name: 123, kind: 'reader' }, { id: 'y', name: {}, kind: 'pre' }, { id: 'z', kind: 'weird' }] } } });
+a.$('profileBtn').click();
+check('minor: non-string names and unknown kinds are sanitised', a.errors.length === 0 && a.$('profileName').textContent === 'x' && a.d.querySelectorAll('#profileList .wbtn').length === 3, a.errors.join(' | '));
+// If sounds.js cannot load, show the normal screen instead of a blank stage.
+a = await boot({ storage: LEO, importFails: true });
+await sleep(50);
+check('minor: a failed sounds.js import falls back to the normal screen', !a.d.documentElement.classList.contains('pre') && !a.$('joinBtn').hidden && a.errors.length === 0, a.errors.join(' | '));
+
+// The unlock button is not the big primary one, so a child tapping the first big button just plays again.
+a = await boot({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', stats: { 'snd:a': mast(3), 'snd:e': mast(3), 'snd:i': mast(3), 'snd:o': mast(3) } } } });
+await until(() => a.$('prePlay'));
+a.$('prePlay').click(); await playPre(a, 5); await sleep(10);
+check('minor: for Leo the unlock button is secondary and "Otra sesión" is primary and focused', !a.$('endLevelUpBtn').hidden && !a.$('endLevelUpBtn').classList.contains('primary') && a.$('endMore').classList.contains('primary') && a.d.activeElement === a.$('endMore'));
+
+// Parents switch profile from their panel; the child cannot reach the chip.
+a = await bootLeo();
+check('minor: Leo has no profile chip; the parents panel has a switch button', a.$('profileBtn').hidden && !!a.$('profileOpen'));
+a.$('profileOpen').click();
+check('minor: the parents-panel button opens the profile sheet', !a.$('profiles').hidden);
+a = await boot();
+check('minor: readers keep the chip', !a.$('profileBtn').hidden);
+
+// An intro card that is abandoned does not count the letter as seen.
+a = await bootLeo();
+a.$('prePlay').click();
+a.$('langBtn').click(); await sleep(10);
+const savedLeo = a.w.localStorage.getItem('leemos-v1:leo');
+check('minor: leaving an intro card does not mark the letter as seen', !savedLeo || Object.keys(JSON.parse(savedLeo).stats || {}).length === 0, savedLeo);
+
+// Neutral wording for Leo.
+a = await boot({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', sessionLen: 100 } } });
+await until(() => a.$('prePlay'));
+a.$('prePlay').click();
+let lectora = 0;
+for (let i = 0; i < 60; i++) {
+  if (a.$('preNext')) a.$('preNext').click();
+  choice(a, a.$('preChoices').dataset.answer).click();
+  if (/lectora/.test(a.$('hint').textContent)) lectora++;
+  await sleep(5);
+}
+check('minor: praise shown to Leo never says "lectora"', lectora === 0, `${lectora}/60`);
+a = await bootLeo();
+a.$('nm').value = ''; a.$('nm').dispatchEvent(new a.w.Event('input'));
+check('minor: with the name cleared Leo is greeted by his profile name, not "campeona"', a.$('hello').textContent === '¡Hola, Leo!', a.$('hello').textContent);
+
+// Focus follows the screen (keyboard and switch users).
+a = await bootLeo();
+check('minor: the home focuses Jugar', a.d.activeElement === a.$('prePlay'));
+a.$('prePlay').click();
+check('minor: the intro card focuses Siguiente', a.d.activeElement === a.$('preNext'));
+a.$('preNext').click();
+check('minor: the game focuses the hear button', a.d.activeElement === a.$('preHear'));
+[...a.d.querySelectorAll('.pre-choice')].find((b) => b.dataset.l !== a.$('preChoices').dataset.answer).click();
+check('minor: after a wrong tap focus moves to an enabled choice', !!a.d.activeElement && a.d.activeElement.classList.contains('pre-choice') && !a.d.activeElement.disabled);
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

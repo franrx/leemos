@@ -172,6 +172,7 @@ input[type=range]{flex:1;min-width:140px;accent-color:var(--c2)}
 /* ---------- Letter sounds (pre-reader profile) ---------- */
 html.pre #levels,html.pre .modes,html.pre #tiles,html.pre #pic,html.pre #stage .actions,html.pre #worldBtn,html.pre #caseBtn{display:none!important}
 body.pre-home .session,body.pre-home .goal{display:none!important}
+html.pre #endLevelUpBtn{order:3}
 .pre-room{display:flex;flex-direction:column;align-items:center;gap:18px;width:100%}
 .pre-card{display:flex;flex-direction:column;align-items:center;gap:16px;width:100%}
 .pre-play{font-size:2rem;padding:22px 56px;min-height:72px}

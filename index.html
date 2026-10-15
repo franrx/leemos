@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="src/styles.css">
-<script>try{var p=JSON.parse(localStorage.getItem('leemos-profiles')),a=p&&p.list.find(function(x){return x.id===p.active});if(a&&a.kind==='pre')document.documentElement.classList.add('pre')}catch(e){}</script>
+<script>try{var p=JSON.parse(localStorage.getItem('leemos-profiles')),a=p&&p.list.find(function(x){return x&&x.id===p.active});if(a&&a.kind==='pre')document.documentElement.classList.add('pre')}catch(e){}</script>
 </head>
 <body>
 <main>
@@ -108,6 +108,9 @@
     <div class="row">
       <button class="icon-btn" id="resetBtn" data-i="resetBtn">Borrar progreso</button>
       <button class="icon-btn" id="themeBtn" data-i="theme">Tema</button>
+    </div>
+    <div class="row">
+      <button class="icon-btn" id="profileOpen" data-i="aProfile">Cambiar de niño o niña</button>
     </div>
     <p class="small" id="voiceInfo"></p>
   </details>

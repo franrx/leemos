@@ -101,5 +101,6 @@
   "preGroupUpBtn": "Sí, lletres noves",
   "preRest": "Fins demà, {n}! Si vols continuar, toca Jugar.",
   "preRecWorld": "Sons de les lletres. Digues només el so, sense el nom de la lletra.",
+  "preOks": ["Molt bé, {n}!", "Genial, {n}!", "Bravo, {n}!", "L'has clavat, {n}!"],
   "preNoAudio": "Per a pare i mare: falten sons de lletres. Sense ells, la veu del navegador diu el nom de la lletra («eme»), no el seu so. Fes servir «Gravar la meva veu» a «Per a pare i mare»."
 }

@@ -3,7 +3,7 @@
 
 export const NEW_PER_SESSION=2;
 // Letters children mix up; only offered together once both are mastered.
-export const CONFUSABLE=[['m','n'],['b','d'],['p','b']];
+export const CONFUSABLE=[['m','n'],['b','d'],['p','b'],['s','z']];
 
 export const sKey=(lang,l)=>(lang==='ca'?'ca:':'')+'snd:'+l;
 export const phOf=x=>x.ph||x.l;
@@ -67,6 +67,7 @@ export function createSounds(ctx){
     const play=el('button','btn primary pre-play',t('prePlay'));play.id='prePlay';
     play.onclick=begin;
     room().replaceChildren(play,el('p','small',t('preProgress',{d:done,n:total})));
+    play.focus();
     // Without a clip or a recording the browser voice says a lone consonant's NAME ("eme"), not its sound.
     if(pool().some(x=>!VOWELS.includes(x.l)&&!ctx.hasAudio(x.l))){
       const note=el('p','small pre-notice',t('preNoAudio'));note.id='preNotice';
@@ -88,9 +89,9 @@ export function createSounds(ctx){
     if(seen(x.l))game(x);else{fresh++;intro(x)}
   }
   // Intro card: the picture is shown on purpose here (the goal is sound-letter linking, not reading).
+  // The letter only counts as seen once its game step records an answer, so abandoning the card keeps it new.
   function intro(x){
     cur=null;busy=false;
-    stat(x.l);save();
     const letter=el('button','pre-letter');letter.id='preLetter';
     letter.setAttribute('aria-label',x.l);
     letter.append(el('span','up',x.l.toUpperCase()),el('span','lo',x.l));
@@ -102,6 +103,7 @@ export function createSounds(ctx){
     go.onclick=()=>game(x);
     const card=el('div','pre-card');card.append(letter,word,go);
     room().replaceChildren(card);
+    go.focus();
     $('hint').textContent=t('preIntroHint');
     say(x.l);
   }
@@ -120,6 +122,7 @@ export function createSounds(ctx){
       row.appendChild(b);
     });
     room().replaceChildren(hear,row);
+    hear.focus();
     $('hint').textContent=t('preGameHint');
     say(x.l);
   }
@@ -130,6 +133,8 @@ export function createSounds(ctx){
     b.classList.add('gone');b.disabled=true;
     if(!wrong){wrong=true;stat(x.l).fail++;save();ctx.renderHard()}
     $('hint').textContent=ctx.fmt(ctx.rnd(t('preNos')));
+    const nextChoice=room().querySelector('.pre-choice:not(:disabled)');
+    if(nextChoice)nextChoice.focus(); // the tapped button just became disabled and dropped focus
     say(x.l); // replay the sound so the next try is informed
   }
   function correct(x,b){
@@ -140,7 +145,7 @@ export function createSounds(ctx){
     ctx.burst();sfx.ok();ctx.poke('cheer',900);ctx.sparkle($('mascot'),10);
     const pic=el('div','pre-pic big',x.e);pic.id='prePic';
     room().appendChild(pic);
-    $('hint').textContent=ctx.fmt(ctx.rnd(t('oks')));
+    $('hint').textContent=ctx.fmt(ctx.rnd(t('preOks')));
     ctx.sess.inc(!wrong);
     const finished=ctx.sess.done>=S.sessionLen;
     let reward=null;
@@ -157,6 +162,8 @@ export function createSounds(ctx){
   function showEnd(){
     const up=canUnlockNext(groups(),gi(),S.stats,lang());
     $('endLevelUp').hidden=!up;$('endLevelUpBtn').hidden=!up;
+    // Secondary on purpose: a child tapping the big button should start another session, not unlock harder letters.
+    $('endLevelUpBtn').classList.remove('primary');
     if(up){$('endLevelUp').textContent=t('preGroupUp');$('endLevelUpBtn').textContent=t('preGroupUpBtn')}
     return up;
   }

@@ -101,5 +101,6 @@
   "preGroupUpBtn": "Sí, letras nuevas",
   "preRest": "¡Hasta mañana, {n}! Si quieres seguir, toca Jugar.",
   "preRecWorld": "Sonidos de las letras. Di solo el sonido, sin el nombre de la letra.",
+  "preOks": ["¡Muy bien, {n}!", "¡Genial, {n}!", "¡Bravo, {n}!", "¡Lo has clavado, {n}!"],
   "preNoAudio": "Para papá y mamá: faltan sonidos de letras. Sin ellos, la voz del navegador dice el nombre de la letra («eme»), no su sonido. Usa «Grabar mi voz» en «Para papá y mamá»."
 }
