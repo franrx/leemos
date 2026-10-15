@@ -29,7 +29,8 @@ export function spokenFor(clip) {
       return clip.text; // TODO(experiment): try clip.text + '.'
     case 'sound':
       // A lone "m" read as text comes out as the letter name "eme", so a sound is sent as IPA (SSML phoneme):
-      // Azure and Google read it natively, and the piper provider extracts the IPA and synthesizes it directly.
+      // Azure and Google read it natively. Providers without SSML support (edge, elevenlabs, piper) cannot use it:
+      // record these sounds instead (tools/record.html).
       return clip.ipa ? `<phoneme alphabet='ipa' ph='${clip.ipa}'>${clip.text}</phoneme>` : clip.text;
     case 'word':
       return clip.text;

@@ -8,7 +8,6 @@ import {
 } from '../src/sounds.js';
 import { buildClipList } from '../scripts/lib/clips.mjs';
 import { spokenFor } from '../scripts/spoken.mjs';
-import { ipaFrom } from '../scripts/providers/piper.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readJSON = (p) => JSON.parse(readFileSync(join(ROOT, p), 'utf8'));
@@ -133,7 +132,6 @@ for (const lang of ['es', 'ca']) {
 const mClip = clips.find((c) => c.lang === 'es' && c.key === 'm' && c.kind === 'sound');
 check('clips: a sound clip carries its ipa', !!mClip && mClip.ipa === 'mː', JSON.stringify(mClip));
 check('spoken: a sound is sent as an SSML phoneme', !!mClip && spokenFor(mClip) === "<phoneme alphabet='ipa' ph='mː'>m</phoneme>", mClip && spokenFor(mClip));
-check('piper: the IPA is read back out of the SSML, plain text has none', !!mClip && ipaFrom(spokenFor(mClip)) === 'mː' && ipaFrom('mano') === null);
 const fileSeen = new Set(); let fileDup = 0;
 clips.forEach((c) => { const k = c.lang + '/' + c.file; if (fileSeen.has(k)) fileDup++; fileSeen.add(k); });
 check('clips: no two clips share a file name', fileDup === 0);
