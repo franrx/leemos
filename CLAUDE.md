@@ -28,6 +28,9 @@ tests/smoke.mjs         pruebas
 src/sounds.js           modo pre-lector (Leo): lógica pura + createSounds(ctx); app.js lo carga con import() solo si el perfil es kind:'pre'
 src/data/sounds.{es,ca}.json   grupos de letras: l, w (palabra), e (emoji), ph opcional (mismo sonido: b/v, c/qu)
 tests/sounds.mjs        pruebas unitarias de la lógica pura y del listado de clips
+tools/record.html+.js   grabar clips con tu voz en el portátil: POST al servidor de desarrollo, que convierte a mp3, guarda en audio/ y actualiza el manifest
+scripts/lib/clipstore.mjs, clipapi.mjs   lista de clips a grabar, guardado, y rutas /__clips y /__clip (solo loopback + Host/Origin locales: el servidor escucha en todas las interfaces)
+tests/clipstore.mjs, tests/record.mjs    pruebas del guardado/API y de la página (jsdom con micro y servidor falsos)
 ```
 Sin frameworks ni bundler, a propósito. No introducir uno sin una razón clara. `app.js` es grande (~540 líneas): trocearlo en módulos es razonable si se toca mucho, pero hacerlo en un cambio aparte y con `npm test` en verde.
 
@@ -74,7 +77,7 @@ Los sonidos de letras son clips de tipo `sound` (clave = la letra). Un TTS suele
 6. Pegatinas por mundo (granja, mar, dinosaurios) como razón extra para probar cada uno.
 7. Persistir la sesión en curso; sincronizar perfil entre dispositivos (solo si Fran lo pide).
 8. Pruebas e2e con un navegador real (Playwright). Hoy solo hay jsdom.
-9. **Audio del modo Leo sin generar.** El proveedor `edge` devuelve 403 (2026-10-15), así que no se han podido generar ni escuchar los clips `sound`. Probar `azure`/`google`/`elevenlabs` o grabar con «Grabar mi voz». Revisar con nativo las palabras de `sounds.ca.json` (nyam, ànec, eina, ós, ull, mà, lupa…) y qué e/o (abierta/cerrada) se quiere enseñar en catalán.
+9. **Audio del modo Leo sin generar.** El proveedor `edge` devuelve 403 (2026-10-15), así que no se han podido generar ni escuchar los clips `sound`. Piper se probó con IPA directo y salió ininteligible (descartado). No se intenta saltar la verificación de Microsoft. Lo previsto: grabar con `tools/record.html` (`npm run record`), o `azure`/`google` (aceptan el SSML `<phoneme>` que ya emite `spoken.mjs`). Revisar con nativo las palabras de `sounds.ca.json` (nyam, ànec, eina, ós, ull, mà, lupa…) y qué e/o (abierta/cerrada) se quiere enseñar en catalán.
 
 ## Ojo con esto
 - **Nunca se ha probado en un navegador real**, solo en jsdom. Lo primero: `npm run dev` y probarlo en la tablet de Elsa (audio, micrófono, instalación).

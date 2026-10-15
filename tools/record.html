@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leemos: grabar mi voz</title>
+<style>
+  :root{color-scheme:light dark;font-family:system-ui,sans-serif}
+  body{margin:0 auto;max-width:640px;padding:16px;text-align:center}
+  header{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between;text-align:left}
+  select,button{font:inherit;padding:10px 16px;min-height:44px;border-radius:12px;border:2px solid #8886;background:Canvas;color:CanvasText;cursor:pointer}
+  button.primary{background:#6D4AF0;border-color:#6D4AF0;color:#fff;font-weight:700}
+  button:focus-visible,select:focus-visible{outline:3px solid #6D4AF0;outline-offset:2px}
+  .muted{opacity:.75}
+  .big{font-size:clamp(96px,28vw,180px);font-weight:700;line-height:1.1;margin:12px 0 0}
+  .big.word{font-size:clamp(56px,16vw,100px)}
+  #ctx{font-size:1.2rem;margin:4px 0 12px}
+  #shared{margin:8px auto;padding:8px 12px;border-radius:10px;background:#f59e0b33;max-width:34em}
+  .meter{height:16px;max-width:320px;margin:14px auto;border-radius:99px;background:#8883;overflow:hidden}
+  .meter i{display:block;height:100%;width:0;border-radius:99px;background:#00B368;transition:width .08s linear}
+  #status{min-height:3.2em;margin:8px 0}
+  .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:10px 0}
+  [hidden]{display:none!important}
+  @media (prefers-reduced-motion: reduce){.meter i{transition:none}}
+</style>
+</head>
+<body>
+<h1>Grabar mi voz</h1>
+<p class="muted">Cada clip se guarda en <code>audio/</code> del proyecto (hay que ejecutar <code>npm run dev</code>) y vale para todos los dispositivos tras hacer commit. Empieza por los sonidos de las letras: di el <b>sonido</b> («mmm», «pa»), no el nombre de la letra.</p>
+<header>
+  <select id="lang" aria-label="Idioma"><option value="es">Castellano</option><option value="ca">Català</option></select>
+  <span id="progress" role="status"></span>
+</header>
+<main>
+  <div class="big" id="big" aria-live="polite"></div>
+  <div id="ctx"></div>
+  <div id="shared" hidden>⚠ Elsa también usa este clip: al grabarlo se cambia también para ella.</div>
+  <div class="meter" id="meter" role="meter" aria-label="Nivel del micrófono" hidden><i id="meterFill"></i></div>
+  <p id="status" aria-live="polite"></p>
+  <div class="row">
+    <button id="prev" aria-label="Anterior">◀</button>
+    <button id="rec" class="primary">⏺ Grabar</button>
+    <button id="next" aria-label="Siguiente">▶</button>
+  </div>
+  <div class="row">
+    <button id="play" hidden>▶ Escuchar</button>
+    <button id="save" class="primary" hidden>💾 Guardar</button>
+  </div>
+</main>
+<script src="record.js"></script>
+</body>
+</html>

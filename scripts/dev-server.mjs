@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { createReadStream, statSync, existsSync } from 'node:fs';
 import { join, extname, normalize } from 'node:path';
 import { ROOT } from './lib/clips.mjs';
+import { handleClipApi } from './lib/clipapi.mjs';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -12,7 +13,8 @@ const TYPES = {
 };
 const port = Number(process.env.PORT || 5173);
 
-createServer((req, res) => {
+createServer(async (req, res) => {
+  if (await handleClipApi(req, res)) return; // recording export for tools/record.html (loopback only)
   let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   if (p.endsWith('/')) p += 'index.html';
   const file = normalize(join(ROOT, p));
