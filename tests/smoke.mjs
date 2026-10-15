@@ -251,5 +251,48 @@ const seenLetters = Object.keys(JSON.parse(a.w.localStorage.getItem('leemos-v1:l
 check('sounds: at most 2 new letters are introduced per session', seenLetters.length === 2, seenLetters.join(','));
 check('sounds: the whole run raised no errors', a.errors.length === 0, a.errors.join(' | '));
 
+// ---------- 10. letter sounds: end of session, unlock, language, recorder, reset ----------
+const mast = (n) => ({ ok: n, fail: 0 });
+a = await bootLeo();
+a.$('prePlay').click();
+await playPre(a, 5);
+await sleep(10);
+check('sounds: finishing a session shows the end screen and a sticker', !a.$('end').hidden && Number(a.$('albumCount').textContent) === 1);
+check('sounds: the end text counts first-try answers', a.$('endInfo').textContent.startsWith('Has acertado 5 de 5.'), a.$('endInfo').textContent);
+check('sounds: no group unlock is offered after one session', a.$('endLevelUpBtn').hidden);
+a.$('endStop').click();
+check('sounds: "enough for today" returns to the home with a goodbye', !!a.$('prePlay') && /Hasta mañana, Leo/.test(a.$('hint').textContent), a.$('hint').textContent);
+
+a = await boot({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', stats: { 'snd:a': mast(3), 'snd:e': mast(3), 'snd:i': mast(3), 'snd:o': mast(3) } } } });
+await until(() => a.$('prePlay'));
+a.$('prePlay').click(); await playPre(a, 5); await sleep(10);
+check('sounds: with most of the group mastered, the next group is offered', !a.$('endLevelUpBtn').hidden && a.$('endLevelUpBtn').textContent === 'Sí, letras nuevas', a.$('endLevelUpBtn').textContent);
+a.$('endLevelUpBtn').click();
+check('sounds: accepting unlocks the next group and starts a new session', JSON.parse(a.w.localStorage.getItem('leemos-v1:leo')).pre.es === 1 && a.$('end').hidden && !!(a.$('preLetter') || a.$('preChoices')));
+
+// Review Focus 5a: last group fully mastered.
+a = await boot({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', pre: { es: 5, ca: 0 }, stats: Object.fromEntries(allEs.map((x) => ['snd:' + x.l, mast(3)])) } } });
+await until(() => a.$('prePlay'));
+a.$('prePlay').click(); await playPre(a, 5); await sleep(10);
+check('sounds: a mastered last group offers no unlock and raises no error', !a.$('end').hidden && a.$('endLevelUpBtn').hidden && a.errors.length === 0, a.errors.join(' | '));
+
+// Review Focus 5b: language switch keeps per-language progress.
+a = await bootLeo();
+a.$('langBtn').click(); await sleep(10);
+check('sounds: switching language rebuilds the home in Catalan', !!a.$('prePlay') && /lletres dominades/.test(a.d.querySelector('#pre .small').textContent), a.d.querySelector('#pre .small')?.textContent);
+a.$('prePlay').click(); await playPre(a, 1);
+const caKeys = Object.keys(JSON.parse(a.w.localStorage.getItem('leemos-v1:leo')).stats);
+check('sounds: Catalan progress is stored under the ca: prefix only', caKeys.length >= 1 && caKeys.every((k) => k.startsWith('ca:snd:')), caKeys.join(','));
+
+a = await bootLeo();
+a.$('recOpen').click();
+check('sounds: the recorder lists the letter sounds first, then the picture words', a.$('recText').textContent === allEs[0].l && a.$('recCount').textContent.startsWith(`1 de ${allEs.length * 2}`) && /Sonidos de las letras/.test(a.$('recWorld').textContent), a.$('recCount').textContent);
+
+a = await bootLeo();
+a.$('prePlay').click(); await playPre(a, 2);
+a.$('resetBtn').click(); a.$('resetBtn').click();
+check('sounds: reset clears this language and returns to the home', Object.keys(JSON.parse(a.w.localStorage.getItem('leemos-v1:leo')).stats).length === 0 && !!a.$('prePlay'));
+check('sounds: Elsa tests above and this run stayed error-free', a.errors.length === 0, a.errors.join(' | '));
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

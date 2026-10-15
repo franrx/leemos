@@ -95,5 +95,10 @@
   "preGameHint": "Escolta el so i toca la seva lletra.",
   "preHear": "Escoltar",
   "preNos": ["Gairebé, {n}. Escolta un altre cop.", "Gairebé. Escolta amb atenció, {n}.", "Poc a poc, {n}. Escolta un altre cop."],
-  "prePIntro": "Primer escolta el so de la lletra i toca la lletra que correspon. Si falla, no passa res: li ho repetim. El que li costa torna més sovint."
+  "prePIntro": "Primer escolta el so de la lletra i toca la lletra que correspon. Si falla, no passa res: li ho repetim. El que li costa torna més sovint.",
+  "preEndInfo": "Has encertat {o} de {n}.",
+  "preGroupUp": "Ja coneixes gairebé totes aquestes lletres! Provem lletres noves?",
+  "preGroupUpBtn": "Sí, lletres noves",
+  "preRest": "Fins demà, {n}! Si vols continuar, toca Jugar.",
+  "preRecWorld": "Sons de les lletres. Digues només el so, sense el nom de la lletra."
 }

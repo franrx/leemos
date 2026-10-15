@@ -95,5 +95,10 @@
   "preGameHint": "Escucha el sonido y toca su letra.",
   "preHear": "Escuchar",
   "preNos": ["Casi, {n}. Escucha otra vez.", "Casi. Escucha con atención, {n}.", "Poco a poco, {n}. Escucha otra vez."],
-  "prePIntro": "Primero escucha el sonido de la letra y toca la letra que corresponde. Si falla, no pasa nada: se lo repetimos. Lo que le cuesta vuelve más a menudo."
+  "prePIntro": "Primero escucha el sonido de la letra y toca la letra que corresponde. Si falla, no pasa nada: se lo repetimos. Lo que le cuesta vuelve más a menudo.",
+  "preEndInfo": "Has acertado {o} de {n}.",
+  "preGroupUp": "¡Ya conoces casi todas estas letras! ¿Probamos letras nuevas?",
+  "preGroupUpBtn": "Sí, letras nuevas",
+  "preRest": "¡Hasta mañana, {n}! Si quieres seguir, toca Jugar.",
+  "preRecWorld": "Sonidos de las letras. Di solo el sonido, sin el nombre de la letra."
 }

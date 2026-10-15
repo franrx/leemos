@@ -146,5 +146,22 @@ export function createSounds(ctx){
     else ctx.later(next,1300);
   }
 
-  return {refresh:home,begin,next};
+  // End of session: offer the next group when most of this one is mastered. Returns whether it is offered.
+  function showEnd(){
+    const up=canUnlockNext(groups(),gi(),S.stats,lang());
+    $('endLevelUp').hidden=!up;$('endLevelUpBtn').hidden=!up;
+    if(up){$('endLevelUp').textContent=t('preGroupUp');$('endLevelUpBtn').textContent=t('preGroupUpBtn')}
+    return up;
+  }
+  function unlockNext(){S.pre[lang()]=Math.min(gi()+1,groups().length-1);save()}
+  function rest(){home();$('hint').textContent=t('preRest',{n:ctx.nm()})}
+  // Everything the parent can record: all letter sounds first, then the picture words.
+  function recItems(){
+    const set=new Set();
+    groups().forEach(g=>g.letters.forEach(x=>set.add(x.l)));
+    groups().forEach(g=>g.letters.forEach(x=>set.add(x.w)));
+    return [...set];
+  }
+
+  return {refresh:home,begin,next,showEnd,unlockNext,rest,recItems};
 }

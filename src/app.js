@@ -413,14 +413,18 @@ function renderSession(){
 function showEnd(){
   const n=S.sessionLen;
   $('endTitle').textContent=t('endTitle',{n:nm()});
-  $('endInfo').textContent=t('endInfo',{o:sOk,n:n})+(sStk?(sStk===1?t('endOne'):t('endMany',{k:sStk})):'');
+  $('endInfo').textContent=t(pre?'preEndInfo':'endInfo',{o:sOk,n:n})+(sStk?(sStk===1?t('endOne'):t('endMany',{k:sStk})):'');
   $('end').hidden=false;
-  const all=[...itemsFor(S.level,'syl'),...itemsFor(S.level,'word')];
-  const pct=Math.round(100*all.filter(x=>mastered(x.key)).length/all.length);
-  const canLevelUp=pct>=90&&S.level<LEVELS.length-1;
-  $('endLevelUp').hidden=!canLevelUp;
-  $('endLevelUpBtn').hidden=!canLevelUp;
-  if(canLevelUp)$('endLevelUp').textContent=t('endLevelUp',{n:S.level+2,t:LEVELS[S.level+1].name});
+  let canLevelUp;
+  if(pre)canLevelUp=pre.showEnd();
+  else{
+    const all=[...itemsFor(S.level,'syl'),...itemsFor(S.level,'word')];
+    const pct=Math.round(100*all.filter(x=>mastered(x.key)).length/all.length);
+    canLevelUp=pct>=90&&S.level<LEVELS.length-1;
+    $('endLevelUp').hidden=!canLevelUp;
+    $('endLevelUpBtn').hidden=!canLevelUp;
+    if(canLevelUp)$('endLevelUp').textContent=t('endLevelUp',{n:S.level+2,t:LEVELS[S.level+1].name});
+  }
   confetti();sfx.win();flash();poke('dance',1600);
   if(S.sound)say(t('endTitle',{n:nm()}));
   (canLevelUp?$('endLevelUpBtn'):$('endMore')).focus();
@@ -431,6 +435,7 @@ function restState(){
   $('joinBtn').hidden=true;
   ['hearBtn','okBtn','noBtn'].forEach(id=>$(id).hidden=true);
   $('hint').textContent=t('rest',{n:nm()});
+  if(pre)pre.rest();
 }
 function updateHello(){$('hello').textContent=t('hello',{n:nm()})}
 function applySound(){
@@ -463,7 +468,7 @@ $('rate').oninput=e=>{S.rate=parseFloat(e.target.value);save()};
 $('testVoice').onclick=()=>say(t('sample'));
 $('resetBtn').onclick=e=>{
   if(!resetArmed){resetArmed=true;e.target.textContent=t('sure');setTimeout(()=>{resetArmed=false;e.target.textContent=t('resetBtn')},3500);return}
-  Object.keys(S.stats).forEach(k=>{if((S.lang==='ca')===(k.indexOf('ca:')===0))delete S.stats[k]});save();resetArmed=false;e.target.textContent=t('resetBtn');renderLevels();renderHard();next();
+  Object.keys(S.stats).forEach(k=>{if((S.lang==='ca')===(k.indexOf('ca:')===0))delete S.stats[k]});save();resetArmed=false;e.target.textContent=t('resetBtn');renderLevels();renderHard();pre?pre.refresh():next();
 };
 function applyTheme(){
   if(S.theme)document.documentElement.setAttribute('data-theme',S.theme);
@@ -532,7 +537,7 @@ function stopRec(){
 }
 function renderRec(status){
   const item=RS.list[RS.i];
-  $('recWorld').textContent=t('recWorld',{w:LEVELS[S.level].name});
+  $('recWorld').textContent=pre?t('preRecWorld'):t('recWorld',{w:LEVELS[S.level].name});
   $('recText').textContent=item;
   $('recCount').textContent=t('recOf',{i:RS.i+1,n:RS.list.length})+(clipURL[ck(item)]?t('recDone'):'');
   $('recBtn').textContent=RS.on?t('recStop'):t('recStart');
@@ -540,7 +545,7 @@ function renderRec(status){
   $('recStatus').textContent=status||(RS.on?t('recRecording',{t:item}):'');
 }
 function openRecorder(){
-  RS.list=recItems(S.level);
+  RS.list=pre?pre.recItems():recItems(S.level);
   const miss=RS.list.findIndex(x=>!clipURL[ck(x)]);
   RS.i=miss<0?0:miss;RS.on=false;
   $('recorder').hidden=false;renderRec();$('recBtn').focus();
@@ -583,8 +588,8 @@ $('recClear').onclick=async e=>{
 $('voiceSel').onchange=e=>{S.voiceURIs[S.lang]=e.target.value;save();pickVoice();say(t('sample'))};
 $('sessionSel').value=String(S.sessionLen);
 $('sessionSel').onchange=e=>{S.sessionLen=parseInt(e.target.value,10);save();renderSession()};
-$('endMore').onclick=()=>{$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();next()};
-$('endLevelUpBtn').onclick=()=>{S.level++;save();renderLevels();$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();next()};
+$('endMore').onclick=()=>{$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();pre?pre.begin():next()};
+$('endLevelUpBtn').onclick=()=>{if(pre)pre.unlockNext();else{S.level++;save();renderLevels()}$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();pre?pre.begin():next()};
 $('endStop').onclick=()=>{$('end').hidden=true;restState()};
 renderSession();
 
@@ -604,7 +609,7 @@ function setLang(l){
   S.lang=l;LEVELS=LV[l]||LV_ES;
   if(S.level>=LEVELS.length)S.level=0;
   sDone=sOk=sStk=0;pendingEnd=false;resting=false;newWorld();
-  save();applyLang();renderSession();next();
+  save();applyLang();renderSession();pre?pre.refresh():next();
 }
 $('langBtn').onclick=()=>setLang(S.lang==='es'?'ca':'es');
 
