@@ -16,17 +16,17 @@ export function slug(text) {
 
 export function buildClipList({ name = 'Elsa', langs = ['es', 'ca'] } = {}) {
   const out = new Map();
-  const add = (lang, text, kind) => {
+  const add = (lang, text, kind, extra = {}) => {
     const key = text.toLowerCase();
     const id = lang + ':' + key;
-    if (!out.has(id)) out.set(id, { lang, text, key, kind, file: slug(key) + '.mp3' });
+    if (!out.has(id)) out.set(id, { lang, text, key, kind, file: slug(key) + '.mp3', ...extra });
   };
   for (const lang of langs) {
     // Letter sounds first, so a one-letter key such as "a" is classified as a sound, not a syllable.
     const sounds = readJSON(`src/data/sounds.${lang}.json`);
     for (const g of sounds.groups) {
       for (const x of g.letters) {
-        add(lang, x.l, 'sound');
+        add(lang, x.l, 'sound', { ipa: x.ipa });
         add(lang, x.w, 'word');
       }
     }

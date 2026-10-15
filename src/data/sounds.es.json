@@ -1,40 +1,40 @@
 {
   "groups": [
     { "letters": [
-      { "l": "a", "w": "avión", "e": "✈️" },
-      { "l": "e", "w": "elefante", "e": "🐘" },
-      { "l": "i", "w": "iglesia", "e": "⛪" },
-      { "l": "o", "w": "oso", "e": "🐻" },
-      { "l": "u", "w": "uva", "e": "🍇" }
+      { "l": "a", "w": "avión", "e": "✈️", "ipa": "aː" },
+      { "l": "e", "w": "elefante", "e": "🐘", "ipa": "eː" },
+      { "l": "i", "w": "iglesia", "e": "⛪", "ipa": "iː" },
+      { "l": "o", "w": "oso", "e": "🐻", "ipa": "oː" },
+      { "l": "u", "w": "uva", "e": "🍇", "ipa": "uː" }
     ] },
     { "letters": [
-      { "l": "m", "w": "mano", "e": "✋" },
-      { "l": "s", "w": "sol", "e": "☀️" },
-      { "l": "l", "w": "luna", "e": "🌙" },
-      { "l": "p", "w": "pato", "e": "🦆" }
+      { "l": "m", "w": "mano", "e": "✋", "ipa": "mː" },
+      { "l": "s", "w": "sol", "e": "☀️", "ipa": "sː" },
+      { "l": "l", "w": "luna", "e": "🌙", "ipa": "lː" },
+      { "l": "p", "w": "pato", "e": "🦆", "ipa": "pə" }
     ] },
     { "letters": [
-      { "l": "t", "w": "tomate", "e": "🍅" },
-      { "l": "n", "w": "nube", "e": "☁️" },
-      { "l": "d", "w": "dedo", "e": "👆" },
-      { "l": "c", "w": "casa", "e": "🏠" }
+      { "l": "t", "w": "tomate", "e": "🍅", "ipa": "tə" },
+      { "l": "n", "w": "nube", "e": "☁️", "ipa": "nː" },
+      { "l": "d", "w": "dedo", "e": "👆", "ipa": "də" },
+      { "l": "c", "w": "casa", "e": "🏠", "ipa": "kə" }
     ] },
     { "letters": [
-      { "l": "r", "w": "rana", "e": "🐸" },
-      { "l": "b", "w": "barco", "e": "⛵" },
-      { "l": "f", "w": "foca", "e": "🦭" },
-      { "l": "g", "w": "gato", "e": "🐱" }
+      { "l": "r", "w": "rana", "e": "🐸", "ipa": "rː" },
+      { "l": "b", "w": "barco", "e": "⛵", "ipa": "bə" },
+      { "l": "f", "w": "foca", "e": "🦭", "ipa": "fː" },
+      { "l": "g", "w": "gato", "e": "🐱", "ipa": "ɡə" }
     ] },
     { "letters": [
-      { "l": "v", "w": "vaca", "e": "🐮", "ph": "b" },
-      { "l": "j", "w": "jirafa", "e": "🦒" },
-      { "l": "z", "w": "zapato", "e": "👟" },
-      { "l": "ñ", "w": "ñoquis", "e": "🍝" }
+      { "l": "v", "w": "vaca", "e": "🐮", "ph": "b", "ipa": "bə" },
+      { "l": "j", "w": "jirafa", "e": "🦒", "ipa": "xː" },
+      { "l": "z", "w": "zapato", "e": "👟", "ipa": "θː" },
+      { "l": "ñ", "w": "ñoquis", "e": "🍝", "ipa": "ɲː" }
     ] },
     { "letters": [
-      { "l": "ch", "w": "chocolate", "e": "🍫" },
-      { "l": "ll", "w": "lluvia", "e": "🌧️" },
-      { "l": "qu", "w": "queso", "e": "🧀", "ph": "c" }
+      { "l": "ch", "w": "chocolate", "e": "🍫", "ipa": "tʃə" },
+      { "l": "ll", "w": "lluvia", "e": "🌧️", "ipa": "ʝː" },
+      { "l": "qu", "w": "queso", "e": "🧀", "ph": "c", "ipa": "kə" }
     ] }
   ]
 }
