@@ -20,6 +20,7 @@
   <header>
     <h1 id="hello">¡Hola!</h1>
     <div class="hdr-actions">
+      <button class="icon-btn" id="profileBtn" data-ia="title:aProfile;aria-label:aProfile" title="Cambiar de niño o niña" aria-label="Cambiar de niño o niña">🧒 <span id="profileName"></span></button>
       <button class="icon-btn" id="albumBtn" data-ia="title:aAlbum;aria-label:aAlbum" title="Mis pegatinas" aria-label="Mis pegatinas">🎖️ <span id="albumCount">0</span></button>
       <button class="icon-btn" id="soundBtn" aria-pressed="true" data-ia="title:aSound;aria-label:aSound" title="Sonidos y voz de ánimo" aria-label="Sonidos y voz de ánimo">🔔</button>
       <button class="icon-btn" id="worldBtn" data-ia="title:aWorld;aria-label:aWorld" title="Elegir mundo" aria-label="Elegir mundo">🎨</button>
@@ -134,6 +135,26 @@
     <p class="small" data-i="worldsSub">Cambia el paisaje. «Sorpresa» estrena un mundo distinto en cada sesión.</p>
     <div class="worlds" id="worldGrid"></div>
     <div class="actions"><button class="btn primary" id="worldsClose" data-i="close">Cerrar</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="profiles" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="profilesTitle">
+    <h2 id="profilesTitle" data-i="profilesTitle">¿Quién juega?</h2>
+    <p class="small" data-i="profilesSub">Cada niño o niña tiene su propio progreso y sus pegatinas.</p>
+    <div class="worlds" id="profileList"></div>
+    <div class="pf-row">
+      <label for="pfName" data-i="lName">Nombre</label>
+      <input type="text" id="pfName" maxlength="20" autocomplete="off">
+    </div>
+    <div class="pf-row">
+      <select id="pfKind" data-ia="aria-label:pfKind" aria-label="Tipo">
+        <option value="reader" data-i="pfKindReader">Ya lee sílabas</option>
+        <option value="pre" data-i="pfKindPre">Aprende letras y sonidos</option>
+      </select>
+      <button class="icon-btn" id="pfAdd" data-i="pfAdd">Añadir</button>
+    </div>
+    <div class="actions"><button class="btn primary" id="profilesClose" data-i="close">Cerrar</button></div>
   </div>
 </div>
 

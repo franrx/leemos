@@ -79,5 +79,12 @@
   "voiceNoTTS": "Aquest navegador no té síntesi de veu.",
   "hardEmpty": "Encara res. Quan alguna cosa li costi, apareixerà aquí.",
   "sure": "Segur? Prem una altra vegada",
-  "sample": "casa"
+  "sample": "casa",
+  "aProfile": "Canviar de nen o nena",
+  "profilesTitle": "Qui juga?",
+  "profilesSub": "Cada nen o nena té el seu propi progrés i les seves enganxines.",
+  "pfKind": "Tipus",
+  "pfKindReader": "Ja llegeix síl·labes",
+  "pfKindPre": "Aprèn lletres i sons",
+  "pfAdd": "Afegir"
 }

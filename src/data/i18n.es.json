@@ -79,5 +79,12 @@
   "voiceNoTTS": "Este navegador no tiene síntesis de voz.",
   "hardEmpty": "Todavía nada. Cuando algo le cueste, aparecerá aquí.",
   "sure": "¿Seguro? Pulsa otra vez",
-  "sample": "masa"
+  "sample": "masa",
+  "aProfile": "Cambiar de niño o niña",
+  "profilesTitle": "¿Quién juega?",
+  "profilesSub": "Cada niño o niña tiene su propio progreso y sus pegatinas.",
+  "pfKind": "Tipo",
+  "pfKindReader": "Ya lee sílabas",
+  "pfKindPre": "Aprende letras y sonidos",
+  "pfAdd": "Añadir"
 }

@@ -1,6 +1,6 @@
 // Smoke tests: loads index.html + src/app.js in jsdom (no browser needed) and drives the real UI.
 // jsdom does not run ES modules, so app.js is evaluated inside an async wrapper (top-level await) in strict mode.
-import { JSDOM } from 'jsdom';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,13 +14,16 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function boot({ manifest = null, lang = 'en-US' } = {}) {
+async function boot({ manifest = null, lang = 'en-US', storage = {} } = {}) {
   const errors = [];
   const audioCalls = [];
+  const vc = new VirtualConsole();
+  vc.on('jsdomError', (e) => { if (!/Not implemented: navigation/.test(e.message)) console.error(e.message); });
   const dom = new JSDOM(html, {
-    runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://localhost/',
+    runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://localhost/', virtualConsole: vc,
     beforeParse(w) {
       Object.defineProperty(w.navigator, 'language', { value: lang });
+      for (const [k, v] of Object.entries(storage)) w.localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
       w.matchMedia = () => ({ matches: false, addEventListener() {}, removeListener() {} });
       w.speechSynthesis = { getVoices: () => [{ name: 'Joana Online (Natural)', lang: 'ca-ES', voiceURI: 'j' }, { name: 'Google español', lang: 'es-ES', voiceURI: 'g' }], cancel() {}, speak(u) { (w.__tts ||= []).push(u.text); } };
       w.SpeechSynthesisUtterance = function (t) { this.text = t; };
@@ -53,6 +56,8 @@ async function playSession(app, n, verdict = () => true) {
     if (!app.$('reward').hidden) app.$('rewardOk').click();
   }
 }
+
+const dump = (w) => Object.fromEntries(Array.from({ length: w.localStorage.length }, (_, i) => w.localStorage.key(i)).map((k) => [k, w.localStorage.getItem(k)]));
 
 // ---------- 1. boot + structure ----------
 let a = await boot();
@@ -150,6 +155,42 @@ const ies = readJSON('src/data/i18n.es.json'), ica = readJSON('src/data/i18n.ca.
 Object.keys(ies).forEach((k) => { if (!(k in ica)) problems.push('missing ca key ' + k); });
 Object.keys(ica).forEach((k) => { if (!(k in ies)) problems.push('missing es key ' + k); });
 check('data: no duplicate words, unknown world tags or missing translations', problems.length === 0, problems.slice(0, 4).join(' | '));
+
+// ---------- 8. profiles ----------
+const elsaSaved = { name: 'Elsa', stickers: 3, total: 7, stats: { 's:ma': { ok: 2, fail: 0 } } };
+a = await boot({ storage: { 'leemos-v1': elsaSaved } });
+check('profiles: no profiles key behaves as Elsa alone', a.$('hello').textContent === '¡Hola, Elsa!' && a.$('profileName').textContent === 'Elsa');
+a.$('profileBtn').click();
+check('profiles: the overlay lists Elsa', !a.$('profiles').hidden && a.d.querySelectorAll('#profileList .wbtn').length === 1);
+a.$('pfName').value = 'Mia'; a.$('pfKind').value = 'reader'; a.$('pfAdd').click();
+const savedProfiles = JSON.parse(a.w.localStorage.getItem('leemos-profiles'));
+check('profiles: adding a child stores it and makes it active', savedProfiles.active === 'mia' && savedProfiles.list.length === 2 && savedProfiles.list[1].kind === 'reader', JSON.stringify(savedProfiles));
+const elsaKept = JSON.parse(a.w.localStorage.getItem('leemos-v1'));
+check("profiles: Elsa's saved state is untouched", elsaKept.stickers === 3 && elsaKept.total === 7 && elsaKept.name === 'Elsa' && elsaKept.stats['s:ma'].ok === 2);
+
+a = await boot({ storage: dump(a.w) });
+check('profiles: reboot loads the new child with their own name', a.$('hello').textContent === '¡Hola, Mia!');
+await playSession(a, 1);
+const miaSaved = JSON.parse(a.w.localStorage.getItem('leemos-v1:mia'));
+const elsaAfter = JSON.parse(a.w.localStorage.getItem('leemos-v1'));
+check("profiles: progress goes to the active child's own key", miaSaved.total === 1 && elsaAfter.total === 7 && elsaAfter.stickers === 3);
+a.$('nm').value = 'Mía'; a.$('nm').dispatchEvent(new a.w.Event('input'));
+check('profiles: renaming updates the chip and the stored list', a.$('profileName').textContent === 'Mía' && JSON.parse(a.w.localStorage.getItem('leemos-profiles')).list[1].name === 'Mía');
+
+// Review Focus 3: corrupt or hostile stores fall back to Elsa and never throw.
+const badStores = [
+  ['invalid JSON', '{nope'],
+  ['active not in the list', JSON.stringify({ active: 'zzz', list: [{ id: 'leo', name: 'Leo', kind: 'pre' }] })],
+  ['empty list', JSON.stringify({ active: 'elsa', list: [] })],
+  ['non-string id', JSON.stringify({ active: 'x', list: [{ id: 5, name: 'X', kind: 'reader' }] })],
+];
+for (const [label, bad] of badStores) {
+  const b = await boot({ storage: { 'leemos-profiles': bad } });
+  check(`profiles: ${label} falls back to Elsa`, b.$('hello').textContent === '¡Hola, Elsa!' && b.errors.length === 0, b.errors.join(' | '));
+}
+a = await boot({ storage: { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader' }, { id: 'x', name: '<b>x</b>', kind: 'reader' }] } } });
+a.$('profileBtn').click();
+check('profiles: names are rendered as text, never as HTML', a.d.querySelectorAll('#profileList b').length === 0 && a.d.querySelectorAll('#profileList .wbtn')[1].textContent.includes('<b>x</b>'));
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

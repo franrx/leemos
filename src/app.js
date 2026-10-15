@@ -31,11 +31,33 @@ function splitSyl(s){
 }
 
 // ---------- state ----------
-const KEY='leemos-v1';
+// ---------- profiles (one saved state per child; Elsa keeps the original key) ----------
+const PKEY='leemos-profiles';
+const loadProfiles=()=>{
+  try{
+    const p=JSON.parse(localStorage.getItem(PKEY));
+    if(p&&Array.isArray(p.list)&&p.list.length&&p.list.every(x=>x&&typeof x.id==='string'&&x.id)&&p.list.some(x=>x.id===p.active))return p;
+  }catch(e){}
+  return {active:'elsa',list:[{id:'elsa',name:'Elsa',kind:'reader'}]};
+};
+const PROFILES=loadProfiles();
+const PROFILE=PROFILES.list.find(x=>x.id===PROFILES.active);
+const saveProfiles=()=>{try{localStorage.setItem(PKEY,JSON.stringify(PROFILES))}catch(e){}};
+const keyFor=id=>id==='elsa'?'leemos-v1':'leemos-v1:'+id;
+const profileSlug=n=>n.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+function switchProfile(id){PROFILES.active=id;saveProfiles();location.reload()}
+function addProfile(name,kind){
+  const base=profileSlug(name)||'nino';let id=base,i=2;
+  while(PROFILES.list.some(x=>x.id===id))id=base+'-'+i++;
+  PROFILES.list.push({id,name:name.trim(),kind:kind==='pre'?'pre':'reader'});
+  switchProfile(id);
+}
+const KEY=keyFor(PROFILE.id);
 const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||{}}catch(e){return {}}};
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
-const S=Object.assign({stats:{},level:0,mode:'syl',upper:false,rate:.75,theme:'',name:'Elsa',total:0,progress:0,stickers:0,sound:true,voiceURI:'',voiceURIs:{es:'',ca:''},world:'auto',lang:((navigator.language||'').toLowerCase().indexOf('ca')===0?'ca':'es'),sessionLen:10},load());
+const S=Object.assign({stats:{},level:0,mode:'syl',upper:false,rate:.75,theme:'',name:PROFILE.name,total:0,progress:0,stickers:0,sound:true,voiceURI:'',voiceURIs:{es:'',ca:''},world:'auto',lang:((navigator.language||'').toLowerCase().indexOf('ca')===0?'ca':'es'),sessionLen:PROFILE.kind==='pre'?5:10,pre:{es:0,ca:0}},load());
 if(!S.voiceURIs)S.voiceURIs={es:'',ca:''};
+if(!S.pre)S.pre={es:0,ca:0};
 LEVELS=LV[S.lang]||LV_ES;
 let cur=null,last=null,phase='read',resetArmed=false;
 let sDone=0,sOk=0,sStk=0,pendingEnd=false,resting=false;
@@ -377,7 +399,7 @@ function showReward(e){
 }
 function closeOverlays(){
   const wasReward=!$('reward').hidden, wasEnd=!$('end').hidden;
-  $('reward').hidden=true;$('album').hidden=true;$('end').hidden=true;$('worlds').hidden=true;closeRec();
+  $('reward').hidden=true;$('album').hidden=true;$('end').hidden=true;$('worlds').hidden=true;$('profiles').hidden=true;closeRec();
   if(wasReward&&pendingEnd){pendingEnd=false;setTimeout(showEnd,250)}
   else if(wasEnd)restState();
 }
@@ -458,13 +480,29 @@ $('albumBtn').onclick=()=>{renderAlbum();$('album').hidden=false;$('albumClose')
 $('albumClose').onclick=closeOverlays;
 $('worldBtn').onclick=()=>{renderWorlds();$('worlds').hidden=false;$('worldsClose').focus()};
 $('worldsClose').onclick=closeOverlays;
+function updateProfileChip(){$('profileName').textContent=PROFILE.name}
+function renderProfiles(){
+  const g=$('profileList');g.innerHTML='';
+  PROFILES.list.forEach(p=>{
+    const b=document.createElement('button');
+    b.className='wbtn';b.setAttribute('aria-pressed',p.id===PROFILES.active);
+    const ic=document.createElement('span');ic.textContent=p.kind==='pre'?'🔤':'📖';
+    b.append(ic,document.createTextNode(p.name));
+    b.onclick=()=>{if(p.id!==PROFILES.active)switchProfile(p.id);else closeOverlays()};
+    g.appendChild(b);
+  });
+}
+$('profileBtn').onclick=()=>{renderProfiles();$('profiles').hidden=false;$('profilesClose').focus()};
+$('profilesClose').onclick=closeOverlays;
+$('pfAdd').onclick=()=>{const n=$('pfName').value.trim();if(n)addProfile(n,$('pfKind').value)};
 $('rewardOk').onclick=closeOverlays;
-['album','reward','worlds'].forEach(id=>$(id).addEventListener('click',e=>{if(e.target.id===id)closeOverlays()}));
+['album','reward','worlds','profiles'].forEach(id=>$(id).addEventListener('click',e=>{if(e.target.id===id)closeOverlays()}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeOverlays()});
 $('soundBtn').onclick=()=>{S.sound=!S.sound;save();applySound();if(S.sound)sfx.ok()};
 $('nm').value=S.name;
 $('nm').oninput=e=>{
   S.name=e.target.value;save();updateHello();
+  const pn=S.name.trim();if(pn){PROFILE.name=pn;saveProfiles();updateProfileChip()}
   if(phase==='read'||phase==='judge')$('hint').textContent=hintFor(phase);
 };
 
@@ -569,7 +607,7 @@ function setLang(l){
 }
 $('langBtn').onclick=()=>setLang(S.lang==='es'?'ca':'es');
 
-applyTheme();applyCase();applySound();applyLang();loadClips();
+applyTheme();applyCase();applySound();applyLang();loadClips();updateProfileChip();
 loadManifest().then(()=>setTimeout(warmAudio,3000));
 renderGoal();next();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
