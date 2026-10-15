@@ -14,6 +14,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="src/styles.css">
+<script>try{var p=JSON.parse(localStorage.getItem('leemos-profiles')),a=p&&p.list.find(function(x){return x.id===p.active});if(a&&a.kind==='pre')document.documentElement.classList.add('pre')}catch(e){}</script>
 </head>
 <body>
 <main>
@@ -61,6 +62,7 @@
       <p class="bubble" id="hint"></p>
     </div>
     <div class="goal" id="goal" role="img" data-ia="aria-label:aGoal" aria-label="Ejercicios de la sesión"></div>
+    <div class="pre-room" id="pre" hidden></div>
     <div class="tiles" id="tiles"></div>
     <div class="pic q" id="pic" hidden>?</div>
     <div class="actions">

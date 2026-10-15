@@ -60,6 +60,7 @@ if(!S.voiceURIs)S.voiceURIs={es:'',ca:''};
 if(!S.pre)S.pre={es:0,ca:0};
 LEVELS=LV[S.lang]||LV_ES;
 let cur=null,last=null,phase='read',resetArmed=false;
+let pre=null;
 let sDone=0,sOk=0,sStk=0,pendingEnd=false,resting=false;
 let curWorld=Math.floor(Math.random()*WORLDS.length);
 
@@ -190,7 +191,7 @@ function renderHard(){
   const list=Object.entries(S.stats).filter(([k,s])=>s.fail>s.ok&&(S.lang==='ca')===(k.indexOf('ca:')===0)).sort((a,b)=>(b[1].fail-b[1].ok)-(a[1].fail-a[1].ok)).slice(0,10);
   const box=$('hard');box.innerHTML='';
   if(!list.length){box.innerHTML='<span class="small">'+t('hardEmpty')+'</span>';return}
-  list.forEach(([k])=>{const c=document.createElement('span');c.className='chip';c.textContent=k.replace(/^ca:/,'').slice(2);box.appendChild(c)});
+  list.forEach(([k])=>{const c=document.createElement('span');c.className='chip';c.textContent=k.replace(/^ca:/,'').replace(/^(snd|s|w):/,'');box.appendChild(c)});
 }
 const hintFor=p=>p==='read'
   ? t(S.mode==='syl'?'hintSyl':'hintWord',{n:nm()})
@@ -611,3 +612,19 @@ applyTheme();applyCase();applySound();applyLang();loadClips();updateProfileChip(
 loadManifest().then(()=>setTimeout(warmAudio,3000));
 renderGoal();next();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+
+// ---------- letter sounds (pre-reader profile; spec in docs/superpowers/specs) ----------
+if(PROFILE.kind==='pre'){
+  document.documentElement.classList.add('pre');
+  cur=null;phase='wait';
+  const imp=window.__leemosImport||(p=>import(p));
+  const [mod,dEs,dCa]=await Promise.all([imp('./sounds.js'),loadJSON('src/data/sounds.es.json'),loadJSON('src/data/sounds.ca.json')]);
+  const sess={reset(){sDone=sOk=sStk=0;renderSession();renderGoal()},inc(ok){sDone++;if(ok)sOk++},get done(){return sDone},addSticker(){sStk++}};
+  pre=mod.createSounds({doc:document,$,S,save,t,say,sfx,poke,burst,sparkle:sparkleBurst,rnd,fmt,nm,later:(f,ms)=>setTimeout(f,ms),
+    data:{es:dEs,ca:dCa},stickers:STICKERS,sess,renderSession,renderGoal,renderAlbum,renderHard,end:showEnd,
+    reward:e=>{pendingEnd=true;setTimeout(()=>showReward(e),500)}});
+  $('pre').hidden=false;
+  document.querySelector('[data-i="pIntro"]').setAttribute('data-i','prePIntro');
+  applyLang();
+  pre.refresh();
+}

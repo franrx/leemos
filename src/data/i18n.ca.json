@@ -86,5 +86,14 @@
   "pfKind": "Tipus",
   "pfKindReader": "Ja llegeix síl·labes",
   "pfKindPre": "Aprèn lletres i sons",
-  "pfAdd": "Afegir"
+  "pfAdd": "Afegir",
+  "prePlay": "Jugar",
+  "preHello": "Hola, {n}! Juguem amb els sons?",
+  "preProgress": "{d} de {n} lletres dominades",
+  "preIntroHint": "Toca la lletra per sentir com sona.",
+  "preNext": "Següent",
+  "preGameHint": "Escolta el so i toca la seva lletra.",
+  "preHear": "Escoltar",
+  "preNos": ["Gairebé, {n}. Escolta un altre cop.", "Gairebé. Escolta amb atenció, {n}.", "Poc a poc, {n}. Escolta un altre cop."],
+  "prePIntro": "Primer escolta el so de la lletra i toca la lletra que correspon. Si falla, no passa res: li ho repetim. El que li costa torna més sovint."
 }

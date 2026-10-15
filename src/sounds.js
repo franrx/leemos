@@ -42,3 +42,109 @@ export function totals(groups,stats,lang){
   const all=groups.flatMap(g=>g.letters);
   return {done:all.filter(x=>isMastered(stats[sKey(lang,x.l)])).length,total:all.length};
 }
+
+const face=l=>l.toUpperCase()+l;
+
+// The pre-reader flow. ctx supplies state, audio and rewards from app.js (see the "letter sounds" block at the end of app.js).
+export function createSounds(ctx){
+  const {doc,$,S,save,t,say,sfx}=ctx;
+  const lang=()=>S.lang;
+  const groups=()=>(ctx.data[lang()]||ctx.data.es).groups;
+  const gi=()=>Math.min(S.pre[lang()]||0,groups().length-1);
+  const pool=()=>lettersUpTo(groups(),gi());
+  const key=l=>sKey(lang(),l);
+  const seen=l=>!!S.stats[key(l)];
+  const stat=l=>S.stats[key(l)]||(S.stats[key(l)]={ok:0,fail:0});
+  const el=(tag,cls,txt)=>{const e=doc.createElement(tag);if(cls)e.className=cls;if(txt!==undefined)e.textContent=txt;return e};
+  const room=()=>$('pre');
+  let cur=null,last=null,wrong=false,busy=false,fresh=0;
+
+  function home(){
+    cur=null;busy=false;
+    doc.body.classList.add('pre-home');
+    const {done,total}=totals(groups(),S.stats,lang());
+    const play=el('button','btn primary pre-play',t('prePlay'));play.id='prePlay';
+    play.onclick=begin;
+    room().replaceChildren(play,el('p','small',t('preProgress',{d:done,n:total})));
+    $('hint').textContent=t('preHello',{n:ctx.nm()});
+  }
+  function begin(){
+    doc.body.classList.remove('pre-home');
+    fresh=0;last=null;
+    ctx.sess.reset();
+    next();
+  }
+  function next(){
+    let cands=pool();
+    if(fresh>=NEW_PER_SESSION){const known=cands.filter(x=>seen(x.l));if(known.length)cands=known}
+    const x=pickTarget(cands,S.stats,lang(),last);
+    last=x.l;
+    if(seen(x.l))game(x);else{fresh++;intro(x)}
+  }
+  // Intro card: the picture is shown on purpose here (the goal is sound-letter linking, not reading).
+  function intro(x){
+    cur=null;busy=false;
+    stat(x.l);save();
+    const letter=el('button','pre-letter');letter.id='preLetter';
+    letter.setAttribute('aria-label',x.l);
+    letter.append(el('span','up',x.l.toUpperCase()),el('span','lo',x.l));
+    letter.onclick=()=>say(x.l);
+    const word=el('button','pre-word');word.id='preWord';
+    word.append(el('span','pre-pic',x.e),el('span','',x.w));
+    word.onclick=()=>say(x.w);
+    const go=el('button','btn primary',t('preNext'));go.id='preNext';
+    go.onclick=()=>game(x);
+    const card=el('div','pre-card');card.append(letter,word,go);
+    room().replaceChildren(card);
+    $('hint').textContent=t('preIntroHint');
+    say(x.l);
+  }
+  function game(x){
+    cur=x;wrong=false;busy=false;
+    const n=choiceCount(S.stats[key(x.l)]);
+    const opts=shuffle([x,...pickDistractors(x,pool(),S.stats,lang(),n-1)]);
+    const hear=el('button','btn pre-hear','🔊 '+t('preHear'));hear.id='preHear';
+    hear.onclick=()=>say(x.l);
+    const row=el('div','pre-choices');row.id='preChoices';
+    row.dataset.answer=x.l; // test hook; the child cannot read the DOM
+    opts.forEach(o=>{
+      const b=el('button','pre-choice',face(o.l));
+      b.dataset.l=o.l;b.setAttribute('aria-label',o.l);
+      b.onclick=()=>choose(o,b,x);
+      row.appendChild(b);
+    });
+    room().replaceChildren(hear,row);
+    $('hint').textContent=t('preGameHint');
+    say(x.l);
+  }
+  function choose(o,b,x){
+    if(busy||cur!==x)return;
+    if(o.l===x.l){correct(x,b);return}
+    sfx.retry();ctx.poke('tilt',800);
+    b.classList.add('gone');b.disabled=true;
+    if(!wrong){wrong=true;stat(x.l).fail++;save();ctx.renderHard()}
+    $('hint').textContent=ctx.fmt(ctx.rnd(t('preNos')));
+    say(x.l); // replay the sound so the next try is informed
+  }
+  function correct(x,b){
+    busy=true;
+    b.classList.add('right');
+    if(!wrong)stat(x.l).ok++;
+    S.total++;
+    ctx.burst();sfx.ok();ctx.poke('cheer',900);ctx.sparkle($('mascot'),10);
+    const pic=el('div','pre-pic big',x.e);pic.id='prePic';
+    room().appendChild(pic);
+    $('hint').textContent=ctx.fmt(ctx.rnd(t('oks')));
+    ctx.sess.inc(!wrong);
+    const finished=ctx.sess.done>=S.sessionLen;
+    let reward=null;
+    if(finished&&S.stickers<ctx.stickers.length){S.stickers++;reward=ctx.stickers[S.stickers-1];ctx.sess.addSticker()}
+    save();
+    ctx.renderSession();ctx.renderGoal();ctx.renderAlbum();ctx.renderHard();
+    if(reward)ctx.reward(reward);
+    else if(finished)ctx.later(ctx.end,1100);
+    else ctx.later(next,1300);
+  }
+
+  return {refresh:home,begin,next};
+}

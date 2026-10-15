@@ -2,10 +2,11 @@
 //  - app shell + data: network-first (always fresh while developing/online), cache fallback offline
 //  - audio clips: cache-first, with Range support (Safari asks for media in byte ranges)
 // Bump VERSION when you change the SHELL list.
-const VERSION = 'leemos-v2';
+const VERSION = 'leemos-v3';
 const SHELL = [
-  './', 'index.html', 'src/styles.css', 'src/app.js', 'manifest.webmanifest',
+  './', 'index.html', 'src/styles.css', 'src/app.js', 'src/sounds.js', 'manifest.webmanifest',
   'src/data/levels.es.json', 'src/data/levels.ca.json', 'src/data/worlds.json',
+  'src/data/sounds.es.json', 'src/data/sounds.ca.json',
   'src/data/stickers.json', 'src/data/i18n.es.json', 'src/data/i18n.ca.json',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
 ];

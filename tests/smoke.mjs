@@ -3,7 +3,7 @@
 import { JSDOM, VirtualConsole } from 'jsdom';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(ROOT, 'index.html'), 'utf8').replace(/<script type="module"[^>]*><\/script>/, '');
@@ -24,6 +24,7 @@ async function boot({ manifest = null, lang = 'en-US', storage = {} } = {}) {
     beforeParse(w) {
       Object.defineProperty(w.navigator, 'language', { value: lang });
       for (const [k, v] of Object.entries(storage)) w.localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
+      w.__leemosImport = (p) => import(pathToFileURL(join(ROOT, 'src', p)).href);
       w.matchMedia = () => ({ matches: false, addEventListener() {}, removeListener() {} });
       w.speechSynthesis = { getVoices: () => [{ name: 'Joana Online (Natural)', lang: 'ca-ES', voiceURI: 'j' }, { name: 'Google español', lang: 'es-ES', voiceURI: 'g' }], cancel() {}, speak(u) { (w.__tts ||= []).push(u.text); } };
       w.SpeechSynthesisUtterance = function (t) { this.text = t; };
@@ -191,6 +192,64 @@ for (const [label, bad] of badStores) {
 a = await boot({ storage: { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader' }, { id: 'x', name: '<b>x</b>', kind: 'reader' }] } } });
 a.$('profileBtn').click();
 check('profiles: names are rendered as text, never as HTML', a.d.querySelectorAll('#profileList b').length === 0 && a.d.querySelectorAll('#profileList .wbtn')[1].textContent.includes('<b>x</b>'));
+
+// ---------- 9. letter sounds: home, intro, game ----------
+const LEO = { 'leemos-profiles': { active: 'leo', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader' }, { id: 'leo', name: 'Leo', kind: 'pre' }] } };
+const allEs = readJSON('src/data/sounds.es.json').groups.flatMap((g) => g.letters);
+const manifestAny = { generated: 'test', clips: { es: new Proxy({}, { get: (_, k) => (typeof k === 'string' ? 'x.mp3' : undefined) }), ca: {} } };
+const until = async (fn, ms = 2000) => { for (let i = 0; i < ms / 20; i++) { if (fn()) return true; await sleep(20); } return false; };
+const bootLeo = async (extra = {}) => { const x = await boot({ storage: LEO, ...extra }); await until(() => x.$('prePlay')); return x; };
+const choice = (app, l) => [...app.d.querySelectorAll('.pre-choice')].find((b) => b.dataset.l === l);
+async function playPre(app, n, { right = true } = {}) {
+  for (let i = 0; i < n; i++) {
+    if (app.$('preNext')) app.$('preNext').click();
+    const l = app.$('preChoices').dataset.answer;
+    if (right) choice(app, l).click();
+    else { [...app.d.querySelectorAll('.pre-choice')].find((b) => b.dataset.l !== l).click(); choice(app, l).click(); }
+    await sleep(5);
+    if (!app.$('reward').hidden) app.$('rewardOk').click();
+  }
+}
+
+a = await bootLeo({ manifest: manifestAny });
+check('sounds: Leo boots into the sounds home without errors', a.errors.length === 0 && a.d.documentElement.classList.contains('pre') && !!a.$('prePlay'), a.errors.join(' | '));
+check('sounds: greeting and progress use Leo and the letter total', a.$('hello').textContent === '¡Hola, Leo!' && a.$('hint').textContent.includes('Leo') && a.d.querySelector('#pre .small').textContent === `0 de ${allEs.length} letras dominadas`, a.d.querySelector('#pre .small').textContent);
+check('sounds: the session is 5 exercises by default', a.$('slabel').textContent === '0 de 5');
+a.$('prePlay').click();
+check('sounds: the first exercise is an intro card', !!a.$('preLetter') && !!a.$('preWord') && !!a.$('preNext'));
+const l0 = a.$('preLetter').getAttribute('aria-label');
+const e0 = allEs.find((x) => x.l === l0);
+check('sounds: intro shows upper and lower case and the picture word', a.$('preLetter').textContent === l0.toUpperCase() + l0 && a.$('preWord').textContent.includes(e0.w) && a.$('preWord').textContent.includes(e0.e));
+const callsBefore = a.audioCalls.length;
+a.$('preLetter').click();
+check('sounds: tapping the letter plays its sound', a.audioCalls.length === callsBefore + 1 && a.audioCalls.at(-1) === 'audio/es/x.mp3');
+a.$('preNext').click();
+// Review Focus 2: first exercise, nothing seen except the target.
+const opts0 = [...a.d.querySelectorAll('.pre-choice')];
+check('sounds: a new letter gets exactly 2 distinct choices including the answer', opts0.length === 2 && new Set(opts0.map((b) => b.dataset.l)).size === 2 && opts0.some((b) => b.dataset.l === l0) && a.$('preChoices').dataset.answer === l0);
+check('sounds: the picture stays hidden until the right answer', !a.$('prePic'));
+const wrongBtn = opts0.find((b) => b.dataset.l !== l0);
+wrongBtn.click();
+const st = () => JSON.parse(a.w.localStorage.getItem('leemos-v1:leo')).stats['snd:' + l0];
+check('sounds: a wrong tap fades that choice, counts one fail, keeps the exercise open', wrongBtn.disabled && wrongBtn.classList.contains('gone') && st().fail === 1 && a.$('slabel').textContent === '0 de 5');
+check('sounds: the hard list shows the bare letter', a.d.querySelector('#hard .chip')?.textContent === l0, a.d.querySelector('#hard').textContent);
+choice(a, l0).click();
+check('sounds: the right answer reveals the picture and counts the exercise', !!a.$('prePic') && a.$('slabel').textContent === '1 de 5');
+check('sounds: an exercise that needed a retry adds no ok', st().ok === 0 && st().fail === 1);
+await sleep(5);
+
+// Review Focus 4: mashing.
+a = await bootLeo();
+a.$('prePlay').click(); a.$('preNext').click();
+const ans = a.$('preChoices').dataset.answer;
+const good = choice(a, ans);
+good.click(); good.click(); good.click();
+check('sounds: mashing the right answer counts once', a.$('slabel').textContent === '1 de 5' && JSON.parse(a.w.localStorage.getItem('leemos-v1:leo')).stats['snd:' + ans].ok === 1);
+a = await bootLeo();
+a.$('prePlay').click(); await playPre(a, 4);
+const seenLetters = Object.keys(JSON.parse(a.w.localStorage.getItem('leemos-v1:leo')).stats);
+check('sounds: at most 2 new letters are introduced per session', seenLetters.length === 2, seenLetters.join(','));
+check('sounds: the whole run raised no errors', a.errors.length === 0, a.errors.join(' | '));
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

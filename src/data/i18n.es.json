@@ -86,5 +86,14 @@
   "pfKind": "Tipo",
   "pfKindReader": "Ya lee sílabas",
   "pfKindPre": "Aprende letras y sonidos",
-  "pfAdd": "Añadir"
+  "pfAdd": "Añadir",
+  "prePlay": "Jugar",
+  "preHello": "¡Hola, {n}! ¿Jugamos con los sonidos?",
+  "preProgress": "{d} de {n} letras dominadas",
+  "preIntroHint": "Toca la letra para oír cómo suena.",
+  "preNext": "Siguiente",
+  "preGameHint": "Escucha el sonido y toca su letra.",
+  "preHear": "Escuchar",
+  "preNos": ["Casi, {n}. Escucha otra vez.", "Casi. Escucha con atención, {n}.", "Poco a poco, {n}. Escucha otra vez."],
+  "prePIntro": "Primero escucha el sonido de la letra y toca la letra que corresponde. Si falla, no pasa nada: se lo repetimos. Lo que le cuesta vuelve más a menudo."
 }
