@@ -44,6 +44,7 @@ export function totals(groups,stats,lang){
 }
 
 const face=l=>l.toUpperCase()+l;
+const VOWELS=['a','e','i','o','u'];
 
 // The pre-reader flow. ctx supplies state, audio and rewards from app.js (see the "letter sounds" block at the end of app.js).
 export function createSounds(ctx){
@@ -57,15 +58,20 @@ export function createSounds(ctx){
   const stat=l=>S.stats[key(l)]||(S.stats[key(l)]={ok:0,fail:0});
   const el=(tag,cls,txt)=>{const e=doc.createElement(tag);if(cls)e.className=cls;if(txt!==undefined)e.textContent=txt;return e};
   const room=()=>$('pre');
-  let cur=null,last=null,wrong=false,busy=false,fresh=0;
+  let cur=null,last=null,wrong=false,busy=false,fresh=0,epoch=0;
 
   function home(){
-    cur=null;busy=false;
+    cur=null;busy=false;epoch++; // epoch: timers scheduled before this point must not resurrect a screen
     doc.body.classList.add('pre-home');
     const {done,total}=totals(groups(),S.stats,lang());
     const play=el('button','btn primary pre-play',t('prePlay'));play.id='prePlay';
     play.onclick=begin;
     room().replaceChildren(play,el('p','small',t('preProgress',{d:done,n:total})));
+    // Without a clip or a recording the browser voice says a lone consonant's NAME ("eme"), not its sound.
+    if(pool().some(x=>!VOWELS.includes(x.l)&&!ctx.hasAudio(x.l))){
+      const note=el('p','small pre-notice',t('preNoAudio'));note.id='preNotice';
+      room().appendChild(note);
+    }
     $('hint').textContent=t('preHello',{n:ctx.nm()});
   }
   function begin(){
@@ -141,9 +147,10 @@ export function createSounds(ctx){
     if(finished&&S.stickers<ctx.stickers.length){S.stickers++;reward=ctx.stickers[S.stickers-1];ctx.sess.addSticker()}
     save();
     ctx.renderSession();ctx.renderGoal();ctx.renderAlbum();ctx.renderHard();
-    if(reward)ctx.reward(reward);
-    else if(finished)ctx.later(ctx.end,1100);
-    else ctx.later(next,1300);
+    const e=epoch,alive=()=>e===epoch;
+    if(reward)ctx.reward(reward,alive);
+    else if(finished)ctx.later(()=>{if(alive())ctx.end()},1100);
+    else ctx.later(()=>{if(alive())next()},1300);
   }
 
   // End of session: offer the next group when most of this one is mastered. Returns whether it is offered.

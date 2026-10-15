@@ -26,12 +26,17 @@ for (const lang of ['es', 'ca']) {
   all.forEach((x) => {
     if (seen.has(x.l)) problems.push('dup ' + x.l);
     seen.add(x.l);
-    if (!x.w || !x.w.toLowerCase().startsWith(x.l)) problems.push(`word "${x.w}" must start with "${x.l}"`);
+    const bare = x.l === 'ñ' ? (x.w || '').toLowerCase() : (x.w || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    if (!x.w || !bare.startsWith(x.l)) problems.push(`word "${x.w}" must start with "${x.l}"`);
     if (!x.e) problems.push('no emoji for ' + x.l);
     if (x.ph !== undefined && typeof x.ph !== 'string') problems.push('bad ph on ' + x.l);
   });
   check(`[${lang}] sounds data is well formed`, problems.length === 0, problems.slice(0, 4).join(' | '));
 }
+
+// Catalan reduces unstressed vowels (avió -> "əvió"), so a vowel's picture word must open on a stressed vowel.
+const reduced = ['avió', 'elefant', 'ocell'];
+check('[ca] vowel picture words do not start with a reduced unstressed vowel', DATA.ca.groups[0].letters.every((x) => !reduced.includes(x.w)));
 
 // ---------- keys, weights, mastery ----------
 check('keys: es has no prefix, ca has ca:', sKey('es', 'm') === 'snd:m' && sKey('ca', 'm') === 'ca:snd:m');

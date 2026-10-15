@@ -14,7 +14,7 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function boot({ manifest = null, lang = 'en-US', storage = {} } = {}) {
+async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null } = {}) {
   const errors = [];
   const audioCalls = [];
   const vc = new VirtualConsole();
@@ -29,7 +29,13 @@ async function boot({ manifest = null, lang = 'en-US', storage = {} } = {}) {
       w.speechSynthesis = { getVoices: () => [{ name: 'Joana Online (Natural)', lang: 'ca-ES', voiceURI: 'j' }, { name: 'Google español', lang: 'es-ES', voiceURI: 'g' }], cancel() {}, speak(u) { (w.__tts ||= []).push(u.text); } };
       w.SpeechSynthesisUtterance = function (t) { this.text = t; };
       w.Audio = function (src) { audioCalls.push(src); this.play = () => Promise.resolve(); this.pause = () => {}; };
+      w.__fetched = [];
+      if (swMock) {
+        Object.defineProperty(w.navigator, 'serviceWorker', { value: { controller: {}, register: () => Promise.resolve() } });
+        w.caches = { match: async () => (swMock.cached ? {} : undefined) };
+      }
       w.fetch = async (u) => {
+        w.__fetched.push(u);
         if (u === 'audio/manifest.json') return manifest ? { ok: true, status: 200, json: async () => manifest } : { ok: false, status: 404, json: async () => ({}) };
         const p = join(ROOT, u);
         if (!existsSync(p)) return { ok: false, status: 404, json: async () => ({}) };
@@ -293,6 +299,40 @@ a.$('prePlay').click(); await playPre(a, 2);
 a.$('resetBtn').click(); a.$('resetBtn').click();
 check('sounds: reset clears this language and returns to the home', Object.keys(JSON.parse(a.w.localStorage.getItem('leemos-v1:leo')).stats).length === 0 && !!a.$('prePlay'));
 check('sounds: Elsa tests above and this run stayed error-free', a.errors.length === 0, a.errors.join(' | '));
+
+// ---------- 11. fixes from the final review ----------
+// Stale timers must not resurrect a screen after a language switch.
+a = await bootLeo();
+a.$('prePlay').click(); a.$('preNext').click();
+choice(a, a.$('preChoices').dataset.answer).click();
+a.$('langBtn').click();
+await sleep(10);
+check('review: a pending next-exercise timer does not start a game after a language switch', !!a.$('prePlay') && !a.$('preChoices') && a.d.body.classList.contains('pre-home'));
+a = await bootLeo();
+a.$('prePlay').click(); await playPre(a, 4);
+a.$('preNext')?.click();
+choice(a, a.$('preChoices').dataset.answer).click();
+a.$('langBtn').click();
+await sleep(10);
+check('review: a pending reward/end timer does not pop over the home after a language switch', a.$('reward').hidden && a.$('end').hidden && !!a.$('prePlay'));
+
+// Elsa keeps offline audio after a service-worker cache bump: warm again when the cache lost the files.
+const warmManifest = { generated: 'g1', clips: { es: { ma: 'ma.mp3' }, ca: {} } };
+a = await boot({ manifest: warmManifest, swMock: { cached: false }, storage: { 'leemos-v1': { warmed: 'g1' } } });
+await sleep(30);
+check('review: audio is re-downloaded when the cache no longer holds it', a.w.__fetched.includes('audio/es/ma.mp3'), a.w.__fetched.join(','));
+a = await boot({ manifest: warmManifest, swMock: { cached: true }, storage: { 'leemos-v1': { warmed: 'g1' } } });
+await sleep(30);
+check('review: nothing is re-downloaded when the cache already holds the audio', !a.w.__fetched.includes('audio/es/ma.mp3'), a.w.__fetched.join(','));
+
+// A parent hint when the unlocked consonants have neither a clip nor a recording.
+const LEO_MSLP = { ...LEO, 'leemos-v1:leo': { name: 'Leo', pre: { es: 1, ca: 0 } } };
+a = await boot({ storage: LEO_MSLP }); await until(() => a.$('prePlay'));
+check('review: a parent hint appears when consonant sounds have no audio', !!a.$('preNotice'));
+a = await boot({ storage: LEO_MSLP, manifest: manifestAny }); await until(() => a.$('prePlay'));
+check('review: no hint when the sounds have clips', !a.$('preNotice'));
+a = await bootLeo();
+check('review: no hint for the vowels alone (the voice reads them correctly)', !a.$('preNotice'));
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

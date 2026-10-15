@@ -144,9 +144,12 @@ function say(t){
 async function warmAudio(){
   try{
     if(!navigator.onLine||!navigator.serviceWorker||!navigator.serviceWorker.controller)return;
-    const stamp=genManifest.generated||'';if(!stamp||S.warmed===stamp)return;
+    const stamp=genManifest.generated||'';if(!stamp)return;
     const jobs=[];
     Object.keys(genManifest.clips||{}).forEach(l=>Object.values(genManifest.clips[l]).forEach(f=>jobs.push('audio/'+l+'/'+f)));
+    // A service-worker cache bump deletes the old cache, so trust the stamp only while the files are still cached.
+    const stillCached=async()=>{try{return !jobs.length||!!(await caches.match(jobs[0]))}catch(e){return true}};
+    if(S.warmed===stamp&&await stillCached())return;
     let i=0;
     const worker=async()=>{while(i<jobs.length){const u=jobs[i++];try{await fetch(u)}catch(e){return}}};
     await Promise.all([worker(),worker(),worker()]);
@@ -627,7 +630,8 @@ if(PROFILE.kind==='pre'){
   const sess={reset(){sDone=sOk=sStk=0;renderSession();renderGoal()},inc(ok){sDone++;if(ok)sOk++},get done(){return sDone},addSticker(){sStk++}};
   pre=mod.createSounds({doc:document,$,S,save,t,say,sfx,poke,burst,sparkle:sparkleBurst,rnd,fmt,nm,later:(f,ms)=>setTimeout(f,ms),
     data:{es:dEs,ca:dCa},stickers:STICKERS,sess,renderSession,renderGoal,renderAlbum,renderHard,end:showEnd,
-    reward:e=>{pendingEnd=true;setTimeout(()=>showReward(e),500)}});
+    hasAudio:x=>!!(clipURL[ck(x)]||genFile(x)),
+    reward:(e,alive)=>{pendingEnd=true;setTimeout(()=>{if(!alive||alive())showReward(e);else pendingEnd=false},500)}});
   $('pre').hidden=false;
   document.querySelector('[data-i="pIntro"]').setAttribute('data-i','prePIntro');
   applyLang();

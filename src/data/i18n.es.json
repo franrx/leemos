@@ -100,5 +100,6 @@
   "preGroupUp": "¡Ya conoces casi todas estas letras! ¿Probamos letras nuevas?",
   "preGroupUpBtn": "Sí, letras nuevas",
   "preRest": "¡Hasta mañana, {n}! Si quieres seguir, toca Jugar.",
-  "preRecWorld": "Sonidos de las letras. Di solo el sonido, sin el nombre de la letra."
+  "preRecWorld": "Sonidos de las letras. Di solo el sonido, sin el nombre de la letra.",
+  "preNoAudio": "Para papá y mamá: faltan sonidos de letras. Sin ellos, la voz del navegador dice el nombre de la letra («eme»), no su sonido. Usa «Grabar mi voz» en «Para papá y mamá»."
 }
