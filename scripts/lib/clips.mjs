@@ -22,6 +22,14 @@ export function buildClipList({ name = 'Elsa', langs = ['es', 'ca'] } = {}) {
     if (!out.has(id)) out.set(id, { lang, text, key, kind, file: slug(key) + '.mp3' });
   };
   for (const lang of langs) {
+    // Letter sounds first, so a one-letter key such as "a" is classified as a sound, not a syllable.
+    const sounds = readJSON(`src/data/sounds.${lang}.json`);
+    for (const g of sounds.groups) {
+      for (const x of g.letters) {
+        add(lang, x.l, 'sound');
+        add(lang, x.w, 'word');
+      }
+    }
     const levels = readJSON(`src/data/levels.${lang}.json`);
     const i18n = readJSON(`src/data/i18n.${lang}.json`);
     for (const L of levels) {

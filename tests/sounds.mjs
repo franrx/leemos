@@ -6,6 +6,7 @@ import {
   sKey, phOf, isMastered, weightFor, choiceCount, lettersUpTo, shuffle,
   pickTarget, pickDistractors, canUnlockNext, totals,
 } from '../src/sounds.js';
+import { buildClipList } from '../scripts/lib/clips.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readJSON = (p) => JSON.parse(readFileSync(join(ROOT, p), 'utf8'));
@@ -102,6 +103,18 @@ check('unlock: uses the language prefix', !canUnlockNext(four, 0, m(['a', 'b', '
 const distinct = [grp(4), { letters: [...'efgh'].map((l) => ({ l })) }];
 const tt = totals(distinct, m(['a', 'b']), 'es');
 check('totals: counts mastered letters over all groups', tt.done === 2 && tt.total === 8);
+
+// ---------- audio clip list ----------
+const clips = buildClipList({ name: 'Leo' });
+const hasClip = (lang, key, kind) => clips.some((c) => c.lang === lang && c.key === key && (!kind || c.kind === kind));
+for (const lang of ['es', 'ca']) {
+  const all = DATA[lang].groups.flatMap((g) => g.letters);
+  check(`[${lang}] every letter sound is a clip of kind "sound"`, all.every((x) => hasClip(lang, x.l, 'sound')), all.filter((x) => !hasClip(lang, x.l, 'sound')).map((x) => x.l).join(','));
+  check(`[${lang}] every picture word is a clip`, all.every((x) => hasClip(lang, x.w.toLowerCase())));
+}
+const fileSeen = new Set(); let fileDup = 0;
+clips.forEach((c) => { const k = c.lang + '/' + c.file; if (fileSeen.has(k)) fileDup++; fileSeen.add(k); });
+check('clips: no two clips share a file name', fileDup === 0);
 
 console.log(failures ? `\n${failures} sounds test(s) FAILED` : '\nAll sounds tests passed');
 process.exit(failures ? 1 : 0);

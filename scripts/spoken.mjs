@@ -5,6 +5,7 @@
 //   - append a period or an ellipsis:            "ma."  /  "ma…"
 //   - repeat it, keep only the first (post step): "ma, ma"
 //   - use SSML/IPA on Azure or Google:            "<phoneme alphabet='ipa' ph='ma'>ma</phoneme>"
+//   - for sounds: try "mmm", a doubled vowel, or IPA on Azure/Google: <phoneme alphabet='ipa' ph='m'>m</phoneme>
 //   - set an explicit override for a stubborn clip in src/data/pronunciation.<lang>.json
 //
 // Return a plain string. If it starts with "<" it is treated as an SSML fragment (Azure/Google).
@@ -26,6 +27,8 @@ export function spokenFor(clip) {
   switch (clip.kind) {
     case 'syllable':
       return clip.text; // TODO(experiment): try clip.text + '.'
+    case 'sound':
+      return clip.text; // experiment here: a lone "m" is often read as the letter name "eme"
     case 'word':
       return clip.text;
     default:
