@@ -51,7 +51,7 @@ Sin frameworks ni bundler, a propósito. No introducir uno sin una razón clara.
 
 Claves: el texto en minúsculas. En catalán, las claves de IndexedDB llevan prefijo `ca:` y las de estadísticas también (`ca:s:ma`, `ca:w:ne-na`); las del castellano no llevan prefijo (compatibilidad con progreso ya guardado, no cambiarlo).
 Las frases de ánimo incluyen el nombre («¡Muy bien, Elsa!»). Los clips se generan con `NAME` (por defecto Elsa); si el nombre cambia en la app, esas frases caen a la voz del navegador.
-Los sonidos de letras son clips de tipo `sound` (clave = la letra). Un TTS suele leer una «m» suelta como «eme»: ajustar con `scripts/spoken.mjs`, `pronunciation.*.json`, o grabarlos con «Grabar mi voz» (para Leo la lista empieza por los sonidos). Frases de ánimo de Leo: `npm run audio -- --provider <p> --name Leo`.
+Los sonidos de letras son clips de tipo `sound` (clave = la letra). Un TTS suele leer una «m» suelta como «eme»: ajustar con `scripts/spoken.mjs`, `pronunciation.*.json`, o grabarlos con «Grabar mi voz» (para Leo la lista empieza por los sonidos). El grabador muestra una barra de nivel en vivo y no guarda grabaciones en silencio (pico < 0.01, `SILENT_PEAK` en app.js): la causa habitual es que el navegador abra otro micrófono (auriculares Bluetooth) o el volumen de entrada esté a cero. Frases de ánimo de Leo: `npm run audio -- --provider <p> --name Leo`.
 **Lo difícil son las sílabas sueltas**: cualquier TTS puede darles entonación de pregunta o leerlas como nombre de letra. El sitio para experimentar es `scripts/spoken.mjs` (qué texto se envía por tipo de clip) y `pronunciation.*.json` (casos concretos, admite SSML en Azure/Google). Escuchar con `tools/review.html` y regenerar con `--only`.
 
 ## Persistencia

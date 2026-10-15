@@ -14,7 +14,7 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false } = {}) {
+async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null } = {}) {
   const errors = [];
   const audioCalls = [];
   const vc = new VirtualConsole();
@@ -29,6 +29,13 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
       w.speechSynthesis = { getVoices: () => [{ name: 'Joana Online (Natural)', lang: 'ca-ES', voiceURI: 'j' }, { name: 'Google español', lang: 'es-ES', voiceURI: 'g' }], cancel() {}, speak(u) { (w.__tts ||= []).push(u.text); } };
       w.SpeechSynthesisUtterance = function (t) { this.text = t; };
       w.Audio = function (src) { audioCalls.push(src); this.play = () => Promise.resolve(); this.pause = () => {}; };
+      if (mic) {
+        // fake microphone: mic.peak is the constant sample level the analyser reports; mic.deny refuses permission
+        Object.defineProperty(w.navigator, 'mediaDevices', { value: { getUserMedia: async () => { if (mic.deny) throw new Error('denied'); return { getTracks: () => [{ stop() {} }] }; } } });
+        w.URL.createObjectURL = () => 'blob:test'; w.URL.revokeObjectURL = () => {};
+        w.MediaRecorder = class { static isTypeSupported() { return true; } constructor() { this.mimeType = 'audio/webm'; } start() {} stop() { this.ondataavailable({ data: new w.Blob(['abc']) }); this.onstop(); } };
+        w.AudioContext = class { constructor() { this.state = 'running'; } resume() {} createMediaStreamSource() { return { connect() {}, disconnect() {} }; } createAnalyser() { return { fftSize: 1024, getFloatTimeDomainData(a) { a.fill(mic.peak); } }; } };
+      }
       w.__fetched = [];
       if (swMock) {
         Object.defineProperty(w.navigator, 'serviceWorker', { value: { controller: {}, register: () => Promise.resolve() } });
@@ -393,6 +400,19 @@ a.$('preNext').click();
 check('minor: the game focuses the hear button', a.d.activeElement === a.$('preHear'));
 [...a.d.querySelectorAll('.pre-choice')].find((b) => b.dataset.l !== a.$('preChoices').dataset.answer).click();
 check('minor: after a wrong tap focus moves to an enabled choice', !!a.d.activeElement && a.d.activeElement.classList.contains('pre-choice') && !a.d.activeElement.disabled);
+
+// ---------- 13. recorder: live level bar and silence check ----------
+const recStart = async (micCfg) => { const x = await boot({ mic: micCfg }); x.$('recOpen').click(); x.$('recBtn').click(); await sleep(60); return x; };
+a = await recStart({ peak: 0.2 });
+check('recorder: the level bar shows and follows the input while recording', !a.$('recMeter').hidden && a.$('recMeterFill').style.width === '60%', a.$('recMeterFill').style.width);
+a.$('recBtn').click(); await sleep(30);
+check('recorder: a recording with sound is saved', a.$('recStatus').textContent === 'Guardada ✓' && /ya grabada/.test(a.$('recCount').textContent), a.$('recStatus').textContent);
+check('recorder: the level bar hides when recording stops', a.$('recMeter').hidden);
+a = await recStart({ peak: 0 });
+a.$('recBtn').click(); await sleep(30);
+check('recorder: a silent recording is rejected with a hint about the microphone', /No se oyó nada/.test(a.$('recStatus').textContent) && !/ya grabada/.test(a.$('recCount').textContent) && a.$('recPlay').hidden, a.$('recStatus').textContent);
+a = await boot({ mic: { deny: true } }); a.$('recOpen').click(); a.$('recBtn').click(); await sleep(30);
+check('recorder: a refused microphone still shows the permission message', /No pude usar el micrófono/.test(a.$('recStatus').textContent), a.$('recStatus').textContent);
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

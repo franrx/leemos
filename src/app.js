@@ -533,6 +533,35 @@ function recItems(lv){
   L.words.forEach(o=>set.add(o.w.replace(/-/g,'')));
   return [...set];
 }
+// Live level bar + silence check: a clip whose loudest sample stays below SILENT_PEAK (about -40 dBFS) is not saved,
+// because the usual cause is the browser opening the wrong microphone (e.g. Bluetooth headphones) or a zero input volume.
+const SILENT_PEAK=0.01;
+let recPeak=1,meterOn=false,meterRaf=0,meterSrc=null;
+function startMeter(){
+  recPeak=1; // unknown until an analyser works: never call a recording silent without evidence
+  try{
+    AC=AC||new (window.AudioContext||window.webkitAudioContext)();
+    if(AC.state==='suspended')AC.resume();
+    meterSrc=AC.createMediaStreamSource(recStream);
+    const an=AC.createAnalyser();an.fftSize=1024;meterSrc.connect(an);
+    const buf=new Float32Array(an.fftSize);
+    recPeak=0;meterOn=true;
+    const tick=()=>{
+      an.getFloatTimeDomainData(buf);
+      let pk=0;for(let i=0;i<buf.length;i++){const v=Math.abs(buf[i]);if(v>pk)pk=v}
+      if(pk>recPeak)recPeak=pk;
+      const pct=Math.min(100,Math.round(pk*300));
+      $('recMeterFill').style.width=pct+'%';$('recMeter').setAttribute('aria-valuenow',pct);
+      if(meterOn)meterRaf=requestAnimationFrame(tick);
+    };
+    tick();
+  }catch(e){meterOn=false}
+}
+function stopMeter(){
+  meterOn=false;cancelAnimationFrame(meterRaf);
+  try{if(meterSrc)meterSrc.disconnect()}catch(e){}
+  meterSrc=null;$('recMeterFill').style.width='0%';
+}
 async function startRec(){
   recStream=await navigator.mediaDevices.getUserMedia({audio:true});
   const mime=['audio/webm;codecs=opus','audio/mp4','audio/webm'].find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m));
@@ -540,10 +569,11 @@ async function startRec(){
   recChunks=[];
   rec.ondataavailable=e=>{if(e.data&&e.data.size)recChunks.push(e.data)};
   rec.start();
+  startMeter();
 }
 function stopRec(){
   return new Promise(res=>{
-    rec.onstop=()=>{recStream.getTracks().forEach(t=>t.stop());res(new Blob(recChunks,{type:rec.mimeType||'audio/webm'}))};
+    rec.onstop=()=>{stopMeter();recStream.getTracks().forEach(t=>t.stop());res(new Blob(recChunks,{type:rec.mimeType||'audio/webm'}))};
     rec.stop();
   });
 }
@@ -553,6 +583,7 @@ function renderRec(status){
   $('recText').textContent=item;
   $('recCount').textContent=t('recOf',{i:RS.i+1,n:RS.list.length})+(clipURL[ck(item)]?t('recDone'):'');
   $('recBtn').textContent=RS.on?t('recStop'):t('recStart');
+  $('recMeter').hidden=!RS.on;
   $('recPlay').hidden=!clipURL[ck(item)];
   $('recStatus').textContent=status||(RS.on?t('recRecording',{t:item}):'');
 }
@@ -575,7 +606,8 @@ async function toggleRec(){
     let blob=null;
     try{blob=await stopRec()}catch(e){}
     RS.on=false;
-    if(blob&&blob.size){
+    if(blob&&blob.size&&recPeak<SILENT_PEAK)renderRec(t('recSilent'));
+    else if(blob&&blob.size){
       setClip(ck(item),blob);
       try{await idbSet(ck(item),blob)}catch(e){}
       updateRecInfo();renderRec(t('recSaved'));

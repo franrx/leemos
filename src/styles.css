@@ -166,6 +166,8 @@ input[type=range]{flex:1;min-width:140px;accent-color:var(--c2)}
 .chip{padding:4px 12px;border-radius:99px;background:var(--bg);border:1px solid var(--line);font-size:.95rem}
 .small{color:var(--muted);font-size:.9rem;margin:6px 0}
 .hdr-actions{flex-wrap:wrap}
+.meter{height:16px;max-width:320px;margin:10px auto;border-radius:99px;background:color-mix(in srgb,var(--ink) 14%,transparent);overflow:hidden}
+.meter i{display:block;height:100%;width:0;border-radius:99px;background:var(--ok);transition:width .08s linear}
 .pf-row{display:flex;align-items:center;gap:10px;margin:12px 0}
 .pf-row input,.pf-row select{flex:1;min-height:44px;font:inherit;border:2px solid var(--line);border-radius:12px;padding:6px 10px;background:var(--panel);color:var(--ink)}
 
@@ -190,7 +192,7 @@ html.pre #endLevelUpBtn{order:3}
 .pre-letter:focus-visible,.pre-word:focus-visible,.pre-choice:focus-visible{outline:4px solid var(--ink);outline-offset:3px}
 
 @media (prefers-reduced-motion: reduce){
-  .pre-choice,.pre-choice.right,.pre-pic.big{transition:none;animation:none}
+  .pre-choice,.pre-choice.right,.pre-pic.big,.meter i{transition:none;animation:none}
   .tiles,.tile,.level .bar i,.sbar i,.goal i{transition:none}
   .pic.on,.star,.eyes,.big,
   .mascot,.mascot.cheer,.mascot.cheer .wl,.mascot.cheer .wr,

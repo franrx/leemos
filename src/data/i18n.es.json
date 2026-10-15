@@ -102,5 +102,7 @@
   "preRest": "¡Hasta mañana, {n}! Si quieres seguir, toca Jugar.",
   "preRecWorld": "Sonidos de las letras. Di solo el sonido, sin el nombre de la letra.",
   "preOks": ["¡Muy bien, {n}!", "¡Genial, {n}!", "¡Bravo, {n}!", "¡Lo has clavado, {n}!"],
-  "preNoAudio": "Para papá y mamá: faltan sonidos de letras. Sin ellos, la voz del navegador dice el nombre de la letra («eme»), no su sonido. Usa «Grabar mi voz» en «Para papá y mamá»."
+  "preNoAudio": "Para papá y mamá: faltan sonidos de letras. Sin ellos, la voz del navegador dice el nombre de la letra («eme»), no su sonido. Usa «Grabar mi voz» en «Para papá y mamá».",
+  "recSilent": "No se oyó nada. Comprueba que esté elegido el micrófono correcto (con auriculares Bluetooth suele elegirse otro) y que el volumen de entrada no esté a cero. Luego prueba otra vez.",
+  "recMeterLbl": "Nivel del micrófono"
 }
