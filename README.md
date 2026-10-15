@@ -48,6 +48,12 @@ Sin claves puedes probar todo el pipeline con `--provider mock` (pitidos; necesi
 
 Las frases de ánimo llevan el nombre («¡Muy bien, Elsa!»). Se generan con `NAME` del `.env` (por defecto Elsa). Si en la app se cambia el nombre, esas frases usan la voz del navegador.
 
+## Modo Leo (letras y sonidos)
+Para quien aún no lee. Pulsa 🧒 en la cabecera, escribe el nombre y elige «Aprende letras y sonidos» (o «Ya lee sílabas» para otro lector como Elsa). Cada niño o niña tiene su progreso y sus pegatinas por separado; Elsa no se toca.
+- Juego: tarjeta con la letra grande, su sonido y un dibujo; luego suena el sonido y toca la letra entre 2 (o 3) opciones. Un fallo nunca penaliza: se repite el sonido.
+- Letras en `src/data/sounds.<idioma>.json`. Los clips (`sound`) se generan con `npm run audio`; una letra suelta suele salir mal en TTS, así que «Grabar mi voz» (panel de padres) empieza por los sonidos.
+- Frases de ánimo con su nombre: `npm run audio -- --provider <p> --name Leo`.
+
 ## Publicar e instalar en la tablet
 Es un sitio estático: sirve cualquier hosting con **https** (Netlify, Cloudflare Pages, GitHub Pages…). Hace falta https para el micrófono y el modo offline. Una vez abierta en la tablet, «Añadir a pantalla de inicio» la instala; tras la primera visita con conexión, descarga los audios y funciona sin internet.
 

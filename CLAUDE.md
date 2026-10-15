@@ -25,6 +25,9 @@ scripts/                generate-audio.mjs, spoken.mjs, lib/, providers/ (eleven
 sw.js, manifest.webmanifest, icons/    PWA instalable y offline
 tools/review.html       escuchar clips, marcar los malos y copiar el comando para regenerarlos
 tests/smoke.mjs         pruebas
+src/sounds.js           modo pre-lector (Leo): lógica pura + createSounds(ctx); app.js lo carga con import() solo si el perfil es kind:'pre'
+src/data/sounds.{es,ca}.json   grupos de letras: l, w (palabra), e (emoji), ph opcional (mismo sonido: b/v, c/qu)
+tests/sounds.mjs        pruebas unitarias de la lógica pura y del listado de clips
 ```
 Sin frameworks ni bundler, a propósito. No introducir uno sin una razón clara. `app.js` es grande (~540 líneas): trocearlo en módulos es razonable si se toca mucho, pero hacerlo en un cambio aparte y con `npm test` en verde.
 
@@ -38,6 +41,7 @@ Sin frameworks ni bundler, a propósito. No introducir uno sin una razón clara.
 - Sesiones de 5/10/15/20 ejercicios (por defecto 10, unos 5 minutos). La barra de sesión cuenta ejercicios hechos, no aciertos. Pegatina cada 8 aciertos.
 - **Retroalimentación siempre amable:** un fallo suena suave y Lumi anima; nada de sonidos de castigo.
 - Interruptor Aa: minúsculas / MAYÚSCULAS (los libros de inicio suelen ir en mayúsculas).
+- **Leo (4 años, pre-lector):** perfil aparte (`kind:'pre'`). Asocia letra con SONIDO (fonema, no nombre). Tarjeta de presentación (letra grande, sonido, dibujo+palabra) y luego juego: suena el sonido, toca la letra entre 2 opciones (3 si ya la domina). El dibujo sale en la tarjeta a propósito (aquí no se lee). Máximo 2 letras nuevas por sesión. Grupos: vocales, m s l p, t n d c, r b f g, v j z ñ, ch ll qu (en catalán x, ll ny tx). La `h` no entra (no tiene sonido). Dos letras con el mismo `ph` nunca salen juntas. Siguiente grupo cuando ≥75% del actual está dominado.
 - **Mundos:** el nivel es la dificultad; el mundo (16 paisajes, o 🎲 Sorpresa que rota por sesión) es solo el paisaje. En modo Palabras, se prefieren las palabras etiquetadas con el mundo actual (80% con ≥3 candidatas, 40% con menos). Etiquetas = ids de `worlds.json` en el campo `g`, separadas por espacios.
 
 ## Audio: orden de prioridad (ver `say()` en app.js)
@@ -47,10 +51,12 @@ Sin frameworks ni bundler, a propósito. No introducir uno sin una razón clara.
 
 Claves: el texto en minúsculas. En catalán, las claves de IndexedDB llevan prefijo `ca:` y las de estadísticas también (`ca:s:ma`, `ca:w:ne-na`); las del castellano no llevan prefijo (compatibilidad con progreso ya guardado, no cambiarlo).
 Las frases de ánimo incluyen el nombre («¡Muy bien, Elsa!»). Los clips se generan con `NAME` (por defecto Elsa); si el nombre cambia en la app, esas frases caen a la voz del navegador.
+Los sonidos de letras son clips de tipo `sound` (clave = la letra). Un TTS suele leer una «m» suelta como «eme»: ajustar con `scripts/spoken.mjs`, `pronunciation.*.json`, o grabarlos con «Grabar mi voz» (para Leo la lista empieza por los sonidos). Frases de ánimo de Leo: `npm run audio -- --provider <p> --name Leo`.
 **Lo difícil son las sílabas sueltas**: cualquier TTS puede darles entonación de pregunta o leerlas como nombre de letra. El sitio para experimentar es `scripts/spoken.mjs` (qué texto se envía por tipo de clip) y `pronunciation.*.json` (casos concretos, admite SSML en Azure/Google). Escuchar con `tools/review.html` y regenerar con `--only`.
 
 ## Persistencia
 - `localStorage['leemos-v1']`: estado `S` (stats, level, mode, world, lang, name, total, progress, stickers, sound, voiceURIs, sessionLen, upper, rate, theme…). Al añadir campos, dar un valor por defecto en la línea de `Object.assign` para que no rompa estados guardados.
+- Perfiles: `localStorage['leemos-profiles']` = `{active, list:[{id,name,kind}]}`. Elsa sigue en `leemos-v1` (no renombrar); los demás en `leemos-v1:<id>`. Cambiar de perfil recarga la página. Estadísticas del modo sonidos: `snd:<letra>` y `ca:snd:<letra>`; `S.pre = {es:n, ca:n}` es el grupo desbloqueado por idioma.
 - No hay servidor, cuentas ni analítica. **No añadir seguimiento, anuncios ni envío de datos del niño.**
 
 ## Convenciones de UI
@@ -68,10 +74,12 @@ Las frases de ánimo incluyen el nombre («¡Muy bien, Elsa!»). Los clips se ge
 6. Pegatinas por mundo (granja, mar, dinosaurios) como razón extra para probar cada uno.
 7. Persistir la sesión en curso; sincronizar perfil entre dispositivos (solo si Fran lo pide).
 8. Pruebas e2e con un navegador real (Playwright). Hoy solo hay jsdom.
+9. **Audio del modo Leo sin generar.** El proveedor `edge` devuelve 403 (2026-10-15), así que no se han podido generar ni escuchar los clips `sound`. Probar `azure`/`google`/`elevenlabs` o grabar con «Grabar mi voz». Revisar con nativo las palabras de `sounds.ca.json` (txec, ull, mà, lupa…) y qué e/o (abierta/cerrada) se quiere enseñar en catalán.
 
 ## Ojo con esto
 - **Nunca se ha probado en un navegador real**, solo en jsdom. Lo primero: `npm run dev` y probarlo en la tablet de Elsa (audio, micrófono, instalación).
 - Los proveedores `elevenlabs`, `azure` y `google` **no se han probado con claves reales**; sí `mock`, `edge` (funcionando, es/ca) y todo el pipeline (postprocesado, manifest, nombres con tildes). Verificar en la documentación actual del proveedor los nombres de voces/modelos y si soportan catalán.
 - `app.js` es un módulo (modo estricto). `tests/smoke.mjs` lo evalúa dentro de una función async porque jsdom no ejecuta módulos.
+- `app.js` no puede tener sentencias `import` (el test lo evalúa como texto): `sounds.js` se carga con `import()` y `tests/smoke.mjs` inyecta `window.__leemosImport`.
 - Si cambias la lista `SHELL` de `sw.js`, sube `VERSION`.
 - El micrófono y el service worker solo funcionan en `localhost` o `https`. Una IP de red local con `http://` no sirve para probarlos en la tablet: usa un hosting con https.
