@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "node scripts/dev-server.mjs",
-    "test": "node tests/smoke.mjs",
+    "test": "node tests/smoke.mjs && node tests/sounds.mjs",
     "audio": "node scripts/generate-audio.mjs",
     "audio:plan": "node scripts/generate-audio.mjs --dry-run",
     "review": "echo 'Abre http://localhost:5173/tools/review.html (con npm run dev en marcha)'"
