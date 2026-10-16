@@ -8,6 +8,17 @@ import { httpError } from './_http.mjs';
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const LOCALE = { es: 'es-ES', ca: 'ca-ES' };
 
+// Voices this region offers for Spanish and Catalan (Spain). Voice names and regions change: run `npm run azure:voices`
+// before generating instead of trusting the defaults below.
+export async function listVoices({ env }) {
+  const key = env.AZURE_SPEECH_KEY;
+  const region = env.AZURE_SPEECH_REGION;
+  if (!key || !region) throw new Error('Faltan AZURE_SPEECH_KEY y AZURE_SPEECH_REGION en .env');
+  const r = await fetch(`https://${region}.tts.speech.microsoft.com/cognitiveservices/voices/list`, { headers: { 'Ocp-Apim-Subscription-Key': key } });
+  if (!r.ok) throw await httpError(r);
+  return (await r.json()).filter((v) => v.Locale === 'es-ES' || v.Locale === 'ca-ES');
+}
+
 export async function synthesize({ text, lang, env }) {
   const key = env.AZURE_SPEECH_KEY;
   const region = env.AZURE_SPEECH_REGION;

@@ -14,18 +14,7 @@ import { join } from 'node:path';
 import { ROOT, buildClipList } from './lib/clips.mjs';
 import { hasFfmpeg, postprocess } from './lib/post.mjs';
 import { spokenFor } from './spoken.mjs';
-
-function loadEnv() {
-  const env = { ...process.env };
-  const p = join(ROOT, '.env');
-  if (existsSync(p)) {
-    for (const line of readFileSync(p, 'utf8').split('\n')) {
-      const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-      if (m && !line.trim().startsWith('#') && env[m[1]] === undefined) env[m[1]] = m[2].replace(/^["']|["']$/g, '');
-    }
-  }
-  return env;
-}
+import { loadEnv } from './lib/env.mjs';
 
 function parseArgs(argv) {
   const a = { _: [] };
