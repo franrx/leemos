@@ -6,7 +6,9 @@
   const MSG_SILENT = 'No se oyó nada. Comprueba que esté elegido el micrófono correcto (con auriculares Bluetooth suele elegirse otro) y que el volumen de entrada no esté a cero. Luego prueba otra vez.';
   let clips = [], idx = 0, lang = 'es', pending = null;
   let recorder = null, stream = null, chunks = [], recording = false;
-  let peak = 1, meterOn = false, raf = 0, audioCtx = null, source = null;
+  // "Silent" needs evidence: only readings taken while the AudioContext was running count, so a recording is rejected
+  // only after >= 2 real readings (a suspended context or an analyser without sample data reads nothing).
+  let peak = 1, ticks = 0, meterOn = false, raf = 0, audioCtx = null, source = null;
 
   const status = (t) => { $('status').textContent = t || ''; };
   const doneCount = () => clips.filter((c) => c.has).length;
@@ -53,14 +55,17 @@
       an.fftSize = 1024;
       source.connect(an);
       const buf = new Float32Array(an.fftSize);
-      peak = 0; meterOn = true;
+      peak = 0; ticks = 0; meterOn = true;
       const tick = () => {
-        an.getFloatTimeDomainData(buf);
-        let pk = 0;
-        for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > pk) pk = v; }
-        if (pk > peak) peak = pk;
-        $('meterFill').style.width = Math.min(100, Math.round(pk * 300)) + '%';
-        if (meterOn) raf = requestAnimationFrame(tick);
+        try {
+          an.getFloatTimeDomainData(buf);
+          if (audioCtx.state === 'running') ticks++;
+          let pk = 0;
+          for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > pk) pk = v; }
+          if (pk > peak) peak = pk;
+          $('meterFill').style.width = Math.min(100, Math.round(pk * 300)) + '%';
+          if (meterOn) raf = requestAnimationFrame(tick);
+        } catch (e) { meterOn = false; }
       };
       tick();
     } catch (e) { meterOn = false; }
@@ -93,7 +98,7 @@
       });
       recording = false;
       if (!blob.size) status('No se grabó nada. Prueba otra vez.');
-      else if (peak < SILENT_PEAK) status(MSG_SILENT);
+      else if (ticks >= 2 && peak < SILENT_PEAK) status(MSG_SILENT);
       else { pending = blob; status('Escúchala y, si suena bien, pulsa Guardar.'); }
       render();
     }

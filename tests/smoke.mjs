@@ -34,7 +34,8 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
         Object.defineProperty(w.navigator, 'mediaDevices', { value: { getUserMedia: async () => { if (mic.deny) throw new Error('denied'); return { getTracks: () => [{ stop() {} }] }; } } });
         w.URL.createObjectURL = () => 'blob:test'; w.URL.revokeObjectURL = () => {};
         w.MediaRecorder = class { static isTypeSupported() { return true; } constructor() { this.mimeType = 'audio/webm'; } start() {} stop() { this.ondataavailable({ data: new w.Blob(['abc']) }); this.onstop(); } };
-        w.AudioContext = class { constructor() { this.state = 'running'; } resume() {} createMediaStreamSource() { return { connect() {}, disconnect() {} }; } createAnalyser() { return { fftSize: 1024, getFloatTimeDomainData(a) { a.fill(mic.peak); } }; } };
+        // mic.state: what the AudioContext reports ('running' by default; browsers may leave it 'suspended'); mic.noFloat: an analyser without getFloatTimeDomainData
+        w.AudioContext = class { constructor() { this.state = mic.state || 'running'; } resume() {} createMediaStreamSource() { return { connect() {}, disconnect() {} }; } createAnalyser() { const an = { fftSize: 1024 }; if (!mic.noFloat) an.getFloatTimeDomainData = (a) => a.fill(mic.peak); return an; } };
       }
       w.__fetched = [];
       if (swMock) {
@@ -411,6 +412,13 @@ check('recorder: the level bar hides when recording stops', a.$('recMeter').hidd
 a = await recStart({ peak: 0 });
 a.$('recBtn').click(); await sleep(30);
 check('recorder: a silent recording is rejected with a hint about the microphone', /No se oyó nada/.test(a.$('recStatus').textContent) && !/ya grabada/.test(a.$('recCount').textContent) && a.$('recPlay').hidden, a.$('recStatus').textContent);
+// The silence check needs evidence: a suspended AudioContext or an analyser without sample data reads zeros, not silence.
+a = await recStart({ peak: 0, state: 'suspended' });
+a.$('recBtn').click(); await sleep(30);
+check('recorder: a suspended AudioContext never rejects a recording as silent', a.$('recStatus').textContent === 'Guardada ✓', a.$('recStatus').textContent);
+a = await recStart({ peak: 0, noFloat: true });
+a.$('recBtn').click(); await sleep(30);
+check('recorder: an analyser without sample data never rejects a recording as silent', a.$('recStatus').textContent === 'Guardada ✓', a.$('recStatus').textContent);
 a = await boot({ mic: { deny: true } }); a.$('recOpen').click(); a.$('recBtn').click(); await sleep(30);
 check('recorder: a refused microphone still shows the permission message', /No pude usar el micrófono/.test(a.$('recStatus').textContent), a.$('recStatus').textContent);
 

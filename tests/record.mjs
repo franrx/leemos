@@ -14,7 +14,7 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function open({ peak = 0.2, has = [], postStatus = 200, offline = false } = {}) {
+async function open({ peak = 0.2, has = [], postStatus = 200, offline = false, acState = 'running', noFloat = false } = {}) {
   const posts = [];
   const dom = new JSDOM(html, {
     runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://localhost:5173/tools/record.html',
@@ -33,7 +33,7 @@ async function open({ peak = 0.2, has = [], postStatus = 200, offline = false } 
       w.URL.createObjectURL = () => 'blob:test'; w.URL.revokeObjectURL = () => {};
       w.Audio = function () { this.play = () => Promise.resolve(); };
       w.MediaRecorder = class { static isTypeSupported() { return true; } constructor() { this.mimeType = 'audio/webm'; } start() {} stop() { this.ondataavailable({ data: new w.Blob(['x'.repeat(2000)]) }); this.onstop(); } };
-      w.AudioContext = class { constructor() { this.state = 'running'; } resume() {} createMediaStreamSource() { return { connect() {}, disconnect() {} }; } createAnalyser() { return { fftSize: 1024, getFloatTimeDomainData(a) { a.fill(peak); } }; } };
+      w.AudioContext = class { constructor() { this.state = acState; } resume() {} createMediaStreamSource() { return { connect() {}, disconnect() {} }; } createAnalyser() { const an = { fftSize: 1024 }; if (!noFloat) an.getFloatTimeDomainData = (a) => a.fill(peak); return an; } };
     },
   });
   const w = dom.window;
@@ -74,6 +74,12 @@ check('page: it confirms the save', /Guardada/.test(p.$('status').textContent), 
 p = await open({ peak: 0 });
 await startRec(p); await stopRec(p);
 check('page: a silent recording is rejected with a hint and cannot be saved', /No se oyó nada/.test(p.$('status').textContent) && p.$('save').hidden && p.posts.length === 0, p.$('status').textContent);
+
+for (const [label, cfg] of [['a suspended AudioContext', { acState: 'suspended' }], ['an analyser without sample data', { noFloat: true }]]) {
+  p = await open({ peak: 0, ...cfg });
+  await startRec(p); await stopRec(p);
+  check(`page: ${label} never rejects a recording as silent`, !p.$('save').hidden && !/No se oyó nada/.test(p.$('status').textContent), p.$('status').textContent);
+}
 
 p = await open({ peak: 0.2, postStatus: 500 });
 await startRec(p); await stopRec(p); p.$('save').click(); await sleep(40);

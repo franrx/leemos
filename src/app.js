@@ -536,7 +536,9 @@ function recItems(lv){
 // Live level bar + silence check: a clip whose loudest sample stays below SILENT_PEAK (about -40 dBFS) is not saved,
 // because the usual cause is the browser opening the wrong microphone (e.g. Bluetooth headphones) or a zero input volume.
 const SILENT_PEAK=0.01;
-let recPeak=1,meterOn=false,meterRaf=0,meterSrc=null;
+// "Silent" needs evidence: only readings taken while the AudioContext was running count (browsers may leave it suspended,
+// and an analyser without getFloatTimeDomainData reads nothing), so a recording is rejected only after >= 2 real readings.
+let recPeak=1,meterTicks=0,meterOn=false,meterRaf=0,meterSrc=null;
 function startMeter(){
   recPeak=1; // unknown until an analyser works: never call a recording silent without evidence
   try{
@@ -545,14 +547,17 @@ function startMeter(){
     meterSrc=AC.createMediaStreamSource(recStream);
     const an=AC.createAnalyser();an.fftSize=1024;meterSrc.connect(an);
     const buf=new Float32Array(an.fftSize);
-    recPeak=0;meterOn=true;
+    recPeak=0;meterTicks=0;meterOn=true;
     const tick=()=>{
-      an.getFloatTimeDomainData(buf);
-      let pk=0;for(let i=0;i<buf.length;i++){const v=Math.abs(buf[i]);if(v>pk)pk=v}
-      if(pk>recPeak)recPeak=pk;
-      const pct=Math.min(100,Math.round(pk*300));
-      $('recMeterFill').style.width=pct+'%';$('recMeter').setAttribute('aria-valuenow',pct);
-      if(meterOn)meterRaf=requestAnimationFrame(tick);
+      try{
+        an.getFloatTimeDomainData(buf);
+        if(AC.state==='running')meterTicks++;
+        let pk=0;for(let i=0;i<buf.length;i++){const v=Math.abs(buf[i]);if(v>pk)pk=v}
+        if(pk>recPeak)recPeak=pk;
+        const pct=Math.min(100,Math.round(pk*300));
+        $('recMeterFill').style.width=pct+'%';$('recMeter').setAttribute('aria-valuenow',pct);
+        if(meterOn)meterRaf=requestAnimationFrame(tick);
+      }catch(e){meterOn=false}
     };
     tick();
   }catch(e){meterOn=false}
@@ -606,7 +611,7 @@ async function toggleRec(){
     let blob=null;
     try{blob=await stopRec()}catch(e){}
     RS.on=false;
-    if(blob&&blob.size&&recPeak<SILENT_PEAK)renderRec(t('recSilent'));
+    if(blob&&blob.size&&meterTicks>=2&&recPeak<SILENT_PEAK)renderRec(t('recSilent'));
     else if(blob&&blob.size){
       setClip(ck(item),blob);
       try{await idbSet(ck(item),blob)}catch(e){}
