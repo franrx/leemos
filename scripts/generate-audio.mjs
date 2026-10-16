@@ -15,6 +15,7 @@ import { ROOT, buildClipList } from './lib/clips.mjs';
 import { hasFfmpeg, postprocess } from './lib/post.mjs';
 import { spokenFor } from './spoken.mjs';
 import { loadEnv } from './lib/env.mjs';
+import { bumpRev } from './lib/clipstore.mjs';
 
 function parseArgs(argv) {
   const a = { _: [] };
@@ -91,6 +92,7 @@ async function worker() {
       if (usePost) buf = postprocess(buf);
       writeFileSync(audioPath(c), buf);
       manifest.clips[c.lang][c.key] = c.file;
+      bumpRev(manifest, c.lang, c.key); // devices that cached the previous version of this clip fetch the new one
       done++;
       if (done % 25 === 0 || done === todo.length) console.log(`  ${done}/${todo.length}`);
     } catch (e) {

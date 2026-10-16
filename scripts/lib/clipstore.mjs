@@ -53,6 +53,14 @@ export function convertToMp3(buf, type = '') {
   }
 }
 
+// Per-clip revision. The app asks for audio/<lang>/<file>?v=<rev>, so a regenerated or re-recorded clip is fetched again
+// by devices that already cached the old file (the service worker caches audio by URL). Strictly increasing per clip.
+export function bumpRev(manifest, lang, key) {
+  manifest.rev ||= {};
+  manifest.rev[lang] ||= {};
+  manifest.rev[lang][key] = Math.max(Date.now(), (manifest.rev[lang][key] || 0) + 1);
+}
+
 export function saveClip({ audioDir = join(ROOT, 'audio'), lang, key, input, type = '', convert = convertToMp3 }) {
   if (!LANGS.includes(lang)) throw fail(400, 'bad language');
   const k = String(key || '').toLowerCase();
@@ -68,6 +76,7 @@ export function saveClip({ audioDir = join(ROOT, 'audio'), lang, key, input, typ
   manifest.clips ||= {};
   for (const l of LANGS) manifest.clips[l] ||= {};
   manifest.clips[lang][clip.key] = clip.file;
+  bumpRev(manifest, lang, clip.key);
   manifest.generated = new Date().toISOString(); // the app re-downloads clips when this stamp changes
   writeFileSync(mp, JSON.stringify(manifest, null, 1) + '\n');
   return { file: clip.file, key: clip.key, lang };

@@ -123,6 +123,8 @@ async function loadManifest(){
   try{const r=await fetch('audio/manifest.json',{cache:'no-cache'});if(r.ok)genManifest=await r.json()}catch(e){}
 }
 function genFile(t){const m=(genManifest.clips||{})[S.lang];return m&&m[t.toLowerCase()]}
+// ?v=<revision> makes a regenerated or re-recorded clip a new URL, so the service worker (cache-first by URL) fetches it again.
+const clipUrl=(lang,key,file)=>{const r=((genManifest.rev||{})[lang]||{})[key];return 'audio/'+lang+'/'+file+(r?'?v='+r:'')};
 function ttsSpeak(t){
   if(!hasTTS)return;
   try{
@@ -135,7 +137,7 @@ function playGen(t){
   const f=genFile(t);if(!f)return false;
   try{
     if(curAudio)curAudio.pause();
-    curAudio=new Audio('audio/'+S.lang+'/'+f);
+    curAudio=new Audio(clipUrl(S.lang,t.toLowerCase(),f));
     curAudio.play().catch(()=>ttsSpeak(t));
     return true;
   }catch(e){return false}
@@ -153,7 +155,7 @@ async function warmAudio(){
     if(!navigator.onLine||!navigator.serviceWorker||!navigator.serviceWorker.controller)return;
     const stamp=genManifest.generated||'';if(!stamp)return;
     const jobs=[];
-    Object.keys(genManifest.clips||{}).forEach(l=>Object.values(genManifest.clips[l]).forEach(f=>jobs.push('audio/'+l+'/'+f)));
+    Object.keys(genManifest.clips||{}).forEach(l=>Object.entries(genManifest.clips[l]).forEach(([k,f])=>jobs.push(clipUrl(l,k,f))));
     // A service-worker cache bump deletes the old cache, so trust the stamp only while the files are still cached.
     const stillCached=async()=>{try{return !jobs.length||!!(await caches.match(jobs[0]))}catch(e){return true}};
     if(S.warmed===stamp&&await stillCached())return;

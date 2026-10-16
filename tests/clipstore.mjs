@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { recordList, saveClip, convertToMp3 } from '../scripts/lib/clipstore.mjs';
+import { recordList, saveClip, convertToMp3, bumpRev } from '../scripts/lib/clipstore.mjs';
 import { handleClipApi } from '../scripts/lib/clipapi.mjs';
 import { hasFfmpeg } from '../scripts/lib/post.mjs';
 
@@ -31,6 +31,13 @@ const saved = saveClip({ audioDir, lang: 'es', key: 'm', input: big, type: 'audi
 const manifest = () => JSON.parse(readFileSync(join(audioDir, 'manifest.json'), 'utf8'));
 check('save: writes the converted file under audio/<lang>/', saved.file === 'm.mp3' && readFileSync(join(audioDir, 'es', 'm.mp3')).subarray(0, 4).toString() === 'FAKE');
 check('save: registers the clip in the manifest and stamps it', manifest().clips.es.m === 'm.mp3' && !!manifest().generated);
+const rev1 = manifest().rev && manifest().rev.es && manifest().rev.es.m;
+check('save: gives the clip a revision so installed devices fetch the new file', typeof rev1 === 'number', String(rev1));
+saveClip({ audioDir, lang: 'es', key: 'm', input: big, type: 'audio/webm', convert: fakeMp3 });
+check('save: re-saving the same clip always bumps its revision', manifest().rev.es.m > rev1);
+const revTest = { rev: {} };
+bumpRev(revTest, 'ca', 'ny'); const rBefore = revTest.rev.ca.ny; bumpRev(revTest, 'ca', 'ny');
+check('bumpRev: strictly increasing even within the same millisecond, per language and key', revTest.rev.ca.ny > rBefore && !revTest.rev.es);
 check('save: the list now reports the clip as recorded', recordList({ lang: 'es', audioDir }).find((c) => c.key === 'm').has === true);
 saveClip({ audioDir, lang: 'ca', key: 'ny', input: big, type: 'audio/mp4', convert: fakeMp3 });
 check('save: keeps earlier manifest entries and handles other languages and digraphs', manifest().clips.es.m === 'm.mp3' && manifest().clips.ca.ny === 'ny.mp3');

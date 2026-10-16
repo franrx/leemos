@@ -422,5 +422,15 @@ check('recorder: an analyser without sample data never rejects a recording as si
 a = await boot({ mic: { deny: true } }); a.$('recOpen').click(); a.$('recBtn').click(); await sleep(30);
 check('recorder: a refused microphone still shows the permission message', /No pude usar el micrófono/.test(a.$('recStatus').textContent), a.$('recStatus').textContent);
 
+// ---------- 14. clip revisions: a re-recorded or regenerated clip must be fetched again by installed devices ----------
+const revManifest = { generated: 'g2', clips: { es: { a: 'a.mp3', e: 'e.mp3', i: 'i.mp3', o: 'o.mp3', u: 'u.mp3', ma: 'ma.mp3' }, ca: {} }, rev: { es: { a: 11, e: 12, i: 13, o: 14, u: 15 } } };
+a = await bootLeo({ manifest: revManifest });
+a.$('prePlay').click();
+const l14 = a.$('preLetter').getAttribute('aria-label');
+check('revisions: a clip with a revision is played from a versioned URL', a.audioCalls.at(-1) === `audio/es/${l14}.mp3?v=${revManifest.rev.es[l14]}`, a.audioCalls.at(-1));
+a = await boot({ manifest: revManifest, swMock: { cached: false }, storage: { 'leemos-v1': { warmed: 'g2' } } });
+await sleep(30);
+check('revisions: warming the cache uses the same versioned URLs', a.w.__fetched.includes('audio/es/a.mp3?v=11') && a.w.__fetched.includes('audio/es/ma.mp3'), a.w.__fetched.filter((u) => u.startsWith('audio/es')).join(','));
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

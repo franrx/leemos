@@ -42,7 +42,8 @@ async function rangeResponse(req, res) {
 
 async function audio(req) {
   const cache = await caches.open(VERSION);
-  const key = new Request(new URL(req.url).pathname);
+  const u = new URL(req.url);
+  const key = new Request(u.pathname + u.search); // the ?v=<revision> is part of the key: a re-recorded clip is a new entry
   let res = await cache.match(key);
   if (!res) {
     const net = await fetch(new Request(req.url)); // full file, no Range header
