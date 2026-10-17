@@ -38,9 +38,11 @@ function showStatus(msg){
   const s=$('status');s.textContent=msg;s.style.display='block';
   clearTimeout(statusTimer);statusTimer=setTimeout(()=>s.style.display='none',4000);
 }
+// ?v=<revision> (as in src/app.js clipUrl): the service worker caches audio by URL, so without it a regenerated clip plays the old cached copy.
+const clipUrl=(lang,file)=>{const m=manifest.clips[lang]||{},k=Object.keys(m).find(x=>m[x]===file),r=((manifest.rev||{})[lang]||{})[k];return '../audio/'+lang+'/'+file+(r?'?v='+r:'')};
 const play=(lang,file)=>{
   if(audio)audio.pause();
-  audio=new Audio('../audio/'+lang+'/'+file);
+  audio=new Audio(clipUrl(lang,file));
   audio.onerror=()=>{const e=audio.error;showStatus('Error al cargar '+file+': '+(e?['','MEDIA_ERR_ABORTED','MEDIA_ERR_NETWORK','MEDIA_ERR_DECODE','MEDIA_ERR_SRC_NOT_SUPPORTED'][e.code]:'desconocido'))};
   return audio.play().catch(e=>showStatus('No se pudo reproducir '+file+': '+e.name+' '+e.message))
 };
@@ -64,7 +66,7 @@ function cmd(){
 $('playAll').onclick=async()=>{
   const lang=$('lang').value;
   for(const tr of [...$('rows').children]){
-    const f=tr.children[2].textContent;await new Promise(r=>{if(audio)audio.pause();audio=new Audio('../audio/'+lang+'/'+f);audio.onended=r;audio.onerror=r;audio.play().catch(r)});
+    const f=tr.children[2].textContent;await new Promise(r=>{if(audio)audio.pause();audio=new Audio(clipUrl(lang,f));audio.onended=r;audio.onerror=r;audio.play().catch(r)});
     await new Promise(r=>setTimeout(r,350));
   }
 };
