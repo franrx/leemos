@@ -42,5 +42,15 @@ for (const l of LANGS) {
 const inLevel = (l, idx, ws) => ws.every((w) => LV[l][idx].words.some((o) => o.w === w));
 check('moved words keep their text and sit in their new level', inLevel('ca', 3, ['ni-not', 'bo-let', 'co-et']) && inLevel('es', 4, ['luz', 'pez', 'bra-zo', 'cer-do']));
 
+// ---------- coverage: at least 12 distinct words for each of the 11 book letters ----------
+const BOOK = [...'mplntsfbdrc'];
+const COVER_LANGS = ['ca'];
+for (const l of COVER_LANGS) {
+  const words = LV[l].flatMap((L) => L.words.map((o) => o.w));
+  const counts = Object.fromEntries(BOOK.map((b) => [b, new Set(words.filter((w) => letterOf(w) === b)).size]));
+  const low = BOOK.filter((b) => counts[b] < 12);
+  check(`[${l}] at least 12 distinct words for each book letter`, low.length === 0, low.map((b) => `${b}=${counts[b]}`).join(' '));
+}
+
 console.log(failures ? `\n${failures} levels test(s) FAILED` : '\nAll levels tests passed');
 process.exit(failures ? 1 : 0);
