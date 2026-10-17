@@ -382,10 +382,13 @@ const worldNow=()=>S.world==='auto'?curWorld:Math.min(S.world,WORLDS.length-1);
 function newWorld(){if(S.world==='auto')curWorld=(curWorld+1)%WORLDS.length}
 function renderWorlds(){
   const g=$('worldGrid');g.innerHTML='';
+  const have=w=>Math.min(Math.max(0,Math.floor(Number(S.stk[w.id]))||0),w.stk.length);
   const mk=(val,icon,label,w)=>{
     const b=document.createElement('button');b.className='wbtn';b.setAttribute('aria-pressed',S.world===val);
     if(w)b.style.background='linear-gradient(165deg,color-mix(in srgb,'+w.a+' 55%,var(--panel)),color-mix(in srgb,'+w.b+' 40%,var(--panel)))';
-    b.innerHTML='<span>'+icon+'</span>'+label;
+    const n=w?have(w):stkTotal(),of=w?w.stk.length:WORLDS.reduce((s,x)=>s+x.stk.length,0);
+    b.innerHTML='<span>'+icon+'</span>'+label+'<small class="wk">'+n+'/'+of+(n===of?' ✓':'')+'</small>';
+    b.setAttribute('aria-label',label+', '+t('worldProg',{n:n,t:of}));
     b.onclick=()=>{S.world=val;save();renderWorlds();applyWorld();$('worlds').hidden=true};
     g.appendChild(b);
   };
@@ -755,17 +758,25 @@ function renderGoal(n){
 function renderAlbum(){
   $('albumCount').textContent=S.stickers;
   const g=$('stickerGrid');g.innerHTML='';
-  STICKERS.forEach((e,i)=>{
-    const d=document.createElement('div');
-    d.className='sticker'+(i<S.stickers?'':' locked');
-    d.textContent=e;
-    d.setAttribute('aria-label',i<S.stickers?t('albumGot',{e:e}):t('albumLocked'));
-    g.appendChild(d);
+  let all=0;
+  WORLDS.forEach(w=>{
+    const own=Math.min(Math.max(0,Math.floor(Number(S.stk[w.id]))||0),w.stk.length);all+=w.stk.length;
+    const h=document.createElement('h3');h.className='sset-h';h.textContent=w.icon+' '+wn(w)+' '+own+'/'+w.stk.length;g.appendChild(h);
+    const row=document.createElement('div');row.className='sset';
+    w.stk.forEach((e,i)=>{
+      const d=document.createElement('div');
+      d.className='sticker'+(i<own?'':' locked');
+      d.textContent=e;
+      d.setAttribute('aria-label',i<own?t('albumGot',{e:e}):t('albumLocked'));
+      row.appendChild(d);
+    });
+    g.appendChild(row);
   });
-  $('albumInfo').textContent=t('albumInfo',{s:S.stickers,t:STICKERS.length,x:S.total});
+  $('albumInfo').textContent=t('albumInfo',{s:S.stickers,t:all,x:S.total});
 }
 function showReward(e){
   $('rewardEmoji').textContent=e;
+  const rf=$('rewardFrom');rf.hidden=!rewardFrom;rf.textContent=rewardFrom?t('rewardFrom',{w:rewardFrom}):'';
   $('rewardTitle').textContent=t('rewardTitle',{n:nm()});
   $('reward').hidden=false;
   confetti();sfx.win();flash();poke('dance',1600);

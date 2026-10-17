@@ -113,7 +113,12 @@ h1{margin:0;font-size:1.5rem;letter-spacing:.01em}
 .sheet h2{margin:0 0 4px}
 .sheet.center{text-align:center}
 .big{font-size:120px;line-height:1.1;animation:pop .6s cubic-bezier(.3,1.6,.5,1)}
-.stickers{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}
+.stickers{margin:14px 0}
+.sset{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin:4px 0 14px}
+.sset .sticker{font-size:26px;border-radius:12px}
+.sset-h{margin:10px 0 0;font-size:1rem}
+#album .sheet{max-height:90vh;overflow:auto}
+.wbtn .wk{display:block;font-size:.75rem;font-weight:700;opacity:.8}
 .sticker{aspect-ratio:1;border-radius:18px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:42px}
 .worlds{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0}
 .wbtn{border:2px solid var(--line);border-radius:18px;background:var(--bg);padding:10px 4px;font-weight:700;font-size:.9rem;text-align:center;line-height:1.2}

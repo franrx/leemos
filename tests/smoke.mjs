@@ -1235,5 +1235,32 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('world stickers: per-world stickers from another device arrive without a reload', st(app).stickers === 2 && app.$('albumCount').textContent === '2', app.$('albumCount').textContent);
 }
 
+// ---------- 34. sticker sets per world: what she sees ----------
+{
+  const own = (stk, n) => ({ 'leemos-v1': { name: 'Elsa', world: 0, sessionLen: 5, stk, stickers: n } });
+  let x = await boot({ storage: own({ bosque: 2 }, 2) });
+  x.$('worldBtn').click();
+  const btns = [...x.d.querySelectorAll('#worldGrid .wbtn')];
+  check('world sets: each world tile shows its progress and Sorpresa the total', btns.length === 17 && /2\/6/.test(btns[1].textContent) && /0\/6/.test(btns[2].textContent) && /2\/96/.test(btns[0].textContent), btns.slice(0, 3).map((b) => b.textContent).join(' | '));
+  check('world sets: every tile stays selectable (nothing is locked)', btns.every((b) => !b.disabled));
+  x = await boot({ storage: own({ bosque: 6 }, 6) });
+  x.$('worldBtn').click();
+  check('world sets: a complete set is marked with a tick', /6\/6 ✓/.test(x.d.querySelectorAll('#worldGrid .wbtn')[1].textContent));
+  x = await boot({ storage: own({ bosque: 2, mar: 1 }, 3) });
+  x.$('albumBtn').click();
+  const sets = x.d.querySelectorAll('#stickerGrid .sset');
+  check('album: grouped by world, 6 slots each, owned ones are not dimmed', sets.length === 16 && x.d.querySelectorAll('#stickerGrid .sticker').length === 96 && x.d.querySelectorAll('#stickerGrid .sticker:not(.locked)').length === 3);
+  check('album: each group has a heading with its world and count', /Bosque.*2\/6/.test(x.d.querySelectorAll('#stickerGrid .sset-h')[0].textContent) && /3 de 96/.test(x.$('albumInfo').textContent), x.$('albumInfo').textContent);
+  x = await boot({ storage: own({ bosque: 6 }, 6) });
+  await playSession(x, 5);
+  check('reward: when the sticker comes from another world, the screen says which', !x.$('rewardFrom').hidden && /Playa/.test(x.$('rewardFrom').textContent), x.$('rewardFrom').textContent);
+  x = await boot({ storage: own({}, 0) });
+  await playSession(x, 5);
+  check('reward: a sticker from the world being played shows no origin line', x.$('rewardFrom').hidden);
+  x = await boot({ lang: 'ca-ES', storage: own({ bosque: 6 }, 6) });
+  await playSession(x, 5);
+  check('reward: the origin line is in Catalan too', /Platja/.test(x.$('rewardFrom').textContent), x.$('rewardFrom').textContent);
+}
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
