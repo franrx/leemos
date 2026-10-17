@@ -64,7 +64,7 @@ const KEY=keyFor(PROFILE.id);
 const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||{}}catch(e){return {}}};
 const save=()=>{
   const fp=fpOf();
-  if(fp!==lastFp){lastFp=fp;S.modAt=Date.now();onProgressChange()}
+  if(fp!==lastFp){lastFp=fp;S.modAt=Math.max(Date.now(),(S.modAt||0)+1);onProgressChange()} // never older than a stamp that came from a device with a faster clock
   try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
 };
 const S=Object.assign({stats:{},level:0,mode:'syl',upper:true,rate:.75,theme:'',name:PROFILE.name,total:0,progress:0,stickers:0,sound:true,voiceURI:'',voiceURIs:{es:'',ca:''},world:'auto',lang:((navigator.language||'').toLowerCase().indexOf('ca')===0?'ca':'es'),sessionLen:PROFILE.kind==='pre'?5:10,pre:{es:0,ca:0},resets:{es:0,ca:0},modAt:0},load());
@@ -434,35 +434,47 @@ const stateOf=id=>{
   try{return JSON.parse(localStorage.getItem(keyFor(id)))||{}}catch(e){return {}}
 };
 // Write merged data into a profile (the active one lives in S; the others only in localStorage).
+// Returns the merged data. The child may have answered while the request was in flight, so the server's data is merged
+// into the CURRENT local state (never copied over it): a sync can only add progress, never take it away.
 function storeState(id,data){
+  const cur=id===PROFILE.id?S:stateOf(id);
+  const merged=mergeMod.mergeData(mergeMod.pickSynced(cur),data);
+  mergeMod.applySynced(cur,merged);
   if(id===PROFILE.id){
-    mergeMod.applySynced(S,data);
     if(S.level>=LEVELS.length)S.level=0;
     lastFp=fpOf(); // data that came from the server is not a local change: no modAt stamp, no new sync
     save();renderLevels();renderHard();updateHello();
   }else{
-    const cur=stateOf(id);mergeMod.applySynced(cur,data);
     try{localStorage.setItem(keyFor(id),JSON.stringify(cur))}catch(e){}
   }
+  return merged;
 }
 function schedSync(){if(!sync)return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncAll(),5000)}
 onProgressChange=schedSync;
 async function syncAll(){
   if(syncBusy||!sync)return;
-  let ok=false;
-  try{ok=!!(await sync.session())}catch(e){renderAcct();return}
-  if(!ok)return;
-  syncBusy=true;syncState='syncing';renderAcct();
+  syncBusy=true; // before the first await: two triggers at once (visibilitychange + pagehide, a double tap) must run ONE sync
   try{
+    let s=null;
+    try{s=await sync.session()}catch(e){renderAcct();return}
+    if(!s)return;
+    let last=null;try{last=localStorage.getItem(AUTH_USER_KEY)}catch(e){}
+    if(last&&s.user&&s.user.id&&last!==s.user.id)return; // a session of another account than the one this device was linked to: never send these profiles to it
+    syncState='syncing';renderAcct();
+    const rank=k=>k==='auth'?3:k==='offline'?1:2;
+    let worst=null,again=false;
     for(const p of PROFILES.list){
       if(!p.rid)continue;
-      const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:mergeMod.pickSynced(stateOf(p.id))});
-      storeState(p.id,r.data);
+      try{
+        const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:mergeMod.pickSynced(stateOf(p.id))});
+        const merged=storeState(p.id,r.data);
+        if(!mergeMod.sameData(merged,r.data))again=true; // the child progressed meanwhile: push that too
+      }catch(e){const k=e&&e.kind||'error';if(!worst||rank(k)>rank(worst))worst=k} // one profile failing must not stop the others
     }
-    syncState='idle';
-    try{localStorage.setItem(SYNC_AT_KEY,String(Date.now()))}catch(e){}
-  }catch(e){syncState=e&&e.kind==='offline'?'offline':'error';if(e&&e.kind==='auth')acctMsg('acctExpired')}
-  finally{syncBusy=false;renderAcct()}
+    if(worst){syncState=worst==='offline'?'offline':'error';if(worst==='auth')acctMsg('acctExpired')}
+    else{syncState='idle';try{localStorage.setItem(SYNC_AT_KEY,String(Date.now()))}catch(e){}}
+    if(again)schedSync();
+  }finally{syncBusy=false;renderAcct()}
 }
 function acctMsg(key,vars){$('acctMsg').textContent=key?t(key,vars):''}
 function renderAcct(){
@@ -535,7 +547,12 @@ async function afterSignIn(user){
     saveProfiles();
     try{localStorage.setItem(AUTH_USER_KEY,user.id)}catch(e){}
   }catch(e){
-    PROFILES.list.splice(0,PROFILES.list.length,...JSON.parse(snapshot)); // cancelled or failed half way: nothing stays half-linked
+    // cancelled or failed half way: nothing stays linked and the device is signed out again. The list is restored in place,
+    // so PROFILE (the active entry) is still one of its objects and renaming the child keeps persisting.
+    const keep=JSON.parse(snapshot);
+    for(let i=PROFILES.list.length-1;i>=0;i--)if(!keep.some(k=>k.id===PROFILES.list[i].id))PROFILES.list.splice(i,1);
+    PROFILES.list.forEach(p=>{const k=keep.find(x=>x.id===p.id);delete p.rid;if(k&&k.rid)p.rid=k.rid});
+    sync.signOut();syncState='idle';
     $('link').hidden=true;
     acctMsg(e&&e.kind==='offline'?'acctNetwork':e&&e.message==='cancelled'?'':'acctError');
     renderAcct();

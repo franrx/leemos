@@ -753,5 +753,90 @@ a = await boot({ supa, syncConfig: CFG, storage: { 'leemos-profiles': { active: 
 await sleep(60);
 check('triggers: a signed-out app makes no request to Supabase at start', supa.log.length === before && a.errors.length === 0, supa.log.slice(before).join(' | '));
 
+// ---------- 26. review fixes: no lost progress during a sync, one sync at a time, failed linking, per-profile errors, monotonic modAt ----------
+const signedAuth = async (srv, email = 'mama@example.com') => {
+  await srv.fetch('https://x/auth/v1/otp', { method: 'POST', body: JSON.stringify({ email }) });
+  const s = await (await srv.fetch('https://x/auth/v1/verify', { method: 'POST', body: JSON.stringify({ email, token: '123456', type: 'email' }) })).json();
+  return { auth: { access_token: s.access_token, refresh_token: s.refresh_token, expires_at: Date.now() + 3600 * 1000, user: s.user }, uid: s.user.id };
+};
+const PROF_A = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }] } };
+
+// 26a (critical): the child answers while a sync is in flight: the answer must survive the sync
+supa = createFakeSupabase();
+let sa = await signedAuth(supa);
+let release; const gate = new Promise((r) => { release = r; });
+const slow = { ...supa, fetch: async (u, o) => { if (String(u).includes('/rest/v1/')) await gate; return supa.fetch(u, o); } };
+a = await boot({ supa: slow, syncConfig: CFG, storage: { 'leemos-auth': sa.auth, 'leemos-auth-user': sa.uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', total: 2, stats: { 's:ma': { ok: 1, fail: 0 } }, modAt: 10 } } });
+await sleep(60); // the start-up sync is now waiting on its first request
+a.$('joinBtn').click(); a.$('okBtn').click();
+const mid = JSON.parse(a.w.localStorage.getItem('leemos-v1'));
+release();
+await until(() => supa.rows.has(RID_A), 3000);
+await sleep(80);
+const endSt = JSON.parse(a.w.localStorage.getItem('leemos-v1'));
+check('review C1: an answer given while a sync is running is not lost', mid.total === 3 && endSt.total === 3, `${mid.total} -> ${endSt.total}`);
+const answered = Object.values(endSt.stats).reduce((n, s) => n + s.ok + s.fail, 0);
+check('review C1: and its per-item counters survive too', answered === 2, String(answered));
+
+// 26b (important): two triggers at once run one sync, and the refresh token is used once
+supa = createFakeSupabase();
+sa = await signedAuth(supa);
+a = await boot({ supa, syncConfig: CFG, storage: { 'leemos-auth': sa.auth, 'leemos-auth-user': sa.uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', total: 2, modAt: 10 } } });
+await until(() => supa.rows.has(RID_A), 3000);
+await sleep(50);
+const nearExpiry = JSON.parse(a.w.localStorage.getItem('leemos-auth')); nearExpiry.expires_at = Date.now() + 20000;
+a.w.localStorage.setItem('leemos-auth', JSON.stringify(nearExpiry));
+const refreshes0 = supa.log.filter((l) => l.includes('grant_type=refresh_token')).length;
+Object.defineProperty(a.d, 'hidden', { value: true, configurable: true });
+a.d.dispatchEvent(new a.w.Event('visibilitychange'));
+a.w.dispatchEvent(new a.w.Event('pagehide'));
+await sleep(150);
+check('review I1: visibilitychange and pagehide together refresh the session once and stay signed in', supa.log.filter((l) => l.includes('grant_type=refresh_token')).length === refreshes0 + 1 && a.w.localStorage.getItem('leemos-auth') !== null, supa.log.slice(-4).join(' | '));
+
+// 26c (important): cancelling or failing the linking leaves the device signed out, with the profile list intact and usable
+supa = await withAccount([[RID_A, 'Elsa', 'reader', dat({ total: 1, name: 'Elsa' })]]);
+a = await boot({ supa, syncConfig: CFG, storage: LINK_PROFILES });
+await signInUi(a, 'mama@example.com');
+await until(() => !a.$('link').hidden);
+a.$('linkCancel').click();
+await sleep(60);
+check('review I2: cancelling the linking signs the device out (no half-signed-in state)', a.w.localStorage.getItem('leemos-auth') === null && !a.$('acctOut').hidden && a.$('acctIn').hidden);
+a.$('nm').value = 'Elsita'; a.$('nm').dispatchEvent(new a.w.Event('input'));
+check('review I2: after a cancelled linking, renaming the child still reaches the saved profile list', profList(a).find((p) => p.id === 'elsa').name === 'Elsita', JSON.stringify(profList(a)));
+
+supa = await withAccount([[RID_A, 'Elsa', 'reader', dat({ total: 1, name: 'Elsa' })]]);
+let restDown = false;
+const flaky = { ...supa, fetch: async (u, o) => { if (restDown && String(u).includes('/rest/v1/')) throw new TypeError('fetch failed'); return supa.fetch(u, o); } };
+a = await boot({ supa: flaky, syncConfig: CFG, storage: LINK_PROFILES });
+a.$('parents').open = true; a.$('parents').dispatchEvent(new a.w.Event('toggle'));
+await until(() => !a.$('acct').hidden);
+a.$('acctEmail').value = 'mama@example.com'; a.$('acctConsent').checked = true; a.$('acctSend').click();
+await until(() => !a.$('acctCodeRow').hidden);
+restDown = true; // the code is accepted, then the data connection drops
+a.$('acctCode').value = '123456'; a.$('acctVerify').click();
+await sleep(120);
+check('review I2: a network failure during the linking signs out and leaves every profile unlinked', a.w.localStorage.getItem('leemos-auth') === null && profList(a).every((p) => !p.rid) && /conexi/i.test(a.$('acctMsg').textContent), a.$('acctMsg').textContent);
+
+// 26d (important): a leftover session of another account never syncs this device's profiles
+supa = createFakeSupabase();
+sa = await signedAuth(supa, 'otra@example.com');
+a = await boot({ supa, syncConfig: CFG, storage: { 'leemos-auth': sa.auth, 'leemos-auth-user': 'user-of-account-A', ...PROF_A } });
+await sleep(80);
+check("review I2: a session of a different account than the one that linked this device sends no data requests", !supa.log.some((l) => l.includes('/rest/v1/')), supa.log.join(' | '));
+
+// 26e (important): one profile that cannot sync does not stop the others
+supa = createFakeSupabase();
+sa = await signedAuth(supa);
+const picky = { ...supa, fetch: async (u, o = {}) => { if ((o.method || 'GET') === 'POST' && o.body && o.body.includes(RID_A)) return { ok: false, status: 400, json: async () => ({ message: 'rejected' }) }; return supa.fetch(u, o); } };
+a = await boot({ supa: picky, syncConfig: CFG, storage: { 'leemos-auth': sa.auth, 'leemos-auth-user': sa.uid, 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'leo', name: 'Leo', kind: 'pre', rid: RID_B }] } } });
+await until(() => supa.rows.has(RID_B), 3000);
+check('review I3: a profile the server rejects does not block the next one', supa.rows.has(RID_B) && !supa.rows.has(RID_A));
+
+// 26f (important): the progress stamp never goes backwards, even if a synced stamp came from a faster clock
+const future = Date.now() + 3600 * 1000;
+a = await boot({ storage: { 'leemos-v1': { name: 'Elsa', total: 1, modAt: future } } });
+a.$('joinBtn').click(); a.$('okBtn').click();
+check('review I4: modAt is always newer than the stamp already stored', JSON.parse(a.w.localStorage.getItem('leemos-v1')).modAt > future);
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
