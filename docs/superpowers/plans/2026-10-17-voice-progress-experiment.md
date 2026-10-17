@@ -1,0 +1,72 @@
+# Voice-progress experiment (spike plan)
+
+> **Status:** a spike. Its output is an **answer**, not a feature. The recording page and the analysis script are small tools kept for repeating the test; nothing here changes the app. Do not wire anything into `src/app.js` unless the decision rule at the end says so, and then only through a new spec.
+
+## The question
+
+Can recordings of Elsa reading, compared with the reference clip, tell us something **true** about her progress? Three candidate signals, from cheapest to most ambitious:
+
+| Signal | What it measures | Needs |
+|---|---|---|
+| **Timing** | seconds from the syllable appearing to her first sound, and how long she speaks | loudness only |
+| **Acoustic similarity** | MFCC + dynamic time warping distance between her clip and the app's reference clip | `ffmpeg`, plain Node |
+| **Speech recognition** | does Whisper transcribe what was shown | the `whisper` CLI (already installed; models tiny/base/small cached) |
+
+**Ground truth:** the parent's ✅ / 🔁 on each reading (that is already how the app works), plus deliberately wrong readings (see protocol).
+
+## Decision rule (written before looking at any data)
+
+- **Per-item correctness** (could replace or back up the parent's tap): a signal qualifies only if AUC ≥ **0.85** with the lower end of its 95% bootstrap interval ≥ **0.75**, on **at least 15 natural 🔁 and 40 ✅ readings** of Elsa. If none does, we do **not** build automatic scoring.
+- **Progress trend** (the realistic win): timing qualifies if, for items read more than once, latency test-retest correlation is ≥ **0.6**, and mean latency is clearly lower for mastered items than for items she still fails (difference larger than its bootstrap interval). If yes, the next step is a small spec for storing two numbers per exercise (latency, duration), never audio.
+- **Positive control first:** on **adult** readings (correct vs deliberately wrong) at least one similarity signal must reach AUC ≥ **0.90**. If it does not, the method itself is broken, and the Elsa sessions are not worth doing.
+- Possible outcomes: *drop it*, *timing only*, *timing + something else*. Say which in the report, with the numbers.
+
+## Honest limits (to restate in the report)
+
+- Labels are a parent's quick judgment, so they are noisy. One child, one microphone, one room. Results do not transfer to other children, other dialects (Mallorca) or other devices.
+- Natural mistakes are rare, so negatives come mostly from **on-purpose wrong readings**, which are easier to detect than real confusions. A good score on them overstates real performance; say so.
+- Her audio is a child's voice: it stays on this laptop in `lab/` (gitignored), is never synced or uploaded, and is deleted when the experiment is closed.
+
+## Protocol
+
+1. **Adult control (Fran, about 10 min):** 30 syllables read correctly and 30 read wrong on purpose, same lists, Spanish. Run the analysis; check the positive control.
+2. **Elsa, two sessions of about 5 min on different days:** about 40 readings each, mixed levels, **including items above her level** so natural errors appear. The parent taps ✅ / 🔁 as usual. At the end, a short "say it wrong on purpose" game gives about 20 labelled negatives. Repeat a few items across both sessions for the test-retest check.
+3. Analyze, write the report, decide.
+
+## Tasks
+
+### Task 1: a local-only route that stores a reading
+
+**Files:** create `scripts/lib/labapi.mjs`; modify `scripts/dev-server.mjs` (mount it the same way `clipapi` is mounted); create `tests/lab.mjs`; add to the `npm test` script; add `lab/` to `.gitignore`.
+
+- `POST /__lab?session=<id>&n=<int>` (binary body, max 5 MB) writes `lab/<session>/<n>.webm`; `POST /__lab-label?session=<id>&n=<int>` (JSON body) appends one line to `lab/<session>/labels.jsonl`; `DELETE /__lab?session=<id>` removes that session's folder. Reuse `isLocalRequest` (loopback socket, `Host` localhost, matching `Origin`).
+- `session` must match `/^[a-z0-9-]{3,40}$/`, `n` an integer 0–9999; anything else is a 400. No path is ever built from user text.
+- [ ] Write `tests/lab.mjs` first (fake request/response like `tests/record.mjs`): a local request stores the file and the line; a non-loopback socket, a foreign `Host` and a foreign `Origin` get 403; `session=../x`, `n=-1`, `n=abc` and an oversized body are rejected; delete removes only that session; nothing is written outside `lab/`. Watch it fail, implement, watch it pass, run `npm test`, commit.
+
+### Task 2: the recording page
+
+**Files:** create `tools/lab.html`, `tools/lab.js` (reuse the microphone and level-meter code of `tools/record.js`; do not copy `src/app.js`).
+
+- URL parameters: `lang=es|ca`, `level=1..5`, `n=40`, `who=elsa|adult`, `kind=read|wrong`.
+- Per item: show the text in big tiles; **start recording at the instant it is shown** (so the onset inside the clip is her latency); a large "Listo" button stops it; the adult then taps ✅ or 🔁 (for `kind=wrong` the verdict is set to 🔁 automatically and the screen says "di la sílaba mal a propósito"). Upload the audio, then the label `{session, n, key, text, lang, who, kind, verdict, shownAtIso}`. Items come from `src/data/levels.<lang>.json` using the same keys as the app (`s:ma`, `w:casa`), some repeated.
+- Show the live level bar and refuse to save a silent recording (the same check as `SILENT_PEAK` in the app). A visible "Grabando" indicator, and a "Borrar todo" button that calls `DELETE /__lab?session=<id>`.
+- [ ] Manual check list (no jsdom test for throwaway UI): opens at `http://localhost:5173/tools/lab.html`, records with the real microphone, files and labels appear under `lab/`, silent recordings are refused, delete works. Commit.
+
+### Task 3: the analysis script
+
+**Files:** create `scripts/lab-analyze.mjs` and `scripts/lib/labdsp.mjs` (pure functions); create `tests/labdsp.mjs`; add it to `npm test`.
+
+- `labdsp.mjs`: `frames(pcm, rate, ms)`, `vad(pcm, rate) → {onsetMs, offsetMs, peakDb, noiseDb}` (10 ms frames, noise floor = 10th-percentile energy, speech = more than 8 dB above it for at least 60 ms), `mfcc(pcm, rate)` (25 ms / 10 ms, 26 mel filters, 13 coefficients, per-clip mean/variance normalisation), `dtw(a, b)` (distance divided by path length), `auc(scores, labels)` (rank-based), `bootstrapCI(fn, data, 2000)`, `spearman`.
+- [ ] Write `tests/labdsp.mjs` first with synthetic signals generated in Node: a 400 ms tone burst starting at a known time is detected within ±20 ms; pure silence and constant noise give no onset; `dtw` of a signal with itself is about 0 and with a different-frequency signal is clearly larger; `auc` returns 1 for perfectly separated, 0.5 for identical scores and 0 for inverted; `bootstrapCI` brackets the known AUC. Fail, implement, pass, commit.
+- `lab-analyze.mjs <session...>`: decode each file with `ffmpeg -ar 16000 -ac 1 -f f32le -`; decode the reference clip (`audio/<lang>/…`, resolved through `audio/manifest.json`); compute timing, similarity, and run `whisper <files> --model small --language <lang> --output_format json` once per batch (also `base` for comparison); write `lab/report.md` and `lab/readings.csv` with: n per class, AUC with 95% interval for each signal, the confusion table of Whisper (exact match and edit distance ≤ 1 after lowercasing and removing accents), latency by verdict, test-retest for repeated items, and the verdict of the decision rule above, line by line.
+- [ ] Run it on a recording of Fran's voice before the real sessions; check by hand that three reported onsets match what you hear. Commit.
+
+### Task 4: run the adult control and decide whether to continue
+- [ ] Fran records the adult control (protocol 1). Run the analysis. If no similarity signal reaches AUC 0.90, stop and write the finding (the method is unsound); otherwise continue.
+
+### Task 5: the Elsa sessions and the answer
+- [ ] Two sessions with Elsa and the on-purpose-wrong game (protocol 2). Run the analysis, read `lab/report.md`, write the conclusion **using the decision rule as written**, with the numbers, the limits above and a recommendation (drop it, timing only, or what to specify next). Put the conclusion in `docs/experiments/2026-10-voice-progress.md` (numbers only, no audio, no transcripts of her speech). Delete `lab/` or move it somewhere you choose.
+
+## What would change the plan
+
+If positive control fails, we stop after Task 4. If Elsa produces fewer than 15 natural 🔁, we say the per-item test is underpowered and judge timing only. If the microphone or room is too noisy for the loudness detector (noise floor within 15 dB of her speech), fix the setup before collecting more.
