@@ -6,7 +6,8 @@ import { readFileSync, existsSync } from 'node:fs';
 
 const env = { ...process.env };
 if (existsSync('.env')) for (const l of readFileSync('.env', 'utf8').split('\n')) { const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(l); if (m && !(m[1] in env)) env[m[1]] = m[2].replace(/^["']|["']$/g, ''); }
-const { SUPABASE_URL: url, SUPABASE_ANON_KEY: anon, SUPABASE_SERVICE_KEY: service } = env;
+const { SUPABASE_ANON_KEY: anon, SUPABASE_SERVICE_KEY: service } = env;
+const url = String(env.SUPABASE_URL || '').trim().replace(/\/+$/, '').replace(/\/(rest|auth)\/v1$/, '').replace(/\/+$/, ''); // project root, even if pasted with an API path
 if (!url || !anon || !service) { console.error('Faltan SUPABASE_URL, SUPABASE_ANON_KEY o SUPABASE_SERVICE_KEY en .env'); process.exit(2); }
 
 let failures = 0;
