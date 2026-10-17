@@ -12,6 +12,29 @@ const langOf = (k) => (k.indexOf('ca:') === 0 ? 'ca' : 'es');
 const pair = (o) => ({ es: num(isObj(o) ? o.es : 0), ca: num(isObj(o) ? o.ca : 0) });
 const lvl = (x) => Math.floor(num(x && x.level));
 const nm = (x) => (x && typeof x.name === 'string' ? x.name.trim().slice(0, 40) : '');
+// ---------- stickers per world (spec: 2026-10-17-world-stickers-design.md) ----------
+// The 24 stickers that existed before the per-world sets, in their old order, and the world each one moved to. merge.js cannot
+// read the data files, so tests/merge.mjs checks this list against stickers.json and worlds.json.
+export const LEGACY_WORLD = ['bosque', 'montana', 'castillo', 'mar', 'jardin', 'mar', 'ciudad', 'playa', 'bosque', 'granja', 'jardin', 'selva', 'nieve', 'jardin', 'selva', 'jardin', 'mar', 'bosque', 'selva', 'granja', 'playa', 'selva', 'nubes', 'espacio'];
+const WORLD_ID = /^[a-z]{2,20}$/;
+const CAP_STK = 24; // the app clamps to the real size of each set when it shows them
+// How many stickers of each world's set a saved state owns (the first n of the set). A state from before the sets, or from a
+// device that is not updated yet, has only the old counter: its stickers are the first ones of the old order.
+export function stkOf(d) {
+  const out = {};
+  if (d && isObj(d.stk)) {
+    for (const k of Object.keys(d.stk).slice(0, 32)) {
+      if (unsafe(k) || !WORLD_ID.test(k)) continue;
+      const n = Math.min(CAP_STK, num(d.stk[k]));
+      if (n) out[k] = n;
+    }
+    return out;
+  }
+  const n = Math.min(LEGACY_WORLD.length, num(d && d.stickers));
+  for (let i = 0; i < n; i++) out[LEGACY_WORLD[i]] = (out[LEGACY_WORLD[i]] || 0) + 1;
+  return out;
+}
+const stkSum = (o) => Object.values(o).reduce((s, n) => s + n, 0);
 // ---------- session in progress and preferences (spec: 2026-10-17-session-prefs-sync-design.md) ----------
 const PREF_OK = {
   mode: (v) => v === 'syl' || v === 'word',
@@ -71,10 +94,13 @@ export function mergeData(a, b) {
   // current position (level, name): the side changed last; ties by (level, name) so the argument order never matters
   const aWins = ta !== tb ? ta > tb : lvl(a) !== lvl(b) ? lvl(a) > lvl(b) : nm(a) >= nm(b);
   const w = aWins ? a : b;
+  const ka = stkOf(a), kb = stkOf(b), stk = {};
+  for (const id of new Set([...Object.keys(ka), ...Object.keys(kb)])) stk[id] = Math.max(ka[id] || 0, kb[id] || 0);
   return {
     stats,
     total: Math.max(num(a.total), num(b.total)),
-    stickers: Math.max(num(a.stickers), num(b.stickers)),
+    stk,
+    stickers: stkSum(stk),
     pre: { es: Math.max(pa.es, pb.es), ca: Math.max(pa.ca, pb.ca) },
     resets: { es: Math.max(ra.es, rb.es), ca: Math.max(ra.ca, rb.ca) },
     level: lvl(w),
@@ -96,6 +122,7 @@ export function applySynced(state, data) {
   const d = mergeData(data, {});
   state.stats = d.stats;
   state.total = d.total;
+  state.stk = d.stk;
   state.stickers = d.stickers;
   state.pre = d.pre;
   state.resets = d.resets;

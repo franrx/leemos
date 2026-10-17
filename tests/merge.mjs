@@ -1,5 +1,5 @@
 // Tests for the pure merge of a child's synced state (src/merge.js).
-import { mergeData, sameData, pickSynced, applySynced, PREF_KEYS } from '../src/merge.js';
+import { mergeData, sameData, pickSynced, applySynced, PREF_KEYS, stkOf, LEGACY_WORLD } from '../src/merge.js';
 
 let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
@@ -137,6 +137,39 @@ check('applySynced: the session, the prefs and the plain preference fields are s
 check('bounds: a timestamp beyond the largest JS date counts as invalid', same(mergeData({ session: sess(5, 1, 0, 9e15) }, {}).session, sess(0, 0, 0, 0)) && !('theme' in mergeData({ prefs: { theme: pf('dark', 9e15) } }, {}).prefs) && mergeData({ modAt: 9e15 }, {}).modAt === 0);
 check('bounds: the largest valid timestamp is still accepted', mergeData({ session: sess(1, 0, 0, 8.64e15) }, {}).session.at === 8.64e15);
 check('session: correct answers and stickers cannot exceed the answers done', same(mergeData({ session: sess(3, 1e6, 99, 7) }, {}).session, sess(3, 3, 3, 7)));
+
+// ---------- stickers per world (spec: 2026-10-17-world-stickers-design.md) ----------
+import { readFileSync } from 'node:fs';
+const WORLDS = JSON.parse(readFileSync(new URL('../src/data/worlds.json', import.meta.url), 'utf8'));
+const OLD_STK = JSON.parse(readFileSync(new URL('../src/data/stickers.json', import.meta.url), 'utf8'));
+const total = (o) => Object.values(o).reduce((a, b) => a + b, 0);
+check('stk: LEGACY_WORLD agrees with stickers.json and worlds.json', LEGACY_WORLD.length === 24 && OLD_STK.every((e, i) => WORLDS.find((w) => w.stk.includes(e)).id === LEGACY_WORLD[i]));
+check('stk: an empty or missing counter owns nothing', same(stkOf({}), {}) && same(stkOf({ stickers: 0 }), {}) && same(stkOf(null), {}));
+check('stk: 7 old stickers land in their worlds', same(stkOf({ stickers: 7 }), { bosque: 1, montana: 1, castillo: 1, mar: 2, jardin: 1, ciudad: 1 }));
+check('stk: all 24 old stickers are placed, none lost', total(stkOf({ stickers: 24 })) === 24 && stkOf({ stickers: 24 }).selva === 4 && stkOf({ stickers: 24 }).jardin === 4);
+check('stk: more than 24, negative, fractional, NaN, Infinity and strings are clamped to a valid count',
+  total(stkOf({ stickers: 99 })) === 24 && same(stkOf({ stickers: -3 }), {}) && same(stkOf({ stickers: NaN }), {}) && same(stkOf({ stickers: Infinity }), {}) && same(stkOf({ stickers: '5' }), {}) && total(stkOf({ stickers: 2.9 })) === 2);
+check('stk: when stk is present the old counter is ignored', same(stkOf({ stickers: 9, stk: { circo: 2 } }), { circo: 2 }));
+const hostile = JSON.parse('{"stk":{"circo":1e300,"BAD":2,"x":1,"__proto__":{"a":1},"constructor":3,"dino":-2,"mar":1.9,"musica":"x"}}');
+check('stk: hostile stk entries are dropped or capped', same(stkOf(hostile), { circo: 24, mar: 1 }), JSON.stringify(stkOf(hostile)));
+check('stk: an array or a string is not a stk (falls back to the counter)', same(stkOf({ stk: [1, 2], stickers: 1 }), { bosque: 1 }) && same(stkOf({ stk: 'x', stickers: 1 }), { bosque: 1 }));
+check('stk: at most 32 keys are read', Object.keys(stkOf({ stk: Object.fromEntries(Array.from({ length: 50 }, (_, i) => ['w' + String.fromCharCode(97 + (i % 26)) + String.fromCharCode(97 + Math.floor(i / 26)), 1])) })).length <= 32);
+const mkd = (stk, stickers) => ({ stats: {}, total: 0, stickers, stk, pre: { es: 0, ca: 0 }, resets: { es: 0, ca: 0 }, level: 0, name: 'Elsa', modAt: 1 });
+const mS = mergeData(mkd({ circo: 2, mar: 1 }, 3), mkd({ circo: 1, dino: 4 }, 5));
+check('stk: merge takes the maximum per world and the total is their sum', same(mS.stk, { circo: 2, mar: 1, dino: 4 }) && mS.stickers === 7, JSON.stringify([mS.stk, mS.stickers]));
+const mL = mergeData(mkd({ circo: 2 }, 2), { stats: {}, stickers: 3 }); // the other device is on the old version: only the counter
+check('stk: a device with only the old counter loses nothing and takes nothing away', same(mL.stk, { bosque: 1, montana: 1, castillo: 1, circo: 2 }) && mL.stickers === 5, JSON.stringify(mL.stk));
+check('stk: applySynced and pickSynced carry stk and keep stickers equal to its sum', (() => { const st = applySynced({ stats: {}, stickers: 0 }, mkd({ mar: 2, granja: 1 }, 99)); return same(st.stk, { mar: 2, granja: 1 }) && st.stickers === 3 && same(pickSynced(st).stk, { mar: 2, granja: 1 }); })());
+let kc = true, ka = true, ki = true, kmono = true;
+const genK = () => { const o = {}; ['bosque', 'mar', 'circo', 'dino'].forEach((w) => { if (rnd() < 0.6) o[w] = ri(7); }); return rnd() < 0.4 ? { stats: {}, stickers: ri(26) } : { stats: {}, stk: o }; };
+for (let i = 0; i < 300; i++) {
+  const x = genK(), y = genK(), z = genK();
+  if (!same(mergeData(x, y), mergeData(y, x))) kc = false;
+  if (!same(mergeData(mergeData(x, y), z), mergeData(x, mergeData(y, z)))) ka = false;
+  if (!same(mergeData(x, x), mergeData(x, {}))) ki = false;
+  if (mergeData(x, y).stickers < Math.max(total(stkOf(x)), total(stkOf(y)))) kmono = false;
+}
+check('property: stk merge is commutative, associative, idempotent and never loses stickers (300 random, old and new states mixed)', kc && ka && ki && kmono, JSON.stringify([kc, ka, ki, kmono]));
 
 console.log(failures ? `\n${failures} merge test(s) FAILED` : '\nAll merge tests passed');
 process.exit(failures ? 1 : 0);

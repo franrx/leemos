@@ -738,7 +738,7 @@ a = await boot({ supa, syncConfig: CFG, storage: { 'leemos-auth': authStored, 'l
 await until(() => supa.rows.has(RID_A), 3000);
 check('triggers: a signed-in app syncs at start', supa.rows.has(RID_A) && supa.rows.get(RID_A).data.total === 2);
 const row = supa.rows.get(RID_A); // another device moves ahead meanwhile
-row.data = { ...row.data, total: 40, stickers: 3, modAt: 99999999999999 }; row.version++;
+row.data = { ...row.data, stk: undefined, total: 40, stickers: 3, modAt: 99999999999999 }; row.version++; // another device on the old version: only the counter
 a.$('joinBtn').click(); a.$('okBtn').click();
 Object.defineProperty(a.d, 'hidden', { value: true, configurable: true });
 a.d.dispatchEvent(new a.w.Event('visibilitychange'));
@@ -959,7 +959,7 @@ const signedBoot = async (extra = {}) => {
 }
 {
   const { s, app } = await signedBoot({ syncEvery: 120 });
-  const r = s.rows.get(RID_A); r.data = { ...r.data, stickers: 3 }; r.version++;
+  const r = s.rows.get(RID_A); r.data = { ...r.data, stk: undefined, stickers: 3 }; r.version++; // a device on the old version pushes only the counter
   await until(() => JSON.parse(app.w.localStorage.getItem('leemos-v1')).stickers === 3, 3000);
   await sleep(40);
   check('pull: stickers earned on another device show in the counter without a reload', app.$('albumCount').textContent === '3', app.$('albumCount').textContent);
