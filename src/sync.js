@@ -58,7 +58,49 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
   }
   const userId = () => { const s = read(SESSION_KEY); return s && s.user && s.user.id ? s.user.id : null; };
 
-  // Task 4 adds the data API (listProfiles, syncProfile) here.
+  // ---------- data API (PostgREST) ----------
+  async function api(path, opts = {}) {
+    let s = await session();
+    if (!s) throw new SyncError('auth', 'not signed in');
+    const go = (tok) => raw('/rest/v1/' + path, { ...opts, headers: { ...headers(tok), Prefer: 'return=representation', ...(opts.headers || {}) } });
+    let r = await go(s.access_token);
+    if (r.status === 401) { s = await refresh(s); r = await go(s.access_token); } // the server rejected the token: renew once
+    if (r.status === 401) { signOut(); throw new SyncError('auth', 'not authorised', 401); }
+    return r;
+  }
+  const rows = async (r) => { try { const j = await r.json(); return Array.isArray(j) ? j : []; } catch (e) { return []; } };
+  const SELECT = 'select=id,name,kind,data,version';
 
-  return { requestCode, verifyCode, session, signOut, userId };
+  async function listProfiles() {
+    const r = await api(`child_profiles?${SELECT}&order=id`);
+    if (!r.ok) throw new SyncError('http', 'could not list profiles', r.status);
+    return rows(r);
+  }
+  async function getProfile(rid) {
+    const r = await api(`child_profiles?${SELECT}&id=eq.${encodeURIComponent(rid)}`);
+    if (!r.ok) throw new SyncError('http', 'could not read the profile', r.status);
+    return (await rows(r))[0] || null;
+  }
+
+  // Pull, merge, push one profile. `data` is the local synced snapshot. Returns the merged data and the server version.
+  async function syncProfile({ rid, name, kind, data }) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const row = await getProfile(rid);
+      if (!row) {
+        const c = await api('child_profiles', { method: 'POST', body: JSON.stringify({ id: rid, name, kind, data: mergeData(data, {}) }) });
+        if (c.status === 409) continue; // another device created it first: read it and merge
+        if (!c.ok) throw new SyncError('http', 'could not create the profile', c.status);
+        return { data: mergeData(data, {}), version: 1 };
+      }
+      const merged = mergeData(data, row.data);
+      if (sameData(merged, mergeData(row.data, {})) && row.name === name) return { data: merged, version: row.version };
+      const p = await api(`child_profiles?id=eq.${encodeURIComponent(rid)}&version=eq.${row.version}`, { method: 'PATCH', body: JSON.stringify({ name, data: merged, version: row.version + 1 }) });
+      if (!p.ok) throw new SyncError('http', 'could not save the profile', p.status);
+      if ((await rows(p)).length) return { data: merged, version: row.version + 1 };
+      // empty result: someone else wrote first, go again from the read
+    }
+    throw new SyncError('conflict', 'too many concurrent writes');
+  }
+
+  return { requestCode, verifyCode, session, signOut, userId, listProfiles, syncProfile };
 }

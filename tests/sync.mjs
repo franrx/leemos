@@ -58,7 +58,83 @@ const mk = (opts = {}) => {
   check('auth: a corrupted stored session counts as signed out', (await sync.session()) === null && sync.userId() === null);
 }
 
-// ---------- profile sync: Task 4 adds its tests here ----------
+// ---------- profile sync ----------
+const RID = '11111111-1111-4111-8111-111111111111';
+const data = (over = {}) => ({ stats: { 's:ma': { ok: 2, fail: 0 } }, total: 5, stickers: 1, pre: { es: 0, ca: 0 }, resets: { es: 0, ca: 0 }, level: 0, name: 'Elsa', modAt: 100, ...over });
+const signedIn = async () => { const x = mk(); await x.sync.requestCode('m@e.c'); await x.sync.verifyCode('m@e.c', '123456'); return x; };
+{
+  const { srv, sync } = await signedIn();
+  const r = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+  check('profiles: a profile that does not exist yet is created', srv.rows.has(RID) && r.version === 1 && r.data.total === 5, JSON.stringify(srv.log.slice(-2)));
+  const before = srv.log.length;
+  const again = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+  check('profiles: syncing unchanged data writes nothing', !srv.log.slice(before).some((l) => l.startsWith('PATCH') || l.startsWith('POST')) && again.version === 1);
+  const up = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ total: 9, modAt: 200 }) });
+  check('profiles: newer local data is pushed and the version goes up', srv.rows.get(RID).data.total === 9 && up.version === 2 && srv.rows.get(RID).version === 2);
+  const down = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ total: 1, stats: {}, modAt: 50 }) });
+  check('profiles: an older device receives the merged remote counters', down.data.total === 9 && down.data.stats['s:ma'].ok === 2);
+  const list = await sync.listProfiles();
+  check("profiles: listProfiles returns the account's rows", list.length === 1 && list[0].id === RID && list[0].name === 'Elsa');
+}
+{
+  // another device writes between our read and our write: version conflict, then a retry that keeps both sides' progress
+  const srv = createFakeSupabase(), storage = memoryStorage();
+  const sync = createSync({ url: URL_, anonKey: 'k', fetch: srv.fetch, storage });
+  await sync.requestCode('m@e.c'); await sync.verifyCode('m@e.c', '123456');
+  await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+  let injected = false;
+  const racing = createSync({
+    url: URL_, anonKey: 'k', storage,
+    fetch: async (u, o = {}) => {
+      if (!injected && (o.method || 'GET') === 'PATCH') { injected = true; const row = srv.rows.get(RID); row.version += 1; row.data = { ...row.data, total: 50, stats: { ...row.data.stats, 's:pa': { ok: 7, fail: 0 } } }; }
+      return srv.fetch(u, o);
+    },
+  });
+  const r = await racing.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ total: 6, modAt: 300, stats: { 's:ma': { ok: 4, fail: 1 } } }) });
+  const row = srv.rows.get(RID);
+  check("conflict: a write that lost the race is retried and keeps both devices' progress", injected && row.data.total === 50 && row.data.stats['s:pa'].ok === 7 && row.data.stats['s:ma'].ok === 4 && row.data.stats['s:ma'].fail === 1, JSON.stringify(row.data));
+  check('conflict: the final version moved past the one that won the race', row.version === 3 && r.version === 3, String(row.version));
+  let n = 0;
+  const hostile = createSync({ url: URL_, anonKey: 'k', storage, fetch: async (u, o = {}) => { if ((o.method || 'GET') === 'PATCH') { n++; srv.rows.get(RID).version += 1; } return srv.fetch(u, o); } });
+  const e = await rejects(hostile.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ total: 999, modAt: 999 }) }));
+  check('conflict: after 5 lost races it gives up with a "conflict" error instead of looping', e instanceof SyncError && e.kind === 'conflict' && n === 5, `${e && e.kind} ${n}`);
+}
+{
+  const { srv, sync } = await signedIn();
+  srv.setOffline(true);
+  const e = await rejects(sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() }));
+  check('offline: syncing without a connection is an "offline" error and creates nothing', e instanceof SyncError && e.kind === 'offline' && srv.rows.size === 0);
+  srv.setOffline(false);
+  await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+  check('offline: the next attempt works', srv.rows.has(RID));
+}
+{
+  const { srv, sync } = await signedIn();
+  srv.expireAccessTokens();
+  const r = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+  check('auth: an access token the server rejected is refreshed once and the request succeeds', srv.rows.has(RID) && r.version === 1 && srv.log.some((l) => l.includes('grant_type=refresh_token')), srv.log.join(' | '));
+}
+{
+  const { srv, sync } = await signedIn();
+  srv.expireAccessTokens(); srv.revokeRefreshTokens();
+  const e = await rejects(sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() }));
+  check('auth: when the session cannot be renewed the error is "auth"', e instanceof SyncError && e.kind === 'auth', e && e.kind);
+  const none = mk();
+  const e2 = await rejects(none.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() }));
+  check('auth: syncing while signed out is an "auth" error and sends nothing to the data API', e2 instanceof SyncError && e2.kind === 'auth' && !none.srv.log.length);
+}
+{
+  const { srv, sync } = await signedIn();
+  for (let i = 0; i < 8; i++) await sync.syncProfile({ rid: crypto.randomUUID(), name: 'P' + i, kind: 'pre', data: data() });
+  const e = await rejects(sync.syncProfile({ rid: crypto.randomUUID(), name: 'Nine', kind: 'pre', data: data() }));
+  check('limits: the ninth profile is refused with an "http" error', e instanceof SyncError && e.kind === 'http' && srv.rows.size === 8, e && e.kind);
+}
+{
+  const { srv, sync } = await signedIn();
+  srv.rows.set(RID, { id: RID, owner: srv.userByEmail('m@e.c').id, name: 'Elsa', kind: 'reader', data: { stats: [1, 2], total: 'lots' }, version: 4 });
+  const r = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+  check('remote data: a malformed remote row is merged as if empty and never crashes', r.data.total === 5 && r.version === 5);
+}
 
 console.log(failures ? `\n${failures} sync test(s) FAILED` : '\nAll sync tests passed');
 process.exit(failures ? 1 : 0);
