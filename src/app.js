@@ -467,17 +467,44 @@ const stateOf=id=>{
   try{return JSON.parse(localStorage.getItem(keyFor(id)))||{}}catch(e){return {}}
 };
 // Write merged data into a profile (the active one lives in S; the others only in localStorage).
+const IDLE_MS=30000; // a value changed on THIS device within the last 30 s is kept: nobody is interrupted while playing
+function applyMerged(m){
+  const before={lang:S.lang,mode:S.mode};
+  mergeMod.applySynced(S,m); // sets the progress fields, S.session, S.prefs and the plain preference fields (never the voice)
+  if(S.lang!==before.lang){LEVELS=LV[S.lang]||LV_ES;pendingEnd=false;resting=false}
+  if(S.level>=LEVELS.length)S.level=0;
+  // preferences, through the same functions the UI uses
+  applyTheme();applyCase();applySound();applyWorld();
+  $('rate').value=S.rate;$('sessionSel').value=String(S.sessionLen);
+  $('mSyl').setAttribute('aria-pressed',S.mode==='syl');$('mWord').setAttribute('aria-pressed',S.mode==='word');
+  // the session in progress: a finished or stale one starts a new session
+  const s=m.session;
+  if(s.at){
+    if(Date.now()-s.at<SESSION_TTL&&s.done<S.sessionLen){sDone=s.done;sOk=s.ok;sStk=s.stk}
+    else{sDone=sOk=sStk=0}
+  }
+  lastFp=fpOf();lastSessFp=sessFp();lastPref=prefSnap(); // data that came from the server is not a local change: no stamps, no new sync
+  save();renderLevels();renderHard();renderAlbum();updateHello();
+  if(S.lang!==before.lang)applyLang();else renderSession();
+  renderGoal();renderWorlds();
+  if(S.lang!==before.lang||S.mode!==before.mode)pre?pre.refresh():next(); // a different context needs a new exercise; otherwise the card on screen stays
+}
 // Returns the merged data. The child may have answered while the request was in flight, so the server's data is merged
 // into the CURRENT local state (never copied over it): a sync can only add progress, never take it away.
 function storeState(id,data){
-  const cur=id===PROFILE.id?S:stateOf(id);
-  const merged=mergeMod.mergeData(mergeMod.pickSynced(cur),data);
-  mergeMod.applySynced(cur,merged);
-  if(id===PROFILE.id){
-    if(S.level>=LEVELS.length)S.level=0;
-    lastFp=fpOf(); // data that came from the server is not a local change: no modAt stamp, no new sync
-    save();renderLevels();renderHard();renderAlbum();updateHello(); // renderAlbum: the sticker counter
+  const active=id===PROFILE.id,cur=active?S:stateOf(id);
+  const mine=mergeMod.pickSynced(cur);
+  const merged=mergeMod.mergeData(mine,data);
+  if(active){
+    const now=Date.now();
+    for(const k of PREF_KEYS){ // keep what was changed here a moment ago; renewing its stamp makes it win on the next push
+      const m=mine.prefs[k];
+      if(m&&now-m.at<IDLE_MS&&(!merged.prefs[k]||merged.prefs[k].at!==m.at))merged.prefs[k]={v:m.v,at:Math.max(now,(merged.prefs[k]?merged.prefs[k].at:0)+1)}; // the renewed stamp must beat the one it overrides
+    }
+    if(mine.session.at&&now-mine.session.at<IDLE_MS&&merged.session.at!==mine.session.at)merged.session={...mine.session,at:Math.max(now,merged.session.at+1)};
+    applyMerged(merged);
   }else{
+    mergeMod.applySynced(cur,merged);
     try{localStorage.setItem(keyFor(id),JSON.stringify(cur))}catch(e){}
   }
   return merged;

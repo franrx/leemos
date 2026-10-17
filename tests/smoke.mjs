@@ -994,5 +994,82 @@ a.$('endMore').click();
 await sleep(20);
 check('session: starting another session saves it as zero', JSON.parse(a.w.localStorage.getItem('leemos-v1')).session.done === 0);
 
+// ---------- 30. applying a pull: session and preferences from another device, idle rule, hostile values ----------
+const NOW = () => Date.now();
+const seed = async (extraData, localState = {}, bootExtra = {}) => {
+  const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);
+  s.rows.set(RID_A, { id: RID_A, owner: uid, name: 'Elsa', kind: 'reader', version: 1, data: dat({ total: 1, name: 'Elsa', modAt: 5, ...extraData }) });
+  const app = await boot({ supa: s, syncConfig: CFG, ...bootExtra, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', total: 1, modAt: 5, ...localState } } });
+  return { s, app };
+};
+const localState = (app) => JSON.parse(app.w.localStorage.getItem('leemos-v1'));
+const OLD = () => NOW() - 120000; // idle for two minutes
+
+// a: the session in progress arrives and shows
+{
+  const { s, app } = await seed({ session: { done: 4, ok: 3, stk: 0, at: NOW() - 1000 } }, { session: { done: 1, ok: 1, stk: 0, at: OLD() } });
+  await until(() => /4 de 10/.test(app.$('slabel').textContent), 3000);
+  check('pull a: the session in progress from another device shows "4 de 10"', /4 de 10/.test(app.$('slabel').textContent), app.$('slabel').textContent);
+  check('pull a: and it is saved locally as that session', localState(app).session.done === 4);
+}
+// b: a device being used keeps its own session and pushes it back
+{
+  const { s, app } = await seed({ session: { done: 6, ok: 6, stk: 0, at: NOW() + 5000 } }, { session: { done: 2, ok: 1, stk: 0, at: NOW() } });
+  await sleep(150);
+  check('pull b: a session changed on this device a moment ago is not overwritten', /2 de 10/.test(app.$('slabel').textContent), app.$('slabel').textContent);
+  await until(() => s.rows.get(RID_A).data.session.done === 2, 9000); // pushed back through the normal 5 s debounce
+  check('pull b: and it is pushed back, so the other device adopts it', s.rows.get(RID_A).data.session.done === 2, JSON.stringify(s.rows.get(RID_A).data.session));
+}
+// c: every preference arrives and is applied through the UI
+{
+  const t0 = NOW() - 1000;
+  const { s, app } = await seed({ prefs: { theme: { v: 'dark', at: t0 }, sound: { v: false, at: t0 }, mode: { v: 'word', at: t0 }, sessionLen: { v: 5, at: t0 }, upper: { v: false, at: t0 }, rate: { v: 0.6, at: t0 }, world: { v: 3, at: t0 }, lang: { v: 'ca', at: t0 } } });
+  await until(() => app.d.documentElement.lang === 'ca', 3000);
+  await sleep(60);
+  const st = localState(app);
+  check('pull c: theme, sound, mode, session length, capitals, speed and world are applied', app.d.documentElement.getAttribute('data-theme') === 'dark' && app.$('soundBtn').getAttribute('aria-pressed') === 'false' && app.$('mWord').getAttribute('aria-pressed') === 'true' && app.$('sessionSel').value === '5' && !app.d.body.classList.contains('upper') && app.$('rate').value === '0.6' && st.world === 3, JSON.stringify({ t: st.theme, s: st.sound, m: st.mode, l: st.sessionLen, u: st.upper, r: st.rate, w: st.world }));
+  check('pull c: the language switches the interface', app.d.documentElement.lang === 'ca' && app.$('langBtn').textContent === 'CA', app.$('langBtn').textContent);
+  check('pull c: the page shows the session length of the pulled preference', /de 5/.test(app.$('slabel').textContent), app.$('slabel').textContent);
+}
+// d: preferences are independent per key
+{
+  const { s, app } = await seed({ prefs: { sound: { v: false, at: NOW() - 1000 }, theme: { v: 'light', at: NOW() - 200000 } } }, { theme: 'dark', prefs: { theme: { v: 'dark', at: NOW() - 60000 } } });
+  await until(() => app.$('soundBtn').getAttribute('aria-pressed') === 'false', 3000);
+  check('pull d: the newer remote sound is applied while the newer local theme is kept', app.$('soundBtn').getAttribute('aria-pressed') === 'false' && app.d.documentElement.getAttribute('data-theme') === 'dark');
+}
+// e: a finished or stale remote session starts a new one
+{
+  const { app } = await seed({ session: { done: 10, ok: 9, stk: 1, at: NOW() - 1000 } }, { session: { done: 3, ok: 3, stk: 0, at: OLD() } });
+  await until(() => /0 de 10/.test(app.$('slabel').textContent), 3000);
+  check('pull e: a finished remote session applies as zero, not as "10 de 10"', /0 de 10/.test(app.$('slabel').textContent), app.$('slabel').textContent);
+  const { app: app2 } = await seed({ session: { done: 7, ok: 5, stk: 0, at: NOW() - 13 * 3600 * 1000 } }, { session: { done: 0, ok: 0, stk: 0, at: 0 } });
+  await sleep(150);
+  check('pull e: a remote session older than 12 hours is ignored', /0 de 10/.test(app2.$('slabel').textContent), app2.$('slabel').textContent);
+}
+// f: the voice never leaves the device
+{
+  const { s, app } = await seed({}, { voiceURIs: { es: 'my-private-voice', ca: '' }, voiceURI: 'my-private-voice', theme: 'dark', prefs: { theme: { v: 'dark', at: NOW() - 60000 } } });
+  await until(() => s.rows.get(RID_A).data.prefs && s.rows.get(RID_A).data.prefs.theme, 3000);
+  check('pull f: the voice is never uploaded', !JSON.stringify(s.rows.get(RID_A).data).includes('my-private-voice') && !('voiceURI' in s.rows.get(RID_A).data.prefs));
+}
+// g: a session or preference change never reverts the level
+{
+  const { s, app } = await seed({ level: 3, name: 'Elsa', modAt: NOW() - 1000 }, { level: 0, modAt: 10 });
+  await until(() => localState(app).level === 3, 3000);
+  app.$('themeBtn').click(); app.$('soundBtn').click();
+  await sleep(100);
+  app.w.dispatchEvent(new app.w.Event('online'));
+  await sleep(150);
+  check('pull g: the level from the other device survives local preference changes and the next sync', localState(app).level === 3 && s.rows.get(RID_A).data.level === 3, `${localState(app).level} ${s.rows.get(RID_A).data.level}`);
+}
+// h: hostile remote values are dropped
+{
+  const t0 = NOW() - 1000;
+  const { app } = await seed({ prefs: { theme: { v: 'purple', at: t0 }, mode: { v: 'x', at: t0 }, sessionLen: { v: 7, at: t0 }, rate: { v: 99, at: t0 }, lang: { v: 'fr', at: t0 } }, session: { done: -3, ok: 'a', stk: 1e300, at: t0 } });
+  await sleep(250);
+  const st = localState(app);
+  check('pull h: invalid remote preferences are never applied and nothing crashes', app.errors.length === 0 && (st.theme || '') !== 'purple' && st.mode !== 'x' && st.sessionLen !== 7 && st.rate !== 99 && st.lang !== 'fr', app.errors.join(' | '));
+}
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
