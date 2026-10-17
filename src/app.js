@@ -62,9 +62,11 @@ function addProfile(name,kind){
 const KEY=keyFor(PROFILE.id);
 const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||{}}catch(e){return {}}};
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
-const S=Object.assign({stats:{},level:0,mode:'syl',upper:false,rate:.75,theme:'',name:PROFILE.name,total:0,progress:0,stickers:0,sound:true,voiceURI:'',voiceURIs:{es:'',ca:''},world:'auto',lang:((navigator.language||'').toLowerCase().indexOf('ca')===0?'ca':'es'),sessionLen:PROFILE.kind==='pre'?5:10,pre:{es:0,ca:0}},load());
+const S=Object.assign({stats:{},level:0,mode:'syl',upper:true,rate:.75,theme:'',name:PROFILE.name,total:0,progress:0,stickers:0,sound:true,voiceURI:'',voiceURIs:{es:'',ca:''},world:'auto',lang:((navigator.language||'').toLowerCase().indexOf('ca')===0?'ca':'es'),sessionLen:PROFILE.kind==='pre'?5:10,pre:{es:0,ca:0}},load());
 if(!S.voiceURIs)S.voiceURIs={es:'',ca:''};
 if(!S.pre)S.pre={es:0,ca:0};
+// One-time switch to capitals (the school book is all capitals): readers only, once per profile; she can switch back with Aa.
+if(PROFILE.kind==='reader'&&!S.upperMigrated){S.upper=true;S.upperMigrated=true;save()}
 LEVELS=LV[S.lang]||LV_ES;
 let cur=null,last=null,phase='read',resetArmed=false;
 let pre=null;
