@@ -77,8 +77,21 @@ const save=()=>{
   try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
 };
 const S=Object.assign({stats:{},level:0,mode:'syl',upper:true,rate:.75,theme:'',name:PROFILE.name,total:0,progress:0,stickers:0,sound:true,voiceURI:'',voiceURIs:{es:'',ca:''},world:'auto',lang:((navigator.language||'').toLowerCase().indexOf('ca')===0?'ca':'es'),sessionLen:PROFILE.kind==='pre'?5:10,pre:{es:0,ca:0},resets:{es:0,ca:0},modAt:0,session:{done:0,ok:0,stk:0,at:0},prefs:{}},load());
+// Stickers are collected per world (spec: 2026-10-17-world-stickers-design.md): S.stk = {worldId: n} owns the first n of that world's set.
+// An old save has only the counter S.stickers: its stickers are the first ones of the old order, each in its world's set.
+// Runs before lastFp is taken, so loading an old state is not a progress change (modAt decides level and name in the sync).
+const stkTotal=()=>WORLDS.reduce((n,w)=>n+Math.min(Math.max(0,Math.floor(Number(S.stk[w.id]))||0),w.stk.length),0);
+if(!S.stk||typeof S.stk!=='object'||Array.isArray(S.stk)){
+  const stk={};
+  for(let i=0;i<Math.min(Math.max(0,Math.floor(Number(S.stickers))||0),STICKERS.length);i++){
+    const w=WORLDS.find(x=>x.stk.includes(STICKERS[i]));
+    if(w)stk[w.id]=(stk[w.id]||0)+1;
+  }
+  S.stk=stk;
+}
+S.stickers=stkTotal();
 // Progress-change detection for sync: modAt is stamped only when a synced field changed (not for theme, voice, session length...).
-const fpOf=()=>JSON.stringify([S.stats,S.total,S.stickers,S.pre,S.resets,S.level,S.name]);
+const fpOf=()=>JSON.stringify([S.stats,S.total,S.stickers,S.stk,S.pre,S.resets,S.level,S.name]);
 let lastFp=fpOf();
 let sDone=0,sOk=0,sStk=0,pendingEnd=false,resting=false; // declared early: save() reads the session counters and may run during load
 let onProgressChange=()=>{}; // replaced by the sync glue
@@ -407,6 +420,18 @@ function burst(){
     st.appendChild(s);setTimeout(()=>s.remove(),1200);
   }
 }
+// A sticker goes to the set of the world being played; a complete set passes it to the first incomplete world (none when all are done).
+let rewardFrom=''; // '<icon> <name>' of the world the last sticker came from when it was not the one being played
+function earnSticker(){
+  const playing=WORLDS[worldNow()];
+  const room=w=>(Math.floor(Number(S.stk[w.id]))||0)<w.stk.length;
+  const w=room(playing)?playing:WORLDS.find(room);
+  if(!w)return null;
+  const n=Math.min(Math.max(0,Math.floor(Number(S.stk[w.id]))||0),w.stk.length)+1;
+  S.stk[w.id]=n;S.stickers=stkTotal();
+  rewardFrom=w===playing?'':w.icon+' '+wn(w);
+  return w.stk[n-1];
+}
 function record(ok){
   if(phase!=='judge')return;
   phase='wait';
@@ -421,7 +446,7 @@ function record(ok){
   sDone++;hintIntro=false;if(ok)sOk++;
   const finished=sDone>=S.sessionLen;
   let reward=null;
-  if(finished&&S.stickers<STICKERS.length){S.stickers++;reward=STICKERS[S.stickers-1];sStk++}
+  if(finished){reward=earnSticker();if(reward)sStk++}
   save();
   renderSession();renderGoal();
   const msg=fmt(rnd(t(ok?'oks':'nos')));
@@ -1021,7 +1046,7 @@ if(PROFILE.kind==='pre'){
     const [mod,dEs,dCa]=await Promise.all([imp('./sounds.js'),loadJSON('src/data/sounds.es.json'),loadJSON('src/data/sounds.ca.json')]);
     const sess={reset(){sDone=sOk=sStk=0;renderSession();renderGoal()},inc(ok){sDone++;if(ok)sOk++},get done(){return sDone},addSticker(){sStk++}};
     pre=mod.createSounds({doc:document,$,S,save,t,say,sfx,poke,burst,sparkle:sparkleBurst,rnd,fmt,nm,later:(f,ms)=>setTimeout(f,ms),
-      data:{es:dEs,ca:dCa},stickers:STICKERS,sess,renderSession,renderGoal,renderAlbum,renderHard,end:showEnd,
+      data:{es:dEs,ca:dCa},earnSticker,sess,renderSession,renderGoal,renderAlbum,renderHard,end:showEnd,
       hasAudio:x=>!!(clipURL[ck(x)]||genFile(x)),
       reward:(e,alive)=>{pendingEnd=true;setTimeout(()=>{if(!alive||alive())showReward(e);else pendingEnd=false},500)}});
     $('pre').hidden=false;

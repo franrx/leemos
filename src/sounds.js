@@ -149,7 +149,7 @@ export function createSounds(ctx){
     ctx.sess.inc(!wrong);
     const finished=ctx.sess.done>=S.sessionLen;
     let reward=null;
-    if(finished&&S.stickers<ctx.stickers.length){S.stickers++;reward=ctx.stickers[S.stickers-1];ctx.sess.addSticker()}
+    if(finished){reward=ctx.earnSticker();if(reward)ctx.sess.addSticker()}
     save();
     ctx.renderSession();ctx.renderGoal();ctx.renderAlbum();ctx.renderHard();
     const e=epoch,alive=()=>e===epoch;

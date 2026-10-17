@@ -1185,5 +1185,55 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('review M9: a session changed 20 s ago is kept', /2 de 10/.test(app.$('slabel').textContent), app.$('slabel').textContent);
 }
 
+// ---------- 33. sticker sets per world ----------
+{
+  const st = (app, key = 'leemos-v1') => JSON.parse(app.w.localStorage.getItem(key));
+  const WSTK = (id) => worlds.find((w) => w.id === id).stk;
+  const full = (ids) => Object.fromEntries(ids.map((id) => [id, 6]));
+  let x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', stickers: 7, world: 0, sessionLen: 5 } } });
+  check('world stickers: an old counter of 7 still shows 7 after the migration', x.$('albumCount').textContent === '7');
+  x.$('joinBtn').click(); await sleep(0); x.$('okBtn').click(); await sleep(5);
+  let s = st(x);
+  check('world stickers: the 7 old stickers land in their worlds', JSON.stringify(s.stk) === JSON.stringify({ bosque: 1, montana: 1, castillo: 1, mar: 2, jardin: 1, ciudad: 1 }) && s.stickers === 7, JSON.stringify(s.stk));
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', stickers: 7, modAt: 55, total: 3 } } });
+  x.$('themeBtn').click(); await sleep(5); // a save() that is not a progress change
+  check('world stickers: loading an old state does not stamp modAt (it decides level and name in the sync)', st(x).modAt === 55, String(st(x).modAt));
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', world: 0, sessionLen: 5 } } });
+  await playSession(x, 5);
+  s = st(x);
+  check('world stickers: finishing a session adds a sticker to the world being played', s.stk.bosque === 1 && s.stickers === 1 && x.$('rewardEmoji').textContent === WSTK('bosque')[0], JSON.stringify(s.stk));
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', world: 3, sessionLen: 5 } } });
+  await playSession(x, 5);
+  check('world stickers: another world gets its own first sticker', st(x).stk.montana === 1 && x.$('rewardEmoji').textContent === WSTK('montana')[0]);
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5 } } });
+  await playSession(x, 5);
+  s = st(x);
+  check('world stickers: with Sorpresa exactly one world gets the sticker', Object.keys(s.stk).length === 1 && Object.values(s.stk)[0] === 1 && s.stickers === 1, JSON.stringify(s.stk));
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', world: 99, sessionLen: 5 } } });
+  await playSession(x, 5);
+  check('world stickers: a world number out of range uses the last world', st(x).stk.ciudad === 1 && x.$('rewardEmoji').textContent === WSTK('ciudad')[0]);
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', world: 0, sessionLen: 5, stk: full(['bosque']), stickers: 6 } } });
+  await playSession(x, 5);
+  s = st(x);
+  check('world stickers: a complete set passes the sticker to the first incomplete world', s.stk.bosque === 6 && s.stk.playa === 1 && s.stickers === 7 && x.$('rewardEmoji').textContent === WSTK('playa')[0], JSON.stringify(s.stk));
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', world: 0, sessionLen: 5, stk: full(worlds.map((w) => w.id)), stickers: 96 } } });
+  await playSession(x, 5);
+  s = st(x);
+  check('world stickers: with every set complete no sticker drops and nothing breaks', x.$('reward').hidden && s.stickers === 96 && Object.values(s.stk).every((n) => n === 6) && x.errors.length === 0, x.errors.join(' | '));
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', stk: { bosque: 500 }, stickers: 500 } } });
+  check('world stickers: a hostile count is clamped to the size of the set', x.$('albumCount').textContent === '6' && x.errors.length === 0, x.$('albumCount').textContent);
+  // Leo goes through the same function
+  x = await bootLeo({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', world: 0 } } });
+  x.$('prePlay').click(); await playPre(x, 5); await sleep(10);
+  s = st(x, 'leemos-v1:leo');
+  check('world stickers: Leo earns his sticker in the world being played too', s.stk && s.stk.bosque === 1 && x.$('albumCount').textContent === '1', JSON.stringify(s.stk));
+  // another device pushes per-world stickers: they arrive in the counter without a reload
+  const { s: supa, app } = await signedBoot({ syncEvery: 120 });
+  const r = supa.rows.get(RID_A); r.data = { ...r.data, stk: { circo: 2 }, stickers: 2 }; r.version++;
+  await until(() => (JSON.parse(app.w.localStorage.getItem('leemos-v1')).stk || {}).circo === 2, 3000);
+  await sleep(40);
+  check('world stickers: per-world stickers from another device arrive without a reload', st(app).stickers === 2 && app.$('albumCount').textContent === '2', app.$('albumCount').textContent);
+}
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
