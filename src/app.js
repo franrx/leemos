@@ -1,6 +1,6 @@
 // Leemos: syllable reading practice. ES module, no build step. See CLAUDE.md.
 // ---------- data (edit the JSON files in src/data/, not this file) ----------
-const loadJSON=u=>fetch(u).then(r=>{if(!r.ok)throw new Error(u+' '+r.status);return r.json()});
+const loadJSON=(u,o)=>fetch(u,o).then(r=>{if(!r.ok)throw new Error(u+' '+r.status);return r.json()});
 const [LV_ES,LV_CA,WORLDS,STICKERS,T_ES,T_CA]=await Promise.all([
   loadJSON('src/data/levels.es.json'),loadJSON('src/data/levels.ca.json'),loadJSON('src/data/worlds.json'),
   loadJSON('src/data/stickers.json'),loadJSON('src/data/i18n.es.json'),loadJSON('src/data/i18n.ca.json')
@@ -447,7 +447,7 @@ function syncInit(){
   if(sync)return Promise.resolve(sync);
   return syncP||(syncP=(async()=>{
     try{
-      const cfg=await loadJSON('src/data/sync.config.json');
+      const cfg=await loadJSON('src/data/sync.config.json',{cache:'no-cache'}); // revalidate: the host caches files for minutes and a stale empty config would hide the login
       if(!cfg||!cfg.url||!cfg.anonKey)return null;
       const imp=window.__leemosImport||(p=>import(p));
       const [sm,mm]=await Promise.all([imp('./sync.js'),imp('./merge.js')]);
