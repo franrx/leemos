@@ -14,7 +14,7 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null } = {}) {
+async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null, reduced = false } = {}) {
   const errors = [];
   const audioCalls = [];
   const vc = new VirtualConsole();
@@ -25,10 +25,10 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
       Object.defineProperty(w.navigator, 'language', { value: lang });
       for (const [k, v] of Object.entries(storage)) w.localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
       w.__leemosImport = importFails ? () => Promise.reject(new Error('offline')) : (p) => import(pathToFileURL(join(ROOT, 'src', p)).href);
-      w.matchMedia = () => ({ matches: false, addEventListener() {}, removeListener() {} });
+      w.matchMedia = (q) => ({ matches: reduced && /reduced-motion/.test(q), addEventListener() {}, removeListener() {} });
       w.speechSynthesis = { getVoices: () => [{ name: 'Joana Online (Natural)', lang: 'ca-ES', voiceURI: 'j' }, { name: 'Google español', lang: 'es-ES', voiceURI: 'g' }], cancel() {}, speak(u) { (w.__tts ||= []).push(u.text); } };
       w.SpeechSynthesisUtterance = function (t) { this.text = t; };
-      w.Audio = function (src) { audioCalls.push(src); this.play = () => Promise.resolve(); this.pause = () => {}; };
+      w.Audio = function (src) { audioCalls.push(src); (w.__audios ||= []).push(this); this.play = () => Promise.resolve(); this.pause = () => { this.paused = true; }; };
       if (mic) {
         // fake microphone: mic.peak is the constant sample level the analyser reports; mic.deny refuses permission
         Object.defineProperty(w.navigator, 'mediaDevices', { value: { getUserMedia: async () => { if (mic.deny) throw new Error('denied'); return { getTracks: () => [{ stop() {} }] }; } } });
@@ -491,6 +491,29 @@ check('hint: the next exercise does not repeat the sentence by itself', afterFir
 a = await boot();
 a.$('hint').click();
 check('hint: with no clip the bubble stays silent (no robotic browser voice)', !(a.w.__tts || []).length && !a.audioCalls.length, `tts=${(a.w.__tts || []).length} audio=${a.audioCalls.length}`);
+
+// ---------- 19. Lumi talks: big on tap, small and quiet on the automatic one ----------
+const lastAudio = (x) => x.w.__audios[x.w.__audios.length - 1];
+const hintText = (x) => x.$('hint').textContent;
+a = await boot({ manifest: hintManifest });
+check('lumi: the automatic sentence moves the small Lumi only (no zoom)', a.$('lumiBig').hidden && a.$('mascot').classList.contains('talking'));
+lastAudio(a).onended();
+check('lumi: the small Lumi stops talking when the clip ends', !a.$('mascot').classList.contains('talking'));
+a.$('hint').click();
+check('lumi: tapping the bubble opens the big Lumi with the sentence under him', !a.$('lumiBig').hidden && a.$('lumiBigText').textContent === hintText(a) && !!a.$('lumiBigArt').querySelector('svg') && a.$('lumiBig').classList.contains('talking'));
+check('lumi: the big copy is hidden from screen readers and has no duplicate id', a.$('lumiBigArt').querySelector('svg').getAttribute('aria-hidden') === 'true' && a.d.querySelectorAll('#mascot').length === 1);
+lastAudio(a).onended();
+check('lumi: the big Lumi goes back when the clip ends', await until(() => a.$('lumiBig').hidden));
+a.$('mascot').dispatchEvent(new a.w.MouseEvent('click', { bubbles: true })); // SVG elements have no .click()
+check('lumi: tapping Lumi himself opens him too', !a.$('lumiBig').hidden);
+a.$('lumiBig').click();
+check('lumi: tapping anywhere closes him and stops the audio', (await until(() => a.$('lumiBig').hidden)) && lastAudio(a).paused === true);
+a = await boot();
+a.$('hint').click();
+check('lumi: with no clip nothing opens and nothing talks', a.$('lumiBig').hidden && !a.$('mascot').classList.contains('talking'));
+a = await boot({ manifest: hintManifest, reduced: true });
+a.$('hint').click();
+check('lumi: reduced motion opens him without the zoom', !a.$('lumiBig').hidden && a.$('lumiBig').classList.contains('still') && !a.$('lumiBigArt').style.transform, a.$('lumiBigArt').style.transform);
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

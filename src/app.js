@@ -210,17 +210,69 @@ function renderHard(){
 const hintFor=p=>p==='read'
   ? t(S.mode==='syl'?'hintSyl':'hintWord',{n:nm()})
   : t('hintJudge');
-// Lumi's instruction sentence: a recording or a generated clip only. The browser voice is robotic, so with no clip she stays silent.
-let hintIntro=false; // the first sentence of a session plays by itself, once
-function sayHint(){
+// Lumi's instruction sentence: a recording or a generated clip only. The browser voice is robotic, so with no clip he stays silent.
+// While it plays his beak moves; tapped (big) he also grows to the middle of the screen.
+const reducedMotion=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
+let talkT=null,jawEls=[],closeT=null,hintIntro=false; // hintIntro: the first sentence of a session plays by itself, once
+const jawSet=v=>jawEls.forEach(e=>e.style.setProperty('--jaw',v));
+function mouthLoop(){ // speech rhythm: open by a random amount, close, repeat
+  jawSet((.35+Math.random()*.65).toFixed(2));
+  talkT=setTimeout(()=>{jawSet('0');talkT=setTimeout(mouthLoop,50+Math.random()*80)},110+Math.random()*80);
+}
+function flyTo(art,m){ // place the big Lumi over the small one (translate + scale), without animating
+  const r=m.getBoundingClientRect(),b=art.getBoundingClientRect();
+  if(!b.width)return;
+  art.style.transform='translate('+(r.left+r.width/2-b.left-b.width/2)+'px,'+(r.top+r.height/2-b.top-b.height/2)+'px) scale('+(r.width/b.width)+')';
+}
+function openBig(text){
+  const ov=$('lumiBig'),art=$('lumiBigArt'),m=$('mascot'),still=reducedMotion();
+  clearTimeout(closeT);
+  const c=m.cloneNode(true);
+  ['id','role','aria-label','data-ia','style'].forEach(a=>c.removeAttribute(a));
+  c.setAttribute('class','mascot');c.setAttribute('aria-hidden','true');
+  art.innerHTML='';art.appendChild(c);
+  $('lumiBigText').textContent=text;
+  ov.classList.remove('closing');ov.classList.toggle('still',still);
+  art.style.transform='';ov.hidden=false;
+  if(!still){art.style.transition='none';flyTo(art,m);art.getBoundingClientRect();art.style.transition='';art.style.transform=''} // grows from his corner
+  ov.classList.add('talking');
+  return c;
+}
+function closeBig(){
+  const ov=$('lumiBig');if(ov.hidden)return;
+  ov.classList.remove('talking');ov.classList.add('closing');
+  if(!reducedMotion())flyTo($('lumiBigArt'),$('mascot')); // shrinks back to his corner
+  closeT=setTimeout(()=>{ov.hidden=true;ov.classList.remove('closing')},reducedMotion()?250:450);
+}
+function talkStart(big,text){
+  talkStop();
+  const m=$('mascot');jawEls=[m];
+  if(big)jawEls=[openBig(text)];else m.classList.add('talking');
+  mouthLoop();
+}
+function talkStop(){
+  clearTimeout(talkT);jawSet('0');jawEls=[];
+  $('mascot').classList.remove('talking');
+  closeBig();
+}
+function hintAudio(x){
+  const u=clipURL[ck(x)];if(u)return new Audio(u);
+  const f=genFile(x);return f?new Audio(clipUrl(S.lang,x.toLowerCase(),f)):null;
+}
+function sayHint(big){
   if(phase!=='read'&&phase!=='judge')return false;
-  const x=hintFor(phase);
-  if(playClip(ck(x)))return true;
-  const f=genFile(x);if(!f)return false;
-  try{if(curAudio)curAudio.pause();curAudio=new Audio(clipUrl(S.lang,x.toLowerCase(),f));curAudio.play().catch(()=>{});return true}catch(e){return false}
+  const x=hintFor(phase),au=hintAudio(x);if(!au)return false;
+  try{
+    if(curAudio)curAudio.pause();curAudio=au;
+    talkStart(big,x);
+    const done=()=>{if(curAudio===au)talkStop()};
+    au.onended=au.onerror=done;
+    au.play().catch(done);
+    return true;
+  }catch(e){talkStop();return false}
 }
 // Only counts as said once a clip really played (the manifest may still be loading when the first exercise appears).
-function introHint(){if(sDone===0&&!hintIntro&&phase==='read'&&sayHint())hintIntro=true}
+function introHint(){if(sDone===0&&!hintIntro&&phase==='read'&&sayHint(false))hintIntro=true}
 function setPhase(p){
   phase=p;
   $('joinBtn').hidden=p!=='read';
@@ -652,8 +704,10 @@ $('recClear').onclick=async e=>{
 };
 $('voiceSel').onchange=e=>{S.voiceURIs[S.lang]=e.target.value;save();pickVoice();say(t('sample'))};
 $('sessionSel').value=String(S.sessionLen);
-$('hint').onclick=sayHint;
-$('hint').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();sayHint()}};
+$('hint').onclick=()=>sayHint(true);
+$('hint').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();sayHint(true)}};
+$('mascot').onclick=()=>sayHint(true);
+$('lumiBig').onclick=()=>{if(curAudio)curAudio.pause();talkStop()};
 $('sessionSel').onchange=e=>{S.sessionLen=parseInt(e.target.value,10);save();renderSession()};
 $('endMore').onclick=()=>{$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();pre?pre.begin():next()};
 $('endLevelUpBtn').onclick=()=>{if(pre)pre.unlockNext();else{S.level++;save();renderLevels()}$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();pre?pre.begin():next()};
