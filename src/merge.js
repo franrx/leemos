@@ -94,8 +94,19 @@ export function mergeData(a, b) {
   // current position (level, name): the side changed last; ties by (level, name) so the argument order never matters
   const aWins = ta !== tb ? ta > tb : lvl(a) !== lvl(b) ? lvl(a) > lvl(b) : nm(a) >= nm(b);
   const w = aWins ? a : b;
-  const ka = stkOf(a), kb = stkOf(b), stk = {};
-  for (const id of new Set([...Object.keys(ka), ...Object.keys(kb)])) stk[id] = Math.max(ka[id] || 0, kb[id] || 0);
+  let stk = {};
+  if (isObj(a.stk) === isObj(b.stk)) { // both new, or both old: per world, the larger count
+    const ka = stkOf(a), kb = stkOf(b);
+    for (const id of new Set([...Object.keys(ka), ...Object.keys(kb)])) stk[id] = Math.max(ka[id] || 0, kb[id] || 0);
+  } else {
+    // One side is a device on the old version: it pushes only a counter, and that counter is the larger of its own and OUR total
+    // (an echo), so reading it again from the start would invent stickers on every round. Only what is beyond our total is new:
+    // the stickers it earned itself, which are the next ones in the old order.
+    const [mine, old] = isObj(a.stk) ? [a, b] : [b, a];
+    stk = stkOf(mine);
+    const from = stkSum(stk), to = Math.min(LEGACY_WORLD.length, num(old.stickers));
+    for (let i = from; i < to; i++) stk[LEGACY_WORLD[i]] = Math.min(CAP_STK, (stk[LEGACY_WORLD[i]] || 0) + 1);
+  }
   return {
     stats,
     total: Math.max(num(a.total), num(b.total)),

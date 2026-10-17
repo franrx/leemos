@@ -80,6 +80,7 @@ const S=Object.assign({stats:{},level:0,mode:'syl',upper:true,rate:.75,theme:'',
 // Stickers are collected per world (spec: 2026-10-17-world-stickers-design.md): S.stk = {worldId: n} owns the first n of that world's set.
 // An old save has only the counter S.stickers: its stickers are the first ones of the old order, each in its world's set.
 // Runs before lastFp is taken, so loading an old state is not a progress change (modAt decides level and name in the sync).
+WORLDS.forEach(w=>{if(!Array.isArray(w.stk))w.stk=[]}); // a stale cached worlds.json from before the sets must not stop the app from starting
 const stkTotal=()=>WORLDS.reduce((n,w)=>n+Math.min(Math.max(0,Math.floor(Number(S.stk[w.id]))||0),w.stk.length),0);
 if(!S.stk||typeof S.stk!=='object'||Array.isArray(S.stk)){
   const stk={};
@@ -502,6 +503,7 @@ const IDLE_MS=30000; // a value changed on THIS device within the last 30 s is k
 function applyMerged(m,adoptSession){
   const before={lang:S.lang,mode:S.mode,world:S.world,sessionLen:S.sessionLen};
   mergeMod.applySynced(S,m); // sets the progress fields, S.session, S.prefs and the plain preference fields (never the voice)
+  S.stickers=stkTotal(); // the merge caps a world at 24 and keeps unknown worlds; the counter must follow the sets that exist
   if(S.lang!==before.lang){LEVELS=LV[S.lang]||LV_ES;pendingEnd=false;resting=false}
   if(S.level>=LEVELS.length)S.level=0;
   // preferences, through the same functions the UI uses
@@ -761,7 +763,8 @@ function renderAlbum(){
   let all=0;
   WORLDS.forEach(w=>{
     const own=Math.min(Math.max(0,Math.floor(Number(S.stk[w.id]))||0),w.stk.length);all+=w.stk.length;
-    const h=document.createElement('h3');h.className='sset-h';h.textContent=w.icon+' '+wn(w)+' '+own+'/'+w.stk.length;g.appendChild(h);
+    const h=document.createElement('h3');h.className='sset-h';h.textContent=w.icon+' '+wn(w)+' '+own+'/'+w.stk.length;
+    h.setAttribute('aria-label',wn(w)+', '+t('worldProg',{n:own,t:w.stk.length}));g.appendChild(h);
     const row=document.createElement('div');row.className='sset';
     w.stk.forEach((e,i)=>{
       const d=document.createElement('div');
@@ -869,7 +872,7 @@ window.addEventListener('resize',()=>{if(cur){const merged=$('tiles').classList.
 
 $('mSyl').setAttribute('aria-pressed',S.mode==='syl');
 $('mWord').setAttribute('aria-pressed',S.mode==='word');
-$('albumBtn').onclick=()=>{renderAlbum();$('album').hidden=false;$('albumClose').focus()};
+$('albumBtn').onclick=()=>{renderAlbum();$('album').hidden=false;$('albumClose').focus({preventScroll:true})}; // the long album must open at the top, not scrolled to the close button
 $('albumClose').onclick=closeOverlays;
 $('worldBtn').onclick=()=>{renderWorlds();$('worlds').hidden=false;$('worldsClose').focus()};
 $('worldsClose').onclick=closeOverlays;

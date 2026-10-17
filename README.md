@@ -81,7 +81,7 @@ Es un sitio estático: sirve cualquier hosting con **https** (Netlify, Cloudflar
 ## Personalizar contenido
 - Palabras y sílabas: `src/data/levels.<idioma>.json`. El campo `g` etiqueta la palabra con mundos (ids de `worlds.json`, separados por espacios) para que salga más en ese paisaje.
 - Textos de interfaz: `src/data/i18n.<idioma>.json` (mismas claves en los dos).
-- Mundos y pegatinas: `worlds.json`, `stickers.json`.
+- Mundos y pegatinas: `worlds.json` (cada mundo trae su conjunto de 6 pegatinas en `stk`). `stickers.json` solo conserva el orden de las 24 pegatinas originales para migrar guardados antiguos: no lo cambies.
 - Tras cambiar palabras: `npm run audio:plan` y `npm run audio` generan solo los clips nuevos.
 
 Más contexto de diseño y pedagogía en `CLAUDE.md`.

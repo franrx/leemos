@@ -35,7 +35,8 @@ The 16 worlds (bosque, playa, circo…) give a reason to try each one: stickers 
 - **Reading any state or server data** (`stkOf(d)` in `merge.js`):
   - if `d.stk` is a plain object, keep only keys that match `/^[a-z]{2,20}$/` (at most 32 keys) with whole numbers 0…`CAP_STK` (24; the app clamps to the set size on apply);
   - otherwise (state saved before this change, or a device not updated yet) migrate from `d.stickers`: for old index `i < d.stickers` (capped at 24), add 1 to `LEGACY_WORLD[i]`.
-- `mergeData`: `stk[w] = max(stkOf(a)[w], stkOf(b)[w])` per world; `stickers = sum(stk)`. Commutative, associative, idempotent (same as the other counters). Because owned old animals are always the start of each set, the migration never loses or duplicates one.
+- `mergeData`: when both sides are new (have `stk`) or both old, `stk[w] = max(stkOf(a)[w], stkOf(b)[w])` per world; `stickers = sum(stk)`. Commutative, associative, idempotent (same as the other counters). Because owned old animals are always the start of each set, the migration never loses or duplicates one.
+- **Mixed case (found in review):** a device on the old version pushes only `stickers`, which is the larger of its own counter and OUR total (an echo). Reading it from the start every round would invent stickers (2 became 26 in a simulation). So when exactly one side has `stk`, the old side only counts what is beyond the new total: its stickers number `sum(stk)` to `stickers-1` in the old order are added to their worlds (added, not max). Commutative and idempotent, **not associative** across mixed kinds (accepted: it only exists while a stale old tab is open).
 - `applySynced` writes `state.stk` and `state.stickers`. `fpOf()` in `save()` uses `S.stk` (it already tracks `S.stickers`; both change together).
 - The app migrates a local state on load with the same `stkOf`, so there is one implementation.
 

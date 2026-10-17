@@ -158,18 +158,31 @@ const mkd = (stk, stickers) => ({ stats: {}, total: 0, stickers, stk, pre: { es:
 const mS = mergeData(mkd({ circo: 2, mar: 1 }, 3), mkd({ circo: 1, dino: 4 }, 5));
 check('stk: merge takes the maximum per world and the total is their sum', same(mS.stk, { circo: 2, mar: 1, dino: 4 }) && mS.stickers === 7, JSON.stringify([mS.stk, mS.stickers]));
 const mL = mergeData(mkd({ circo: 2 }, 2), { stats: {}, stickers: 3 }); // the other device is on the old version: only the counter
-check('stk: a device with only the old counter loses nothing and takes nothing away', same(mL.stk, { bosque: 1, montana: 1, castillo: 1, circo: 2 }) && mL.stickers === 5, JSON.stringify(mL.stk));
+check('stk: an old-version counter adds only what is beyond the new side (its stickers past the first 2 of the old order)', same(mL.stk, { circo: 2, castillo: 1 }) && mL.stickers === 3, JSON.stringify(mL.stk));
+check('stk: an old-version counter that is not beyond the new side adds nothing (it is just the echo of the new total)', same(mergeData(mkd({ circo: 2 }, 2), { stats: {}, stickers: 2 }).stk, { circo: 2 }) && same(mergeData(mkd({ circo: 2 }, 2), { stats: {}, stickers: 1 }).stk, { circo: 2 }) && same(mergeData({ stats: {}, stickers: 2 }, mkd({ circo: 2 }, 2)).stk, { circo: 2 }));
+check('stk: the extra of an old-version counter is added to the same world, not absorbed by it', same(mergeData(mkd({ mar: 3 }, 3), { stats: {}, stickers: 5 }).stk, { mar: 4, jardin: 1 }) && mergeData(mkd({ mar: 3 }, 3), { stats: {}, stickers: 5 }).stickers === 5, JSON.stringify(mergeData(mkd({ mar: 3 }, 3), { stats: {}, stickers: 5 }).stk));
+// An old-version device that is still open pushes only "stickers" (= the larger of its own and the server's total) and no stk: repeated rounds must not inflate anything.
+{
+  const oldMerge = (o, r) => ({ stickers: Math.max(o.stickers, r.stickers) }); // what the previous merge.js did
+  let nw = { stats: {}, stk: { circo: 2 }, stickers: 2 }, od = { stickers: 0 }, row = mergeData(nw, {});
+  for (let i = 0; i < 12; i++) { od = oldMerge(od, row); row = { ...od }; nw = mergeData(nw, row); row = mergeData(nw, {}); od = oldMerge(od, row); }
+  check('stk: an old device syncing for 12 rounds does not inflate the new one', nw.stickers === 2 && same(nw.stk, { circo: 2 }), JSON.stringify([nw.stk, nw.stickers]));
+  nw = { stats: {}, stk: { circo: 2 }, stickers: 2 }; od = { stickers: 0 }; row = mergeData(nw, {});
+  for (let i = 0; i < 12; i++) { od = oldMerge(od, row); if (i === 3) od = { stickers: od.stickers + 1 }; row = { ...od }; nw = mergeData(nw, row); row = mergeData(nw, {}); od = oldMerge(od, row); }
+  check('stk: a sticker earned on the old device arrives once and then stays stable', nw.stickers === 3 && od.stickers === 3, JSON.stringify([nw.stk, nw.stickers, od.stickers]));
+}
 check('stk: applySynced and pickSynced carry stk and keep stickers equal to its sum', (() => { const st = applySynced({ stats: {}, stickers: 0 }, mkd({ mar: 2, granja: 1 }, 99)); return same(st.stk, { mar: 2, granja: 1 }) && st.stickers === 3 && same(pickSynced(st).stk, { mar: 2, granja: 1 }); })());
 let kc = true, ka = true, ki = true, kmono = true;
 const genK = () => { const o = {}; ['bosque', 'mar', 'circo', 'dino'].forEach((w) => { if (rnd() < 0.6) o[w] = ri(7); }); return rnd() < 0.4 ? { stats: {}, stickers: ri(26) } : { stats: {}, stk: o }; };
 for (let i = 0; i < 300; i++) {
   const x = genK(), y = genK(), z = genK();
   if (!same(mergeData(x, y), mergeData(y, x))) kc = false;
-  if (!same(mergeData(mergeData(x, y), z), mergeData(x, mergeData(y, z)))) ka = false;
+  const kinds = new Set([x, y, z].map((q) => (q.stk ? 'new' : 'old')));
+  if (kinds.size === 1 && !same(mergeData(mergeData(x, y), z), mergeData(x, mergeData(y, z)))) ka = false; // mixing old-counter and new states is not associative by design (the old counter is read relative to the new total)
   if (!same(mergeData(x, x), mergeData(x, {}))) ki = false;
   if (mergeData(x, y).stickers < Math.max(total(stkOf(x)), total(stkOf(y)))) kmono = false;
 }
-check('property: stk merge is commutative, associative, idempotent and never loses stickers (300 random, old and new states mixed)', kc && ka && ki && kmono, JSON.stringify([kc, ka, ki, kmono]));
+check('property: stk merge is commutative, idempotent and never loses stickers (300 random, old and new states mixed); associative within one kind', kc && ka && ki && kmono, JSON.stringify([kc, ka, ki, kmono]));
 
 console.log(failures ? `\n${failures} merge test(s) FAILED` : '\nAll merge tests passed');
 process.exit(failures ? 1 : 0);

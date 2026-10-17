@@ -1235,6 +1235,15 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('world stickers: per-world stickers from another device arrive without a reload', st(app).stickers === 2 && app.$('albumCount').textContent === '2', app.$('albumCount').textContent);
 }
 
+// review: after a pull the counter follows the sets that exist (out-of-range counts and unknown worlds are not shown)
+{
+  const { s: supa, app } = await signedBoot({ syncEvery: 120 });
+  const r = supa.rows.get(RID_A); r.data = { ...r.data, stk: { bosque: 10, zzzz: 5 } }; r.version++;
+  await until(() => (JSON.parse(app.w.localStorage.getItem('leemos-v1')).stk || {}).bosque === 10, 3000);
+  await sleep(40);
+  check('review: a pulled count above the set size or for an unknown world does not inflate the counter', app.$('albumCount').textContent === '6' && JSON.parse(app.w.localStorage.getItem('leemos-v1')).stickers === 6, app.$('albumCount').textContent);
+}
+
 // ---------- 34. sticker sets per world: what she sees ----------
 {
   const own = (stk, n) => ({ 'leemos-v1': { name: 'Elsa', world: 0, sessionLen: 5, stk, stickers: n } });
