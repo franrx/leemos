@@ -14,7 +14,7 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null, reduced = false } = {}) {
+async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null, reduced = false, voice = null } = {}) {
   const errors = [];
   const audioCalls = [];
   const vc = new VirtualConsole();
@@ -29,6 +29,8 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
       w.speechSynthesis = { getVoices: () => [{ name: 'Joana Online (Natural)', lang: 'ca-ES', voiceURI: 'j' }, { name: 'Google español', lang: 'es-ES', voiceURI: 'g' }], cancel() {}, speak(u) { (w.__tts ||= []).push(u.text); } };
       w.SpeechSynthesisUtterance = function (t) { this.text = t; };
       w.Audio = function (src) { audioCalls.push(src); (w.__audios ||= []).push(this); this.play = () => Promise.resolve(); this.pause = () => { this.paused = true; }; };
+      // fake Web Audio for Lumi's beak: voice.sample is the constant byte the analyser reports (128 = silence); voice.state is the context state
+      if (voice) w.AudioContext = class { constructor() { (w.__acs ||= []).push(1); this.state = voice.state || 'running'; this.destination = {}; } resume() { return Promise.resolve(); } createMediaElementSource() { return { connect() {} }; } createAnalyser() { return { fftSize: 0, connect() {}, getByteTimeDomainData: (arr) => arr.fill(voice.sample) }; } };
       if (mic) {
         // fake microphone: mic.peak is the constant sample level the analyser reports; mic.deny refuses permission
         Object.defineProperty(w.navigator, 'mediaDevices', { value: { getUserMedia: async () => { if (mic.deny) throw new Error('denied'); return { getTracks: () => [{ stop() {} }] }; } } });
@@ -514,6 +516,27 @@ check('lumi: with no clip nothing opens and nothing talks', a.$('lumiBig').hidde
 a = await boot({ manifest: hintManifest, reduced: true });
 a.$('hint').click();
 check('lumi: reduced motion opens him without the zoom', !a.$('lumiBig').hidden && a.$('lumiBig').classList.contains('still') && !a.$('lumiBigArt').style.transform, a.$('lumiBigArt').style.transform);
+
+// ---------- 20. the beak follows the loudness of the clip ----------
+const jawOf = (x) => parseFloat(x.$('lumiBigArt').querySelector('svg').style.getPropertyValue('--jaw') || '0');
+const maxJaw = async (x, ms) => { let m = 0; for (let i = 0; i < ms / 20; i++) { m = Math.max(m, jawOf(x)); await sleep(20); } return m; }; // the beak moves, so look over a window
+a = await boot({ manifest: hintManifest, voice: { sample: 128 + 90 } });
+a.$('hint').click();
+const loud = await maxJaw(a, 300);
+check('beak: a loud voice opens it wide', loud > 0.8, String(loud));
+a = await boot({ manifest: hintManifest, voice: { sample: 128 } });
+a.$('hint').click();
+const quiet = await maxJaw(a, 300);
+check('beak: silence keeps it closed', quiet < 0.05, String(quiet));
+a = await boot({ manifest: hintManifest, voice: { sample: 128, state: 'suspended' } });
+a.$('hint').click();
+const fallback = await maxJaw(a, 400);
+check('beak: with a suspended audio context the clip is not rerouted and the beak still moves', fallback > 0, String(fallback));
+
+a = await boot({ manifest: hintManifest, voice: { sample: 128 + 90 } });
+check('beak: the automatic sentence creates no audio context (one made without a tap stays suspended)', !(a.w.__acs || []).length, String((a.w.__acs || []).length));
+a.$('hint').click();
+check('beak: a tap creates it', (a.w.__acs || []).length === 1, String((a.w.__acs || []).length));
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

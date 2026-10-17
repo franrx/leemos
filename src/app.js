@@ -213,11 +213,34 @@ const hintFor=p=>p==='read'
 // Lumi's instruction sentence: a recording or a generated clip only. The browser voice is robotic, so with no clip he stays silent.
 // While it plays his beak moves; tapped (big) he also grows to the middle of the screen.
 const reducedMotion=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
-let talkT=null,jawEls=[],closeT=null,hintIntro=false; // hintIntro: the first sentence of a session plays by itself, once
+let talkT=null,rafT=null,jawEls=[],closeT=null,hintIntro=false,jawV=0,talkCtx=null; // hintIntro: the first sentence of a session plays by itself, once
 const jawSet=v=>jawEls.forEach(e=>e.style.setProperty('--jaw',v));
-function mouthLoop(){ // speech rhythm: open by a random amount, close, repeat
+// The beak follows the real loudness of the clip (Web Audio analyser): closed in silence, wide on loud syllables.
+// The audio element is rerouted through the context, so only use it when the context is running (otherwise the clip would be mute).
+// The context is created only on a real tap (`tapped`): one made at page load, with no gesture, stays suspended.
+function levelMeter(au,tapped){
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;
+    if(!talkCtx){if(!tapped)return null;talkCtx=new AC()}
+    if(talkCtx.state!=='running'){if(talkCtx.resume)talkCtx.resume().catch(()=>{});return null}
+    const src=talkCtx.createMediaElementSource(au),an=talkCtx.createAnalyser();
+    an.fftSize=512;src.connect(an);an.connect(talkCtx.destination);
+    const buf=new Uint8Array(an.fftSize);
+    return ()=>{an.getByteTimeDomainData(buf);let s=0;for(let i=0;i<buf.length;i++){const x=(buf[i]-128)/128;s+=x*x}return Math.sqrt(s/buf.length)};
+  }catch(e){return null}
+}
+function voiceLoop(meter){
+  const tick=()=>{
+    const lv=Math.min(1,Math.max(0,(meter()-.015)*4.5)); // gate the noise floor; speech RMS is about .05-.25
+    jawV+=(lv-jawV)*(lv>jawV?.6:.25); // opens fast, closes a bit slower
+    jawSet(jawV.toFixed(2));
+    rafT=requestAnimationFrame(tick);
+  };
+  tick();
+}
+function mouthLoop(){ // fallback with no Web Audio: a calm speech rhythm, open by a random amount then closed
   jawSet((.35+Math.random()*.65).toFixed(2));
-  talkT=setTimeout(()=>{jawSet('0');talkT=setTimeout(mouthLoop,50+Math.random()*80)},110+Math.random()*80);
+  talkT=setTimeout(()=>{jawSet('0');talkT=setTimeout(mouthLoop,90+Math.random()*60)},150+Math.random()*80);
 }
 function flyTo(art,m){ // place the big Lumi over the small one (translate + scale), without animating
   const r=m.getBoundingClientRect(),b=art.getBoundingClientRect();
@@ -244,14 +267,14 @@ function closeBig(){
   if(!reducedMotion())flyTo($('lumiBigArt'),$('mascot')); // shrinks back to his corner
   closeT=setTimeout(()=>{ov.hidden=true;ov.classList.remove('closing')},reducedMotion()?250:450);
 }
-function talkStart(big,text){
+function talkStart(big,text,meter){
   talkStop();
   const m=$('mascot');jawEls=[m];
   if(big)jawEls=[openBig(text)];else m.classList.add('talking');
-  mouthLoop();
+  if(meter)voiceLoop(meter);else mouthLoop();
 }
 function talkStop(){
-  clearTimeout(talkT);jawSet('0');jawEls=[];
+  clearTimeout(talkT);cancelAnimationFrame(rafT);jawV=0;jawSet('0');jawEls=[];
   $('mascot').classList.remove('talking');
   closeBig();
 }
@@ -264,7 +287,7 @@ function sayHint(big){
   const x=hintFor(phase),au=hintAudio(x);if(!au)return false;
   try{
     if(curAudio)curAudio.pause();curAudio=au;
-    talkStart(big,x);
+    talkStart(big,x,levelMeter(au,big));
     const done=()=>{if(curAudio===au)talkStop()};
     au.onended=au.onerror=done;
     au.play().catch(done);
