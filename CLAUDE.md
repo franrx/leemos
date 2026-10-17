@@ -33,6 +33,11 @@ scripts/lib/clipstore.mjs, clipapi.mjs   lista de clips a grabar, guardado, y ru
 tests/clipstore.mjs, tests/record.mjs    pruebas del guardado/API y de la página (jsdom con micro y servidor falsos)
 src/levelrule.js        regla de colocación por nivel (sylLevel, minLevel, letterOf); módulo puro, lo usan tests y scripts
 tests/levels.mjs        pruebas de la regla, del formato de los datos, de la cobertura por letra (≥12 palabras) y de las sílabas inversas
+src/merge.js            fusión pura del estado sincronizable de un niño (contadores al máximo, reset por idioma); la usan sync.js, app.js (import()) y tests
+src/sync.js             cliente de Supabase con fetch (sin SDK): código por email, refresco de sesión, pull-merge-push de perfiles. app.js lo carga con import() solo si hay config
+src/data/sync.config.json  {url, anonKey}; vacío = función apagada (no se carga nada ni se pide nada a terceros)
+supabase/migrations/    tabla child_profiles con RLS por propietario. scripts/check-rls.mjs la verifica contra un proyecto real (lo ejecuta Fran)
+tests/merge.mjs, tests/sync.mjs, tests/migration.mjs, tests/lib/fake-supabase.mjs    pruebas de la fusión (propiedades), del protocolo contra un Supabase falso y de la migración
 ```
 Sin frameworks ni bundler, a propósito. No introducir uno sin una razón clara. `app.js` es grande (~540 líneas): trocearlo en módulos es razonable si se toca mucho, pero hacerlo en un cambio aparte y con `npm test` en verde.
 
@@ -65,7 +70,8 @@ Sílabas inversas de 2 letras (ab, ic, um…): Azure las deletrea («a be»). Re
 ## Persistencia
 - `localStorage['leemos-v1']`: estado `S` (stats, level, mode, world, lang, name, total, progress, stickers, sound, voiceURIs, sessionLen, upper, rate, theme…). Al añadir campos, dar un valor por defecto en la línea de `Object.assign` para que no rompa estados guardados.
 - Perfiles: `localStorage['leemos-profiles']` = `{active, list:[{id,name,kind}]}`. Elsa sigue en `leemos-v1` (no renombrar); los demás en `leemos-v1:<id>`. Cambiar de perfil recarga la página. Estadísticas del modo sonidos: `snd:<letra>` y `ca:snd:<letra>`; `S.pre = {es:n, ca:n}` es el grupo desbloqueado por idioma.
-- No hay servidor, cuentas ni analítica. **No añadir seguimiento, anuncios ni envío de datos del niño.**
+- Cuentas **opcionales** con Supabase (solo adultos; el niño nunca inicia sesión): solo se sincronizan apodo, contadores, pegatinas y grupos de Leo (`stats`, `total`, `stickers`, `pre`, `resets`, `level`, `name`, `modAt`). Los ajustes del dispositivo (voz, sonido, tema, velocidad, mundo, idioma, mayúsculas) y las grabaciones nunca se sincronizan. Sigue sin haber analítica ni seguimiento, y sin config (`sync.config.json` vacío) no hay ninguna petición a terceros.
+- Sincronización: las entradas de `leemos-profiles` pueden tener `rid` (uuid del perfil en la cuenta); también `leemos-auth` (sesión), `leemos-auth-user` (último usuario) y `leemos-sync-at`. El estado gana `resets {es,ca}` ("Borrar progreso" suma 1 al idioma actual para que no lo deshaga otro dispositivo) y `modAt`, que `save()` solo actualiza si cambió un campo sincronizable (huella `fpOf`). Fusión: contadores al máximo; `level` y `name` del lado con `modAt` mayor; un reset gana a un dispositivo antiguo. Tras fusionar datos del servidor se pone `lastFp=fpOf()` para no re-sincronizar.
 
 ## Convenciones de UI
 - Colores como tokens en `:root` con variante oscura; objetivos táctiles ≥ 44 px; foco visible; `prefers-reduced-motion` desactiva animaciones (confeti, mascota, transiciones).
@@ -80,7 +86,7 @@ Sílabas inversas de 2 letras (ab, ic, um…): Azure las deletrea («a be»). Re
 4. Autohospedar la fuente Andika (licencia OFL) para que funcione 100% offline; hoy se pide a Google Fonts.
 5. Frases cortas con palabras que ya domina; modo «arma la palabra» arrastrando bloques.
 6. Pegatinas por mundo (granja, mar, dinosaurios) como razón extra para probar cada uno.
-7. Persistir la sesión en curso; sincronizar perfil entre dispositivos (solo si Fran lo pide).
+7. Persistir la sesión en curso. **Sincronizar entre dispositivos: hecho** (subproyecto 1, spec `docs/superpowers/specs/2026-10-17-accounts-sync-design.md`). Faltan el subproyecto 2 (política de privacidad, consentimiento, exportar y borrar la cuenta; **imprescindible antes de abrirlo a otras familias**) y el 3 (hosting https, proveedor de email, límites de abuso).
 8. Pruebas e2e con un navegador real (Playwright). Hoy solo hay jsdom.
 9. **Audio generado con Azure** (voces Elvira/Joana, mismas que los clips de Edge). El proveedor `edge` devuelve 403 desde 2026-10-15; no se intenta saltar la verificación de Microsoft. Pendiente: escuchar los clips de sonidos de letras de Leo que aún no se han revisado y revisar con nativo las palabras de sounds.ca.json.
 10. **Siguientes proyectos (cada uno con su spec):** (a) «Camino de Elsa»: desbloqueo letra a letra en el orden del libro, banco acumulativo entre niveles y ventana de repetición reciente (las mismas palabras salían demasiado: pesos 1+2.5×fallos, solo se excluye el último, niveles 1-2 con pocas palabras, 80% de palabras del mundo actual); (b) juego «Busca la paraula» (3 copias entre 12 palabras parecidas); (c) modo libro (página por letra: buscar la palabra, leer la frase con dibujo, fila de sílabas).

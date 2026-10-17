@@ -55,6 +55,19 @@ Para quien aún no lee. Pulsa 🧒 en la cabecera, escribe el nombre y elige «A
 - Frases de ánimo con su nombre: `npm run audio -- --provider <p> --name Leo`.
 - **Generar los sonidos con Azure** (acepta el IPA que ya envía `spoken.mjs`): crea un recurso «Speech» en Azure (región europea, p. ej. `westeurope`), copia la clave y la región a `.env` (`AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`; nunca las pegues en un chat ni las subas a git), comprueba con `npm run azure:voices` que las voces existen, genera una prueba corta con `npm run audio -- --provider azure --lang es --only "a,e,i,o,u,m,s,l,p"` y escúchala en `/tools/review.html` antes de generar el resto.
 
+## Cuentas y sincronización (opcional)
+
+Sin configurar nada, la app funciona como siempre y no hace ninguna petición a terceros. Para que el progreso y las pegatinas sigan al niño entre dispositivos:
+
+1. Crea un proyecto en [Supabase](https://supabase.com) en una región de la UE.
+2. En el editor SQL ejecuta `supabase/migrations/20261017000000_child_profiles.sql`.
+3. Authentication → Providers → Email: actívalo y edita las plantillas «Magic Link» y «Confirm signup» para que muestren `{{ .Token }}` (el código de 6 dígitos) en vez de un enlace.
+4. Copia la *Project URL* y la clave `anon` a `src/data/sync.config.json` (`{"url": "...", "anonKey": "..."}`). La clave `anon` es pública por diseño (los permisos los pone la base de datos); **nunca** pongas ahí la `service_role`.
+5. Añade `SUPABASE_URL`, `SUPABASE_ANON_KEY` y `SUPABASE_SERVICE_KEY` a `.env` y ejecuta `node scripts/check-rls.mjs`: todas las líneas deben salir `PASS` (comprueba que un usuario no puede leer ni tocar los datos de otro).
+6. El envío de emails incluido en Supabase está limitado a unos pocos por hora: para uso real configura SMTP propio (Authentication → SMTP Settings).
+
+El adulto inicia sesión desde «Para papá y mamá → Guardar mi progreso» (email, código de 6 dígitos y casilla de consentimiento). Antes de abrirlo a otras familias hacen falta la política de privacidad, exportar y borrar la cuenta (subproyecto 2).
+
 ## Publicar e instalar en la tablet
 Es un sitio estático: sirve cualquier hosting con **https** (Netlify, Cloudflare Pages, GitHub Pages…). Hace falta https para el micrófono y el modo offline. Una vez abierta en la tablet, «Añadir a pantalla de inicio» la instala; tras la primera visita con conexión, descarga los audios y funciona sin internet.
 

@@ -727,5 +727,31 @@ await sleep(60);
 const listAfterCancel = JSON.parse(a.w.localStorage.getItem('leemos-profiles')).list;
 check('cancel: closing the dialog links nothing and uploads nothing', a.$('link').hidden && listAfterCancel.every((p) => !p.rid) && supa.rows.size === 1);
 
+// ---------- 25. when it syncs: at start (signed in), after progress changes, when the page is hidden ----------
+supa = createFakeSupabase();
+await supa.fetch('https://x/auth/v1/otp', { method: 'POST', body: JSON.stringify({ email: 'mama@example.com' }) });
+const sess = await (await supa.fetch('https://x/auth/v1/verify', { method: 'POST', body: JSON.stringify({ email: 'mama@example.com', token: '123456', type: 'email' }) })).json();
+const authStored = { access_token: sess.access_token, refresh_token: sess.refresh_token, expires_at: Date.now() + 3600 * 1000, user: sess.user };
+supa.log.length = 0;
+a = await boot({ supa, syncConfig: CFG, storage: { 'leemos-auth': authStored, 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }] }, 'leemos-v1': { name: 'Elsa', total: 2, stats: { 's:ma': { ok: 1, fail: 0 } }, modAt: 10 } } });
+await until(() => supa.rows.has(RID_A), 3000);
+check('triggers: a signed-in app syncs at start', supa.rows.has(RID_A) && supa.rows.get(RID_A).data.total === 2);
+const row = supa.rows.get(RID_A); // another device moves ahead meanwhile
+row.data = { ...row.data, total: 40, stickers: 3, modAt: 99999999999999 }; row.version++;
+a.$('joinBtn').click(); a.$('okBtn').click();
+Object.defineProperty(a.d, 'hidden', { value: true, configurable: true });
+a.d.dispatchEvent(new a.w.Event('visibilitychange'));
+await until(() => JSON.parse(a.w.localStorage.getItem('leemos-v1')).total >= 40, 3000);
+const afterHide = JSON.parse(a.w.localStorage.getItem('leemos-v1'));
+check("triggers: hiding the page syncs, and the answer plus the other device's progress are both kept", afterHide.total >= 40 && afterHide.stickers === 3 && supa.rows.get(RID_A).data.stats['s:ma'].ok >= 1, JSON.stringify({ t: afterHide.total, s: afterHide.stickers }));
+const writes = () => supa.log.filter((l) => l.startsWith('PATCH') || l.startsWith('POST /rest')).length;
+const w0 = writes();
+await sleep(200);
+check('triggers: data that came from the server does not start another round of writes', writes() === w0, String(w0));
+const before = supa.log.length;
+a = await boot({ supa, syncConfig: CFG, storage: { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader' }] } } });
+await sleep(60);
+check('triggers: a signed-out app makes no request to Supabase at start', supa.log.length === before && a.errors.length === 0, supa.log.slice(before).join(' | '));
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
