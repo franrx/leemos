@@ -35,7 +35,7 @@ src/levelrule.js        regla de colocación por nivel (sylLevel, minLevel, lett
 tests/levels.mjs        pruebas de la regla, del formato de los datos, de la cobertura por letra (≥12 palabras) y de las sílabas inversas
 src/merge.js            fusión pura del estado sincronizable de un niño (contadores al máximo, reset por idioma); la usan sync.js, app.js (import()) y tests
 src/sync.js             cliente de Supabase con fetch (sin SDK): código por email, refresco de sesión, pull-merge-push de perfiles. app.js lo carga con import() solo si hay config
-src/data/sync.config.json  {url, anonKey}; vacío = función apagada (no se carga nada ni se pide nada a terceros)
+src/data/sync.config.json  {url, anonKey}; vacío = función apagada (no se carga nada ni se pide nada a terceros). En git van SOLO valores públicos: URL raíz del proyecto + clave anon (nunca service_role; lo comprueba tests/migration.mjs). Sitio publicado: https://franrx.github.io/leemos/ (GitHub Pages, rama main)
 supabase/migrations/    tabla child_profiles con RLS por propietario. scripts/check-rls.mjs la verifica contra un proyecto real (lo ejecuta Fran)
 tests/merge.mjs, tests/sync.mjs, tests/migration.mjs, tests/lib/fake-supabase.mjs    pruebas de la fusión (propiedades), del protocolo contra un Supabase falso y de la migración
 ```

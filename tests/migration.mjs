@@ -1,9 +1,9 @@
-// Guards the SQL migration against accidental edits: RLS on, owner-only policies, limits, and the config stays empty in git.
+// Guards the SQL migration against accidental edits: RLS on, owner-only policies, limits, and the committed config holds only public values (anon key, never service_role).
 import { readFileSync } from 'node:fs';
 let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sql = readFileSync('supabase/migrations/20261017000000_child_profiles.sql', 'utf8');
-// The COMMITTED config must be empty. Fran's local copy holds real values (kept out of git with skip-worktree), so read it from git when possible.
+// The COMMITTED config is either empty (feature off) or a Supabase project root URL plus the public anon key. Read it from git so a local override does not matter.
 import { execSync } from 'node:child_process';
 let cfgText;
 try { cfgText = execSync('git show HEAD:src/data/sync.config.json', { stdio: ['ignore', 'pipe', 'ignore'] }).toString(); } catch (e) { cfgText = readFileSync('src/data/sync.config.json', 'utf8'); }
@@ -22,7 +22,10 @@ check('migration: the limit trigger runs with the caller\'s rights (no security 
 check('migration: anon has no privileges on the table', /revoke all on public\.child_profiles from anon/.test(sql));
 check('migration: an owner can update only name, data and version (never id or owner)', /revoke update on public\.child_profiles from authenticated/.test(sql) && /grant update \(name, data, version\) on public\.child_profiles to authenticated/.test(sql));
 check('migration: every function body has its opening and closing dollar quote', (sql.match(/\$\$/g) || []).length === 4);
-check('config: the committed sync config is empty (the feature is off until Fran fills it in locally)', cfg.url === '' && cfg.anonKey === '');
+const jwtRole = k => { try { return JSON.parse(Buffer.from(String(k).split('.')[1], 'base64url').toString()).role; } catch (e) { return null; } };
+check('config: empty (feature off) or a Supabase https URL plus an anon-role JWT, never service_role',
+  (cfg.url === '' && cfg.anonKey === '') ||
+  (/^https:\/\/[a-z0-9]{20}\.supabase\.co$/.test(cfg.url) && jwtRole(cfg.anonKey) === 'anon'));
 check('config: only the two expected keys exist', Object.keys(cfg).sort().join() === 'anonKey,url');
 
 console.log(failures ? `\n${failures} migration test(s) FAILED` : '\nAll migration tests passed');
