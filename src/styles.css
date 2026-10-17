@@ -226,3 +226,4 @@ html.pre #endLevelUpBtn{order:3}
 .acct input[type=email],.acct input[type=text]{flex:1;min-width:0;min-height:44px;padding:8px 10px;font:inherit;border:2px solid var(--line);border-radius:12px;background:var(--panel);color:inherit}
 .acct-consent{align-items:flex-start;gap:10px;min-height:44px}
 .acct-consent input{width:24px;height:24px;flex:none;margin-top:2px}
+.mode.dim{opacity:.45}

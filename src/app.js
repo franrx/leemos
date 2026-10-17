@@ -5,6 +5,9 @@ const [LV_ES,LV_CA,WORLDS,STICKERS,T_ES,T_CA]=await Promise.all([
   loadJSON('src/data/levels.es.json'),loadJSON('src/data/levels.ca.json'),loadJSON('src/data/worlds.json'),
   loadJSON('src/data/stickers.json'),loadJSON('src/data/i18n.es.json'),loadJSON('src/data/i18n.ca.json')
 ]);
+// The letter path rule (src/levelrule.js, pure; spec: docs/superpowers/specs/2026-10-17-elsas-path-design.md). Loaded through the
+// same import seam as the other modules; if it cannot load, the path is simply off (every item is open), never a blank app.
+const LR=await (async()=>{try{return await (window.__leemosImport||(p=>import(p)))('./levelrule.js')}catch(e){return {stepOf:()=>0,STEPS:['m','p','l','n','t','s','f','b','d','r','c','*']}}})();
 const LV={es:LV_ES,ca:LV_CA};
 let LEVELS=LV_ES;
 const T={es:T_ES,ca:T_CA};
@@ -114,6 +117,10 @@ const sessFp=()=>sDone+'|'+sOk+'|'+sStk;
 const prefSnap=()=>Object.fromEntries(PREF_KEYS.map(k=>[k,S[k]]));
 if(!S.voiceURIs)S.voiceURIs={es:'',ca:''};
 if(!S.pre)S.pre={es:0,ca:0};
+// Camino de Elsa: how many letters are open per language. A profile that already has progress keeps every letter open (nothing
+// changes until a parent closes some); a new one starts at M. Runs before the baselines (lastPref), so it stamps nothing.
+{const started=S.total>0||Object.keys(S.stats).length>0,okPos=v=>Number.isInteger(v)&&v>=1&&v<=12;
+ if(!okPos(S.pathEs))S.pathEs=started?12:1;if(!okPos(S.pathCa))S.pathCa=started?12:1;if(typeof S.pathAuto!=='boolean')S.pathAuto=true}
 // One-time switch to capitals (the school book is all capitals): readers only, once per profile; she can switch back with Aa.
 if(PROFILE.kind==='reader'&&!S.upperMigrated){if(!S.prefs.upper)S.upper=true;S.upperMigrated=true;save()} // a profile that already has a synced capitals preference keeps it
 lastSessFp=sessFp();lastPref=prefSnap();
@@ -219,26 +226,44 @@ async function warmAudio(){
 }
 
 // ---------- items ----------
+const MIN_WORDS=4; // Palabras needs at least this many open words
+const pathPos=()=>S.lang==='ca'?S.pathCa:S.pathEs;
 const itemsFor=(lv,mode)=>{
   const L=LEVELS[lv];
   return mode==='syl'
-    ? L.syl.map(s=>({key:(S.lang==='ca'?'ca:':'')+'s:'+s,parts:splitSyl(s),text:s,emoji:null}))
-    : L.words.map(o=>({key:(S.lang==='ca'?'ca:':'')+'w:'+o.w,parts:o.w.split('-'),text:o.w.replace(/-/g,''),emoji:o.e}));
+    ? L.syl.map(s=>({key:(S.lang==='ca'?'ca:':'')+'s:'+s,parts:splitSyl(s),text:s,emoji:null,h:s,mode:'syl'}))
+    : L.words.map(o=>({key:(S.lang==='ca'?'ca:':'')+'w:'+o.w,parts:o.w.split('-'),text:o.w.replace(/-/g,''),emoji:o.e,h:o.w,mode:'word'}));
 };
+const eligible=i=>LR.stepOf(i.h)<=pathPos();
+// Items of levels 0..lv (cumulative) that the open letters allow; may be empty.
+const openItems=(mode,lv=S.level)=>{const out=[];for(let l=0;l<=lv;l++)out.push(...itemsFor(l,mode).filter(eligible));return out};
+// What the next exercise is drawn from; with nothing open it ignores the letters rather than stall.
+const poolFor=mode=>{
+  const o=openItems(mode);if(o.length)return o;
+  const all=[];for(let l=0;l<=S.level;l++)all.push(...itemsFor(l,mode));return all;
+};
+const effMode=()=>S.mode==='word'&&openItems('word').length>=MIN_WORDS?'word':'syl'; // the stored preference S.mode is never changed by this
+const recent=[]; // keys of the last exercises (not saved)
 function pick(){
-  const pool=itemsFor(S.level,S.mode).filter(i=>!last||i.key!==last||itemsFor(S.level,S.mode).length<2); // the world is only scenery: it never narrows the words
+  const all=poolFor(effMode());
+  const k=Math.min(6,Math.floor(all.length/2));
+  const skip=new Set(recent.slice(-k));if(last)skip.add(last);
+  let pool=all.filter(i=>!skip.has(i.key));
+  if(!pool.length)pool=all.filter(i=>!last||i.key!==last||all.length<2);
+  if(!pool.length)pool=all;
   const wts=pool.map(i=>{const s=S.stats[i.key]||{ok:0,fail:0};return Math.max(.25,1+s.fail*2.5-s.ok*.35+(s.ok+s.fail===0?1.5:0))});
-  let r=Math.random()*wts.reduce((a,b)=>a+b,0);
-  for(let i=0;i<pool.length;i++){r-=wts[i];if(r<=0)return pool[i]}
-  return pool[0];
+  let r=Math.random()*wts.reduce((a,b)=>a+b,0),it=pool[0];
+  for(let i=0;i<pool.length;i++){r-=wts[i];if(r<=0){it=pool[i];break}}
+  recent.push(it.key);if(recent.length>12)recent.shift();
+  return it;
 }
 
 // ---------- render ----------
 function renderLevels(){
   const box=$('levels');box.innerHTML='';
   LEVELS.forEach((L,i)=>{
-    const all=[...itemsFor(i,'syl'),...itemsFor(i,'word')];
-    const pct=Math.round(100*all.filter(x=>mastered(x.key)).length/all.length);
+    const all=[...itemsFor(i,'syl'),...itemsFor(i,'word')].filter(eligible); // only the open items count
+    const pct=all.length?Math.round(100*all.filter(x=>mastered(x.key)).length/all.length):0;
     const b=document.createElement('button');
     b.className='level';b.setAttribute('aria-pressed',i===S.level);
     b.innerHTML='<b>'+(i+1)+'. '+L.name+'</b><small>'+L.sub+'</small><div class="bar"><i style="width:'+pct+'%"></i></div>';
@@ -253,7 +278,7 @@ function renderHard(){
   list.forEach(([k])=>{const c=document.createElement('span');c.className='chip';c.textContent=k.replace(/^ca:/,'').replace(/^(snd|s|w):/,'');box.appendChild(c)});
 }
 const hintFor=p=>p==='read'
-  ? t(S.mode==='syl'?'hintSyl':'hintWord',{n:nm()})
+  ? t(((cur&&cur.mode)||effMode())==='syl'?'hintSyl':'hintWord',{n:nm()})
   : t('hintJudge');
 // Lumi's instruction sentence: a recording or a generated clip only. The browser voice is robotic, so with no clip he stays silent.
 // While it plays his beak moves; tapped (big) he also grows to the middle of the screen.
@@ -362,14 +387,14 @@ function show(){
   t.style.setProperty('--fs',fs+'px');
   it.parts.forEach((p,i)=>{
     const b=document.createElement('button');
-    b.className='tile c'+(i%5)+(S.mode==='syl'?' static':'');
+    b.className='tile c'+(i%5)+(it.mode==='syl'?' static':'');
     b.textContent=p;
     b.setAttribute('aria-label',p);
-    if(S.mode==='word') b.onclick=()=>say(p);
+    if(it.mode==='word') b.onclick=()=>say(p);
     t.appendChild(b);
   });
   const pic=$('pic');
-  pic.hidden=S.mode!=='word'||!it.emoji; // a word without a picture (e.g. "no", "dia") has no slot at all
+  pic.hidden=it.mode!=='word'||!it.emoji; // a word without a picture (e.g. "no", "dia") has no slot at all
   pic.className='pic q';pic.textContent='?';
   setPhase('read');
   introHint();
@@ -504,7 +529,7 @@ function applyMerged(m,adoptSession){
   // preferences, through the same functions the UI uses
   applyTheme();applyCase();applySound();applyWorld();
   $('rate').value=S.rate;$('sessionSel').value=String(S.sessionLen);
-  $('mSyl').setAttribute('aria-pressed',S.mode==='syl');$('mWord').setAttribute('aria-pressed',S.mode==='word');
+  renderMode();
   // the session in progress: a finished or stale one starts a new session
   const s=m.session;
   if(adoptSession&&s.at){
@@ -803,9 +828,9 @@ function showEnd(){
   let canLevelUp;
   if(pre)canLevelUp=pre.showEnd();
   else{
-    const all=[...itemsFor(S.level,'syl'),...itemsFor(S.level,'word')];
-    const pct=Math.round(100*all.filter(x=>mastered(x.key)).length/all.length);
-    canLevelUp=pct>=90&&S.level<LEVELS.length-1;
+    const all=[...itemsFor(S.level,'syl'),...itemsFor(S.level,'word')].filter(eligible);
+    const pct=all.length?Math.round(100*all.filter(x=>mastered(x.key)).length/all.length):0;
+    canLevelUp=pathPos()>=12&&pct>=90&&S.level<LEVELS.length-1; // the next level only when every letter is open
     $('endLevelUp').hidden=!canLevelUp;
     $('endLevelUpBtn').hidden=!canLevelUp;
     if(canLevelUp)$('endLevelUp').textContent=t('endLevelUp',{n:S.level+2,t:LEVELS[S.level+1].name});
@@ -835,10 +860,15 @@ $('okBtn').onclick=()=>record(true);
 $('noBtn').onclick=()=>record(false);
 $('mSyl').onclick=()=>setMode('syl');
 $('mWord').onclick=()=>setMode('word');
+function renderMode(){
+  const m=effMode(),ok=openItems('word').length>=MIN_WORDS;
+  $('mSyl').setAttribute('aria-pressed',m==='syl');$('mWord').setAttribute('aria-pressed',m==='word');
+  $('mWord').setAttribute('aria-disabled',!ok);$('mWord').classList.toggle('dim',!ok);$('mWord').title=ok?'':t('wordsLocked');
+}
 function setMode(m){
+  if(m==='word'&&openItems('word').length<MIN_WORDS)return; // dimmed: not enough words are open yet
   S.mode=m;save();
-  $('mSyl').setAttribute('aria-pressed',m==='syl');
-  $('mWord').setAttribute('aria-pressed',m==='word');
+  renderMode();
   next();
 }
 $('caseBtn').onclick=()=>{S.upper=!S.upper;save();applyCase()};
@@ -865,8 +895,7 @@ $('themeBtn').onclick=()=>{
 };
 window.addEventListener('resize',()=>{if(cur){const merged=$('tiles').classList.contains('merged');const ph=phase;show();if(merged&&ph==='judge'){$('tiles').classList.add('merged');setPhase('judge');if(cur.emoji){$('pic').className='pic on';$('pic').textContent=cur.emoji}}}});
 
-$('mSyl').setAttribute('aria-pressed',S.mode==='syl');
-$('mWord').setAttribute('aria-pressed',S.mode==='word');
+renderMode();
 $('albumBtn').onclick=()=>{renderAlbum();$('album').hidden=false;$('albumClose').focus({preventScroll:true})}; // the long album must open at the top, not scrolled to the close button
 $('albumClose').onclick=closeOverlays;
 $('worldBtn').onclick=()=>{renderWorlds();$('worlds').hidden=false;$('worldsClose').focus()};

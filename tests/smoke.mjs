@@ -15,7 +15,7 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null, reduced = false, voice = null, syncConfig = null, supa = null, syncEvery = 0 } = {}) {
+async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null, reduced = false, voice = null, syncConfig = null, supa = null, syncEvery = 0, openPath = true } = {}) {
   const errors = [];
   const audioCalls = [];
   const vc = new VirtualConsole();
@@ -24,7 +24,11 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
     runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://localhost/', virtualConsole: vc,
     beforeParse(w) {
       Object.defineProperty(w.navigator, 'language', { value: lang });
-      for (const [k, v] of Object.entries(storage)) w.localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
+      // Most tests were written before the letter path: unless a test asks for the real defaults (openPath:false) the saved
+      // reader states start with every letter open, which is what an existing profile gets.
+      const withPath = (k, v) => (openPath && typeof v !== 'string' && /^leemos-v1(:|$)/.test(k) && v.pathEs === undefined ? { ...v, pathEs: 12, pathCa: 12 } : v);
+      for (const [k, v] of Object.entries(storage)) w.localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(withPath(k, v)));
+      if (openPath && !('leemos-profiles' in storage) && !('leemos-v1' in storage)) w.localStorage.setItem('leemos-v1', JSON.stringify({ pathEs: 12, pathCa: 12 }));
       w.__leemosImport = importFails ? () => Promise.reject(new Error('offline')) : (p) => import(pathToFileURL(join(ROOT, 'src', p)).href);
       w.matchMedia = (q) => ({ matches: reduced && /reduced-motion/.test(q), addEventListener() {}, removeListener() {} });
       w.speechSynthesis = { getVoices: () => [{ name: 'Joana Online (Natural)', lang: 'ca-ES', voiceURI: 'j' }, { name: 'Google español', lang: 'es-ES', voiceURI: 'g' }], cancel() {}, speak(u) { (w.__tts ||= []).push(u.text); } };
@@ -1272,6 +1276,65 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   x = await boot({ lang: 'ca-ES', storage: own({ bosque: 6 }, 6) });
   await playSession(x, 5);
   check('reward: the origin line is in Catalan too', /Platja/.test(x.$('rewardFrom').textContent), x.$('rewardFrom').textContent);
+}
+
+// ---------- 35. Camino de Elsa: what she practices ----------
+{
+  const { stepOf } = await import('../src/levelrule.js');
+  const LVES = readJSON('src/data/levels.es.json');
+  const drawn = async (app, n) => {
+    const seen = [];
+    for (let i = 0; i < n; i++) {
+      if (!app.$('end').hidden) app.$('endMore').click();
+      app.$('joinBtn').click();
+      seen.push([...app.d.querySelectorAll('#tiles .tile')].map((b) => b.textContent).join(''));
+      app.$('okBtn').click(); await sleep(0);
+      if (!app.$('reward').hidden) app.$('rewardOk').click();
+    }
+    return seen;
+  };
+  const st = (app) => JSON.parse(app.w.localStorage.getItem('leemos-v1'));
+  let x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', level: 4, sessionLen: 20, pathEs: 1, pathCa: 1 } } });
+  let seen = await drawn(x, 40);
+  check('path: with only M open every exercise needs no other letter (even at level 5)', seen.every((s) => stepOf(s) <= 1), seen.filter((s) => stepOf(s) > 1).join(','));
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', level: 2, sessionLen: 100, pathEs: 12, pathCa: 12 } } });
+  seen = await drawn(x, 60);
+  check('path: the pool is cumulative, so earlier levels keep coming back', seen.some((s) => LVES[0].syl.includes(s)) && seen.some((s) => LVES[1].syl.includes(s)) && seen.some((s) => LVES[2].syl.includes(s)));
+  check('path: the same exercise does not come back within the recent window', seen.every((s, i) => !seen.slice(Math.max(0, i - 6), i).includes(s)), seen.join(','));
+  check('path: the whole run raised no errors', x.errors.length === 0, x.errors.join(' | '));
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', mode: 'word', pathEs: 1, pathCa: 1 } } });
+  x.$('joinBtn').click();
+  check('path: Palabras is dimmed while too few words are open, and a syllable is shown instead', x.$('mWord').getAttribute('aria-disabled') === 'true' && x.$('mSyl').getAttribute('aria-pressed') === 'true' && x.$('pic').hidden && x.$('mWord').title.length > 0);
+  x.$('mWord').click(); await sleep(5);
+  check('path: tapping the dimmed Palabras changes nothing and the saved mode is untouched', x.$('mSyl').getAttribute('aria-pressed') === 'true' && st(x).mode === 'word');
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 } } });
+  check('path: with every letter open Palabras is available', x.$('mWord').getAttribute('aria-disabled') === 'false');
+  // defaults (the real ones: openPath:false)
+  x = await boot({ openPath: false });
+  x.$('joinBtn').click(); x.$('okBtn').click(); await sleep(5);
+  check('path: a new reader profile starts at M with the automatic switch on', st(x).pathEs === 1 && st(x).pathCa === 1 && st(x).pathAuto === true, JSON.stringify([st(x).pathEs, st(x).pathAuto]));
+  x = await boot({ openPath: false, storage: { 'leemos-v1': { name: 'Elsa', total: 3, stats: { 's:ma': { ok: 2, fail: 0 } } } } });
+  x.$('joinBtn').click(); x.$('okBtn').click(); await sleep(5);
+  check('path: a profile that already has progress starts with every letter open', st(x).pathEs === 12 && st(x).pathCa === 12);
+  x = await boot({ openPath: false, storage: { 'leemos-v1': { name: 'Elsa', total: 3, pathEs: 99, pathCa: 0, pathAuto: 'yes' } } });
+  x.$('joinBtn').click(); x.$('okBtn').click(); await sleep(5);
+  check('path: a broken saved value falls back to the default', st(x).pathEs === 12 && st(x).pathCa === 12 && st(x).pathAuto === true);
+  x = await boot({ openPath: false, storage: { 'leemos-v1': { name: 'Elsa', total: 3, modAt: 55, stats: { 's:ma': { ok: 2, fail: 0 } } } } });
+  x.$('themeBtn').click(); await sleep(5);
+  check('path: loading an old state stamps nothing (modAt and the preference stamps stay put)', st(x).modAt === 55 && !(st(x).prefs && st(x).prefs.pathEs), JSON.stringify([st(x).modAt, st(x).prefs]));
+  // the level bars count only the open items, and the level-up offer waits for every letter
+  const lvl0 = [...LVES[0].syl.map((s) => 's:' + s), ...LVES[0].words.map((o) => 'w:' + o.w)];
+  const mastered = Object.fromEntries(lvl0.map((k) => [k, { ok: 3, fail: 0 }]));
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, pathEs: 1, pathCa: 1, pathAuto: false, stats: mastered } } });
+  await playSession(x, 5);
+  check('path: the level-up offer is not shown while letters are still closed', !x.$('end').hidden && x.$('endLevelUpBtn').hidden);
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, pathEs: 12, pathCa: 12, stats: mastered } } });
+  await playSession(x, 5);
+  check('path: with every letter open the level-up offer works as before', !x.$('end').hidden && !x.$('endLevelUpBtn').hidden);
+  // the rule module cannot load: the app still works, every item open
+  x = await boot({ importFails: true, storage: { 'leemos-v1': { name: 'Elsa', pathEs: 1, pathCa: 1 } } });
+  x.$('joinBtn').click();
+  check('path: if the rule cannot load the app still shows an exercise', [...x.d.querySelectorAll('#tiles .tile')].length > 0 && x.errors.length === 0, x.errors.join(' | '));
 }
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
