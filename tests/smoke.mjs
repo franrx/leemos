@@ -444,5 +444,19 @@ check('pictures: a word with an emoji still shows the "?" slot before reading', 
 a.$('joinBtn').click();
 check('pictures: ... and its picture after reading', a.$('pic').hidden === false && a.$('pic').textContent !== '?' && a.$('pic').textContent.length > 0);
 
+// ---------- 16. the new inverse syllables render as non-empty tiles ----------
+const INV = [...'aeiou'].flatMap((v) => [...'mctpb'].map((c) => v + c));
+a = await boot({ levelsPatch: (d) => { d[0].syl = INV; return d; } }); // level 1 holds only the 25 inverse syllables
+const shown = new Set(); let emptyTile = 0;
+for (let i = 0; i < 80; i++) {
+  if (!a.$('end').hidden) a.$('endMore').click();
+  const tiles = [...a.d.querySelectorAll('#tiles .tile')].map((b) => b.textContent);
+  if (!tiles.length || tiles.some((t) => !t)) emptyTile++;
+  shown.add(tiles.join(''));
+  a.$('joinBtn').click(); a.$('okBtn').click(); await sleep(0);
+  if (!a.$('reward').hidden) a.$('rewardOk').click();
+}
+check('syllables: every shown inverse syllable has non-empty tiles and belongs to the series', emptyTile === 0 && [...shown].every((s) => INV.includes(s)) && shown.size >= 20, `${shown.size} distinct, ${emptyTile} empty`);
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

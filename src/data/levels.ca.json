@@ -108,7 +108,7 @@
   {
     "name": "Tanquen i travades",
     "sub": "al, pla, tra",
-    "syl": ["al","ar","an","as","el","er","en","es","il","ir","in","is","ol","or","on","os","ul","ur","un","us","pla","ple","plo","bla","ble","blo","fla","fle","flo","cla","cle","clo","pra","pre","pro","bra","bre","bro","tra","tre","tro","gra","gre","gro","dra","dre","dro","fra","fre","fro"],
+    "syl": ["al","ar","an","as","el","er","en","es","il","ir","in","is","ol","or","on","os","ul","ur","un","us","am","ac","at","ap","ab","em","ec","et","ep","eb","im","ic","it","ip","ib","om","oc","ot","op","ob","um","uc","ut","up","ub","pla","ple","plo","bla","ble","blo","fla","fle","flo","cla","cle","clo","pra","pre","pro","bra","bre","bro","tra","tre","tro","gra","gre","gro","dra","dre","dro","fra","fre","fro"],
     "words": [
       {"w":"pa","e":"🍞","g":"granja ciudad"},
       {"w":"sol","e":"☀️","g":"playa nubes desierto"},

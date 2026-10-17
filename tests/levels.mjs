@@ -52,5 +52,12 @@ for (const l of COVER_LANGS) {
   check(`[${l}] at least 12 distinct words for each book letter`, low.length === 0, low.map((b) => `${b}=${counts[b]}`).join(' '));
 }
 
+// ---------- inverse syllables: the full series vowel + m c t p b is in level 4 ----------
+const SERIES_LANGS = ['ca', 'es'];
+for (const l of SERIES_LANGS) {
+  const missing = [...'aeiou'].flatMap((v) => [...'mctpb'].map((c) => v + c)).filter((s) => !LV[l][3].syl.includes(s));
+  check(`[${l}] inverse syllables (vowel + m c t p b) are in level 4`, missing.length === 0, missing.join(' '));
+}
+
 console.log(failures ? `\n${failures} levels test(s) FAILED` : '\nAll levels tests passed');
 process.exit(failures ? 1 : 0);
