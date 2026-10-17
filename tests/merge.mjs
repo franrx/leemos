@@ -1,5 +1,5 @@
 // Tests for the pure merge of a child's synced state (src/merge.js).
-import { mergeData, sameData, pickSynced, applySynced } from '../src/merge.js';
+import { mergeData, sameData, pickSynced, applySynced, PREF_KEYS } from '../src/merge.js';
 
 let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
@@ -81,6 +81,57 @@ check('bounds: stats keys that are not item keys, or are too long, are dropped',
 check('bounds: fractional counters become whole numbers', huge.stats['w:ne-na'].ok === 1);
 check('bounds: field names inside a stat are limited too', Object.keys(huge.stats['snd:m']).every((f) => f.length <= 16));
 check('bounds: an unsafe modAt counts as zero', huge.modAt === 0);
+
+// ---------- session in progress and preferences (spec: 2026-10-17-session-prefs-sync-design.md) ----------
+const sess = (done, ok, stk, at) => ({ done, ok, stk, at });
+const pf = (v, at) => ({ v, at });
+check('session: the side changed last wins as a whole', same(mergeData({ session: sess(2, 1, 0, 100) }, { session: sess(5, 4, 1, 200) }).session, sess(5, 4, 1, 200)) && same(mergeData({ session: sess(5, 4, 1, 200) }, { session: sess(2, 1, 0, 100) }).session, sess(5, 4, 1, 200)));
+check('session: a tie is broken by done, then ok, then stk, whatever the argument order', same(mergeData({ session: sess(3, 1, 0, 100) }, { session: sess(4, 0, 0, 100) }).session, sess(4, 0, 0, 100)) && same(mergeData({ session: sess(4, 0, 0, 100) }, { session: sess(3, 1, 0, 100) }).session, sess(4, 0, 0, 100)) && same(mergeData({ session: sess(4, 2, 0, 100) }, { session: sess(4, 3, 0, 100) }).session, sess(4, 3, 0, 100)));
+check('session: with none on either side the result is an empty session with at 0', same(mergeData({}, {}).session, sess(0, 0, 0, 0)));
+check('session: a session without a valid timestamp is ignored', same(mergeData({ session: sess(9, 9, 9, 0) }, { session: sess(1, 0, 0, 5) }).session, sess(1, 0, 0, 5)) && same(mergeData({ session: { done: 9, ok: 9, stk: 9 } }, {}).session, sess(0, 0, 0, 0)));
+check('session: counters are whole numbers and capped like the others', same(mergeData({ session: sess(1e300, -4, 2.9, 7) }, {}).session, sess(1e6, 0, 2, 7)));
+check('prefs: each key is decided on its own, so a change on one device never overwrites another key', (() => { const r = mergeData({ prefs: { theme: pf('dark', 300), sound: pf(true, 100) } }, { prefs: { theme: pf('light', 200), sound: pf(false, 250) } }).prefs; return r.theme.v === 'dark' && r.sound.v === false; })());
+check('prefs: a tie is broken by the value as text, whatever the argument order', mergeData({ prefs: { mode: pf('word', 50) } }, { prefs: { mode: pf('syl', 50) } }).prefs.mode.v === mergeData({ prefs: { mode: pf('syl', 50) } }, { prefs: { mode: pf('word', 50) } }).prefs.mode.v);
+check('prefs: invalid values are dropped (wrong type, out of range, unknown)', (() => {
+  const bad = mergeData({ prefs: { theme: pf('purple', 9), mode: pf('x', 9), sessionLen: pf(7, 9), rate: pf(5, 9), world: pf(1000, 9), lang: pf('fr', 9), sound: pf('yes', 9), upper: pf(1, 9) } }, {}).prefs;
+  return Object.keys(bad).length === 0;
+})());
+check('prefs: the valid values are accepted', (() => {
+  const ok = mergeData({ prefs: { theme: pf('', 1), mode: pf('word', 1), sessionLen: pf(15, 1), rate: pf(0.6, 1), world: pf('auto', 1), lang: pf('ca', 1), sound: pf(false, 1), upper: pf(true, 1) } }, {}).prefs;
+  return PREF_KEYS.every((k) => ok[k]);
+})());
+check('prefs: an entry without a valid timestamp is dropped and a non-object prefs is ignored', !('theme' in mergeData({ prefs: { theme: { v: 'dark' } } }, {}).prefs) && Object.keys(mergeData({ prefs: [1, 2] }, { prefs: 'x' }).prefs).length === 0);
+check('prefs: voice settings can never come through', !('voiceURI' in mergeData({ prefs: { voiceURI: pf('x', 9) } }, {}).prefs) && !('voiceURIs' in mergeData({ prefs: { voiceURIs: pf({}, 9) } }, {}).prefs));
+check('prefs: __proto__ and unknown keys are ignored', (() => { const r = mergeData(JSON.parse('{"prefs":{"__proto__":{"v":"dark","at":9},"constructor":{"v":1,"at":9}}}'), {}).prefs; return Object.keys(r).length === 0 && !({}).v; })());
+check('session and prefs never touch modAt, level or name', (() => { const r = mergeData({ level: 3, name: 'A', modAt: 100, session: sess(1, 0, 0, 999) }, { prefs: { theme: pf('dark', 999) } }); return r.modAt === 100 && r.level === 3 && r.name === 'A'; })());
+
+// property tests including the new fields
+const genExtra = () => {
+  const o = gen();
+  o.session = rnd() < 0.7 ? sess(ri(6), ri(6), ri(3), (1 + ri(4)) * 100) : undefined;
+  const prefs = {};
+  if (rnd() < 0.6) prefs.theme = pf(['', 'light', 'dark'][ri(3)], (1 + ri(4)) * 100);
+  if (rnd() < 0.6) prefs.sound = pf(rnd() < 0.5, (1 + ri(4)) * 100);
+  if (rnd() < 0.6) prefs.sessionLen = pf([5, 10, 15, 20][ri(4)], (1 + ri(4)) * 100);
+  if (rnd() < 0.6) prefs.mode = pf(['syl', 'word'][ri(2)], (1 + ri(4)) * 100);
+  o.prefs = prefs;
+  return o;
+};
+let c2 = true, a2 = true, i2 = true;
+for (let i = 0; i < 300; i++) {
+  const x = genExtra(), y = genExtra(), z = genExtra();
+  if (!same(mergeData(x, y), mergeData(y, x))) c2 = false;
+  if (!same(mergeData(mergeData(x, y), z), mergeData(x, mergeData(y, z)))) a2 = false;
+  if (!same(mergeData(x, x), mergeData(x, {}))) i2 = false;
+}
+check('property: with session and prefs the merge is still commutative', c2);
+check('property: with session and prefs the merge is still associative', a2);
+check('property: with session and prefs merging a state with itself changes nothing', i2);
+
+// applySynced writes them and the plain fields
+const T = { theme: 'light', sound: true, voiceURI: 'keep-me' };
+applySynced(T, { session: sess(4, 3, 1, 500), prefs: { theme: pf('dark', 9), sound: pf(false, 9) } });
+check('applySynced: the session, the prefs and the plain preference fields are set; the voice is untouched', T.session.done === 4 && T.prefs.theme.v === 'dark' && T.theme === 'dark' && T.sound === false && T.voiceURI === 'keep-me', JSON.stringify(T));
 
 console.log(failures ? `\n${failures} merge test(s) FAILED` : '\nAll merge tests passed');
 process.exit(failures ? 1 : 0);

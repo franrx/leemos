@@ -30,7 +30,7 @@ prefs:   { mode: {v, at}, world: {v, at}, sessionLen: {v, at}, upper: {v, at},
 
 ### Merge rules
 
-- **`session`**: the whole object comes from the side with the larger `at`. Ties are broken by the larger `done`, then `ok`, then `stk`, so the order of the arguments never matters. `done`, `ok`, `stk` are whole numbers capped like the other counters. A session whose `at` is older than **12 hours** is treated as no session (all zero): a session left over from yesterday must not resume.
+- **`session`**: the whole object comes from the side with the larger `at`. Ties are broken by the larger `done`, then `ok`, then `stk`, so the order of the arguments never matters. `done`, `ok`, `stk` are whole numbers capped like the other counters. A session older than **12 hours** (by its `at`) is ignored by the app when it restores or adopts it (the merge itself stays free of the clock): a session left over from yesterday must not resume.
 - **`prefs`**: per key, the entry with the larger `at` wins (ties: the larger value as text, so the result is deterministic). Each key has a whitelist of valid values; anything else is dropped:
 
 | key | valid `v` |

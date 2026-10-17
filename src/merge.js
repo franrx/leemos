@@ -11,6 +11,31 @@ const langOf = (k) => (k.indexOf('ca:') === 0 ? 'ca' : 'es');
 const pair = (o) => ({ es: num(isObj(o) ? o.es : 0), ca: num(isObj(o) ? o.ca : 0) });
 const lvl = (x) => Math.floor(num(x && x.level));
 const nm = (x) => (x && typeof x.name === 'string' ? x.name.trim().slice(0, 40) : '');
+// ---------- session in progress and preferences (spec: 2026-10-17-session-prefs-sync-design.md) ----------
+const PREF_OK = {
+  mode: (v) => v === 'syl' || v === 'word',
+  world: (v) => v === 'auto' || (Number.isInteger(v) && v >= 0 && v <= 99),
+  sessionLen: (v) => v === 5 || v === 10 || v === 15 || v === 20,
+  upper: (v) => typeof v === 'boolean',
+  lang: (v) => v === 'es' || v === 'ca',
+  rate: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0.5 && v <= 1.1,
+  sound: (v) => typeof v === 'boolean',
+  theme: (v) => v === '' || v === 'light' || v === 'dark',
+};
+export const PREF_KEYS = Object.keys(PREF_OK); // never the voice: it differs per device
+const cleanPref = (k, prefs) => {
+  const e = isObj(prefs) && Object.prototype.hasOwnProperty.call(prefs, k) ? prefs[k] : null;
+  return isObj(e) && PREF_OK[k](e.v) && stamp(e.at) ? { v: e.v, at: stamp(e.at) } : null;
+};
+// the entry changed last; on a tie the larger value as text, so the order of the arguments never matters
+const pickPref = (a, b) => (!a || !b ? a || b || null : a.at !== b.at ? (a.at > b.at ? a : b) : String(a.v) >= String(b.v) ? a : b);
+const cleanSession = (s) => (isObj(s) && stamp(s.at) ? { done: num(s.done), ok: num(s.ok), stk: num(s.stk), at: stamp(s.at) } : null);
+const pickSession = (a, b) => {
+  if (!a || !b) return a || b || { done: 0, ok: 0, stk: 0, at: 0 };
+  if (a.at !== b.at) return a.at > b.at ? a : b;
+  return a.done !== b.done ? (a.done > b.done ? a : b) : a.ok !== b.ok ? (a.ok > b.ok ? a : b) : a.stk >= b.stk ? a : b;
+};
+
 
 const cleanStat = (s) => {
   const o = {};
@@ -53,6 +78,8 @@ export function mergeData(a, b) {
     level: lvl(w),
     name: nm(w),
     modAt: Math.max(ta, tb),
+    session: pickSession(cleanSession(a.session), cleanSession(b.session)),
+    prefs: Object.fromEntries(PREF_KEYS.map((k) => [k, pickPref(cleanPref(k, a.prefs), cleanPref(k, b.prefs))]).filter(([, e]) => e)),
   };
 }
 
@@ -72,6 +99,9 @@ export function applySynced(state, data) {
   state.resets = d.resets;
   state.level = d.level;
   state.modAt = d.modAt;
+  state.session = d.session;
+  state.prefs = d.prefs;
+  for (const k of PREF_KEYS) if (d.prefs[k]) state[k] = d.prefs[k].v; // the plain fields the app reads; never the voice
   if (d.name) state.name = d.name;
   return state;
 }
