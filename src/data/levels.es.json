@@ -10,7 +10,8 @@
       {"w":"la-na","e":"🧶","g":"granja"},
       {"w":"me-sa","e":"🪑"},
       {"w":"ne-na","e":"👧"},
-      {"w":"sa-la","e":"🛋️"}
+      {"w":"sa-la","e":"🛋️"},
+      {"w":"su-ma","e":"➕"}
     ]
   },
   {
@@ -38,7 +39,12 @@
       {"w":"di-no","e":"🦖","g":"dino"},
       {"w":"lo-bo","e":"🐺","g":"bosque montana nieve"},
       {"w":"no-ta","e":"🎵","g":"musica"},
-      {"w":"so-pa","e":"🍲"}
+      {"w":"so-pa","e":"🍲"},
+      {"w":"lu-pa","e":"🔍"},
+      {"w":"ni-do","e":"🪺"},
+      {"w":"se-ta","e":"🍄"},
+      {"w":"de-do","e":"👆"},
+      {"w":"be-bé","e":"👶"}
     ]
   },
   {
@@ -88,7 +94,24 @@
       {"w":"ba-te-rí-a","e":"🥁","g":"musica"},
       {"w":"me-lo-dí-a","e":"🎼","g":"musica"},
       {"w":"se-má-fo-ro","e":"🚦","g":"ciudad"},
-      {"w":"so-ni-do","e":"🔊","g":"musica"}
+      {"w":"so-ni-do","e":"🔊","g":"musica"},
+      {"w":"la-go","e":"🏞️"},
+      {"w":"nú-me-ro"},
+      {"w":"si-re-na","e":"🧜"},
+      {"w":"so-fá","e":"🛋️"},
+      {"w":"fa-ro","e":"🔦"},
+      {"w":"fue-go","e":"🔥"},
+      {"w":"fi-de-o","e":"🍜"},
+      {"w":"fo-co","e":"🔦"},
+      {"w":"fi-la"},
+      {"w":"ra-ta","e":"🐀"},
+      {"w":"ra-mo","e":"💐"},
+      {"w":"rí-o","e":"🏞️"},
+      {"w":"ro-pa","e":"👕"},
+      {"w":"rue-da","e":"🛞"},
+      {"w":"re-ga-lo","e":"🎁"},
+      {"w":"ma-le-ta","e":"🧳"},
+      {"w":"mo-ne-da","e":"🪙"}
     ]
   },
   {
@@ -138,7 +161,26 @@
       {"w":"es-cu-do","e":"🛡️","g":"castillo"},
       {"w":"a-vión","e":"✈️","g":"nubes ciudad"},
       {"w":"can-tar","e":"🎤","g":"musica"},
-      {"w":"fre-sa","e":"🍓","g":"jardin granja"}
+      {"w":"fre-sa","e":"🍓","g":"jardin granja"},
+      {"w":"le-ón","e":"🦁"},
+      {"w":"li-món","e":"🍋"},
+      {"w":"na-ran-ja","e":"🍊"},
+      {"w":"ne-gro"},
+      {"w":"nu-tria","e":"🦦"},
+      {"w":"sar-di-na","e":"🐟"},
+      {"w":"fuen-te","e":"⛲"},
+      {"w":"fan-tas-ma","e":"👻"},
+      {"w":"fie-bre","e":"🤒"},
+      {"w":"dien-te","e":"🦷"},
+      {"w":"dos","e":"2️⃣"},
+      {"w":"dia-man-te","e":"💎"},
+      {"w":"de-sier-to","e":"🏜️"},
+      {"w":"dor-mir","e":"🛌"},
+      {"w":"dis-co","e":"💿"},
+      {"w":"rey","e":"🤴"},
+      {"w":"re-loj","e":"🕐"},
+      {"w":"ra-tón","e":"🐭"},
+      {"w":"ba-lón","e":"⚽"}
     ]
   },
   {
@@ -191,7 +233,18 @@
       {"w":"luz","e":"💡","g":"ciudad"},
       {"w":"pez","e":"🐟","g":"mar"},
       {"w":"bra-zo","e":"💪"},
-      {"w":"cer-do","e":"🐖","g":"granja"}
+      {"w":"cer-do","e":"🐖","g":"granja"},
+      {"w":"le-che","e":"🥛"},
+      {"w":"lá-piz","e":"✏️"},
+      {"w":"no-che","e":"🌙"},
+      {"w":"na-riz","e":"👃"},
+      {"w":"ni-ña","e":"👧"},
+      {"w":"si-lla","e":"🪑"},
+      {"w":"se-llo","e":"✉️"},
+      {"w":"dul-ce","e":"🍬"},
+      {"w":"mo-chi-la","e":"🎒"},
+      {"w":"ta-za","e":"☕"},
+      {"w":"te-cho","e":"🏠"}
     ]
   }
 ]

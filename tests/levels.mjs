@@ -44,7 +44,7 @@ check('moved words keep their text and sit in their new level', inLevel('ca', 3,
 
 // ---------- coverage: at least 12 distinct words for each of the 11 book letters ----------
 const BOOK = [...'mplntsfbdrc'];
-const COVER_LANGS = ['ca'];
+const COVER_LANGS = ['ca', 'es'];
 for (const l of COVER_LANGS) {
   const words = LV[l].flatMap((L) => L.words.map((o) => o.w));
   const counts = Object.fromEntries(BOOK.map((b) => [b, new Set(words.filter((w) => letterOf(w) === b)).size]));
