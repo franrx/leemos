@@ -1015,7 +1015,7 @@ const OLD = () => NOW() - 120000; // idle for two minutes
 // b: a device being used keeps its own session and pushes it back
 {
   const { s, app } = await seed({ session: { done: 6, ok: 6, stk: 0, at: NOW() + 5000 } }, { session: { done: 2, ok: 1, stk: 0, at: NOW() } });
-  await sleep(150);
+  await until(() => app.w.localStorage.getItem('leemos-sync-at'), 3000); await sleep(40);
   check('pull b: a session changed on this device a moment ago is not overwritten', /2 de 10/.test(app.$('slabel').textContent), app.$('slabel').textContent);
   await until(() => s.rows.get(RID_A).data.session.done === 2, 9000); // pushed back through the normal 5 s debounce
   check('pull b: and it is pushed back, so the other device adopts it', s.rows.get(RID_A).data.session.done === 2, JSON.stringify(s.rows.get(RID_A).data.session));
@@ -1043,7 +1043,7 @@ const OLD = () => NOW() - 120000; // idle for two minutes
   await until(() => /0 de 10/.test(app.$('slabel').textContent), 3000);
   check('pull e: a finished remote session applies as zero, not as "10 de 10"', /0 de 10/.test(app.$('slabel').textContent), app.$('slabel').textContent);
   const { app: app2 } = await seed({ session: { done: 7, ok: 5, stk: 0, at: NOW() - 13 * 3600 * 1000 } }, { session: { done: 0, ok: 0, stk: 0, at: 0 } });
-  await sleep(150);
+  await until(() => app2.w.localStorage.getItem('leemos-sync-at'), 3000); await sleep(40);
   check('pull e: a remote session older than 12 hours is ignored', /0 de 10/.test(app2.$('slabel').textContent), app2.$('slabel').textContent);
 }
 // f: the voice never leaves the device
@@ -1066,7 +1066,7 @@ const OLD = () => NOW() - 120000; // idle for two minutes
 {
   const t0 = NOW() - 1000;
   const { app } = await seed({ prefs: { theme: { v: 'purple', at: t0 }, mode: { v: 'x', at: t0 }, sessionLen: { v: 7, at: t0 }, rate: { v: 99, at: t0 }, lang: { v: 'fr', at: t0 } }, session: { done: -3, ok: 'a', stk: 1e300, at: t0 } });
-  await sleep(250);
+  await until(() => app.w.localStorage.getItem('leemos-sync-at'), 3000); await sleep(40);
   const st = localState(app);
   check('pull h: invalid remote preferences are never applied and nothing crashes', app.errors.length === 0 && (st.theme || '') !== 'purple' && st.mode !== 'x' && st.sessionLen !== 7 && st.rate !== 99 && st.lang !== 'fr', app.errors.join(' | '));
 }
@@ -1114,6 +1114,75 @@ const OLD = () => NOW() - 120000; // idle for two minutes
   const y = await bootLeo({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', session: { done: 5, ok: 5, stk: 0, at: Date.now() - 1000 } } } });
   y.$('prePlay').click(); await sleep(20);
   check('review I3: a finished session does start again from zero', /0 de 5/.test(y.$('slabel').textContent), y.$('slabel').textContent);
+}
+
+// ---------- 32. review minors M1-M9 ----------
+const waitSynced = async (app) => { await until(() => app.w.localStorage.getItem('leemos-sync-at'), 3000); await sleep(40); };
+// M1: a remote mode change while resting must not start (and stamp) a new session
+{
+  const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);
+  const app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', total: 0, modAt: 5 } } });
+  await until(() => s.rows.has(RID_A), 3000); await sleep(40);
+  await playSession(app, 10);
+  await until(() => !app.$('end').hidden, 3000);
+  app.$('endStop').click(); await sleep(30);
+  const before = localState(app).session;
+  const r = s.rows.get(RID_A); r.data = { ...r.data, prefs: { ...(r.data.prefs || {}), mode: { v: 'word', at: NOW() + 1000 } } }; r.version++;
+  app.w.dispatchEvent(new app.w.Event('online'));
+  await until(() => localState(app).mode === 'word', 3000); await sleep(40);
+  const after = localState(app).session;
+  check('review M1: a remote mode change while resting does not start and stamp a new session', after.done === before.done && after.at === before.at, JSON.stringify([before, after]));
+}
+// M2: stamps in the future
+a = await boot({ storage: { 'leemos-v1': { name: 'Elsa', session: { done: 4, ok: 3, stk: 0, at: Date.now() + 2 * 3600 * 1000 } } } });
+check('review M2: a session stamped far in the future does not resume (it would never expire)', /0 de 10/.test(a.$('slabel').textContent), a.$('slabel').textContent);
+a = await boot({ storage: { 'leemos-v1': { name: 'Elsa', theme: 'dark', prefs: { theme: { v: 'dark', at: 8.64e15 } } } } });
+a.$('themeBtn').click();
+const th32 = localState(a).prefs.theme;
+check('review M2: a new stamp never goes beyond the largest valid date, so the local value is not dropped', th32.at <= 8.64e15 && th32.v === 'light', JSON.stringify(th32));
+// M4: a session-length change must not leave a protected session at or above its new length
+{
+  const { app } = await seed({ prefs: { sessionLen: { v: 5, at: NOW() - 1000 } } }, { session: { done: 7, ok: 5, stk: 0, at: NOW() - 10000 } });
+  await until(() => app.$('sessionSel').value === '5', 3000); await sleep(60);
+  check('review M4: a session at 7 of 10 becomes 4 of 5 when another device shortens the sessions', /4 de 5/.test(app.$('slabel').textContent) && localState(app).session.done === 4, app.$('slabel').textContent);
+}
+// M5: the capitals migration respects a synced preference
+a = await boot({ storage: { 'leemos-v1': { name: 'Elsa', upper: false, prefs: { upper: { v: false, at: 5 } } } } });
+check('review M5: a profile that already has a synced capitals preference is not forced to capitals', !a.d.body.classList.contains('upper'));
+// M6: a pull that changes no world leaves the worlds grid alone
+{
+  const { s, app } = await seed({}, {}, { syncEvery: 120 });
+  await waitSynced(app);
+  app.$('worldBtn').click(); await sleep(20);
+  const btn = app.d.querySelector('#worldGrid .wbtn');
+  await sleep(500); // several pulls
+  check('review M6: the worlds grid is not rebuilt by a pull that changes nothing', !!btn && app.d.contains(btn));
+}
+// M8: a level clamped at load is a correction, not a progress change
+a = await boot({ storage: { 'leemos-v1': { name: 'Elsa', level: 9, modAt: 10 } } });
+check('review M8: clamping a bad saved level at load does not stamp modAt', localState(a).modAt === 10, String(localState(a).modAt));
+// M9: stronger versions of weak tests
+{
+  const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);
+  s.rows.set(RID_A, { id: RID_A, owner: uid, name: 'Elsa', kind: 'reader', version: 1, data: dat({ level: 3, name: 'Elsa', modAt: NOW() - 1000 }) });
+  let release; const gate = new Promise((r) => { release = r; });
+  const slowS = { ...s, fetch: async (u, o) => { if (String(u).includes('/rest/v1/')) await gate; return s.fetch(u, o); } };
+  const app = await boot({ supa: slowS, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', level: 0, modAt: 10 } } });
+  await sleep(60);
+  app.$('themeBtn').click(); app.$('soundBtn').click(); // preference changes made BEFORE the pull
+  release();
+  await until(() => localState(app).level === 3, 3000);
+  check("review M9: preference changes made before a pull cannot beat the other device's level", localState(app).level === 3, String(localState(app).level));
+}
+{
+  const { app } = await seed({ session: { done: 6, ok: 6, stk: 0, at: NOW() - 1000 } }, { session: { done: 2, ok: 1, stk: 0, at: NOW() - 40000 } });
+  await until(() => /6 de 10/.test(app.$('slabel').textContent), 3000);
+  check('review M9: a session idle for 40 s is replaced by the newer one from another device', /6 de 10/.test(app.$('slabel').textContent), app.$('slabel').textContent);
+}
+{
+  const { app } = await seed({ session: { done: 6, ok: 6, stk: 0, at: NOW() - 1000 } }, { session: { done: 2, ok: 1, stk: 0, at: NOW() - 20000 } });
+  await waitSynced(app);
+  check('review M9: a session changed 20 s ago is kept', /2 de 10/.test(app.$('slabel').textContent), app.$('slabel').textContent);
 }
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');

@@ -4,7 +4,8 @@ const LANGS = ['es', 'ca'];
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const CAP = 1e6; // counters stay below this, so a hostile 1e300 can never absorb later +1 increments
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(CAP, Math.floor(v)) : 0);
-const stamp = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0); // modAt is a millisecond timestamp, not a counter
+const MAX_AT = 8.64e15; // the largest date JavaScript can represent: a stamp beyond it is invalid
+const stamp = (v) => (Number.isSafeInteger(v) && v > 0 && v <= MAX_AT ? v : 0); // modAt and the other stamps are millisecond timestamps, not counters
 const ITEM_KEY = /^(ca:)?(s|w|snd):.{1,40}$/; // the stat keys the app really writes
 const unsafe = (k) => k === '__proto__' || k === 'constructor' || k === 'prototype';
 const langOf = (k) => (k.indexOf('ca:') === 0 ? 'ca' : 'es');
@@ -29,7 +30,8 @@ const cleanPref = (k, prefs) => {
 };
 // the entry changed last; on a tie the larger value as text, so the order of the arguments never matters
 const pickPref = (a, b) => (!a || !b ? a || b || null : a.at !== b.at ? (a.at > b.at ? a : b) : String(a.v) >= String(b.v) ? a : b);
-const cleanSession = (s) => (isObj(s) && stamp(s.at) ? { done: num(s.done), ok: num(s.ok), stk: num(s.stk), at: stamp(s.at) } : null);
+// correct answers and stickers cannot exceed the answers done
+const cleanSession = (s) => { if (!isObj(s) || !stamp(s.at)) return null; const done = num(s.done); return { done, ok: Math.min(num(s.ok), done), stk: Math.min(num(s.stk), done), at: stamp(s.at) }; };
 const pickSession = (a, b) => {
   if (!a || !b) return a || b || { done: 0, ok: 0, stk: 0, at: 0 };
   if (a.at !== b.at) return a.at > b.at ? a : b;

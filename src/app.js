@@ -64,7 +64,7 @@ const KEY=keyFor(PROFILE.id);
 const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||{}}catch(e){return {}}};
 const save=()=>{
   const fp=fpOf();
-  if(fp!==lastFp){lastFp=fp;S.modAt=Math.max(Date.now(),(S.modAt||0)+1);onProgressChange()} // never older than a stamp that came from a device with a faster clock
+  if(fp!==lastFp){lastFp=fp;S.modAt=stampAfter(S.modAt);onProgressChange()} // never older than a stamp that came from a device with a faster clock
   if(lastSessFp!==null){
     const sf=sessFp();
     if(sf!==lastSessFp){lastSessFp=sf;S.session={done:sDone,ok:sOk,stk:sStk,at:stampAfter(S.session&&S.session.at)};onProgressChange()}
@@ -86,10 +86,13 @@ let onProgressChange=()=>{}; // replaced by the sync glue
 // timestamp, so none of them can overwrite another value on a second device or move modAt (which decides level and name).
 const PREF_KEYS=['mode','world','sessionLen','upper','lang','rate','sound','theme']; // keep identical to merge.js; never the voice
 const SESSION_TTL=12*3600*1000; // a session left over from yesterday must not resume
-const stampAfter=prev=>Math.max(Date.now(),(prev||0)+1);
+const MAX_AT=8.64e15; // keep identical to merge.js: a stamp beyond it is invalid there
+const stampAfter=prev=>Math.min(MAX_AT,Math.max(Date.now(),(prev||0)+1));
+const FUTURE_MARGIN=10*60*1000; // a device clock a few minutes ahead is tolerated; a stamp further in the future is never "recent"
+const isFresh=(at,ttl)=>{const age=Date.now()-at;return age>=-FUTURE_MARGIN&&age<ttl};
 if(!S.prefs||typeof S.prefs!=='object')S.prefs={};
 const restoreSession=s=>{
-  if(s&&s.at&&Date.now()-s.at<SESSION_TTL&&s.done<S.sessionLen){sDone=s.done|0;sOk=s.ok|0;sStk=s.stk|0}
+  if(s&&s.at&&isFresh(s.at,SESSION_TTL)&&s.done<S.sessionLen){sDone=s.done|0;sOk=s.ok|0;sStk=s.stk|0}
 };
 restoreSession(S.session);
 let lastSessFp=null,lastPref=null; // baselines, set once the state is loaded: a save() before that (a migration) stamps nothing
@@ -98,10 +101,10 @@ const prefSnap=()=>Object.fromEntries(PREF_KEYS.map(k=>[k,S[k]]));
 if(!S.voiceURIs)S.voiceURIs={es:'',ca:''};
 if(!S.pre)S.pre={es:0,ca:0};
 // One-time switch to capitals (the school book is all capitals): readers only, once per profile; she can switch back with Aa.
-if(PROFILE.kind==='reader'&&!S.upperMigrated){S.upper=true;S.upperMigrated=true;save()}
+if(PROFILE.kind==='reader'&&!S.upperMigrated){if(!S.prefs.upper)S.upper=true;S.upperMigrated=true;save()} // a profile that already has a synced capitals preference keeps it
 lastSessFp=sessFp();lastPref=prefSnap();
 LEVELS=LV[S.lang]||LV_ES;
-if(!(S.level>=0&&S.level<LEVELS.length))S.level=0; // a saved level that does not exist (newer app version, bad data) falls back to the first
+if(!(S.level>=0&&S.level<LEVELS.length)){S.level=0;lastFp=fpOf()} // a correction, not a progress change: no modAt stamp // a saved level that does not exist (newer app version, bad data) falls back to the first
 let cur=null,last=null,phase='read',resetArmed=false;
 let pre=null;
 let curWorld=Math.floor(Math.random()*WORLDS.length);
@@ -469,7 +472,7 @@ const stateOf=id=>{
 // Write merged data into a profile (the active one lives in S; the others only in localStorage).
 const IDLE_MS=30000; // a value changed on THIS device within the last 30 s is kept: nobody is interrupted while playing
 function applyMerged(m,adoptSession){
-  const before={lang:S.lang,mode:S.mode};
+  const before={lang:S.lang,mode:S.mode,world:S.world,sessionLen:S.sessionLen};
   mergeMod.applySynced(S,m); // sets the progress fields, S.session, S.prefs and the plain preference fields (never the voice)
   if(S.lang!==before.lang){LEVELS=LV[S.lang]||LV_ES;pendingEnd=false;resting=false}
   if(S.level>=LEVELS.length)S.level=0;
@@ -480,14 +483,17 @@ function applyMerged(m,adoptSession){
   // the session in progress: a finished or stale one starts a new session
   const s=m.session;
   if(adoptSession&&s.at){
-    if(Date.now()-s.at<SESSION_TTL&&s.done<S.sessionLen){sDone=s.done;sOk=s.ok;sStk=s.stk}
+    if(isFresh(s.at,SESSION_TTL)&&s.done<S.sessionLen){sDone=s.done;sOk=s.ok;sStk=s.stk}
     else{sDone=sOk=sStk=0}
   }
   lastFp=fpOf();lastSessFp=sessFp();lastPref=prefSnap(); // data that came from the server is not a local change: no stamps, no new sync
+  // a shorter session length from another device must not leave a protected session at or above it (it would count as finished)
+  if(!adoptSession&&S.sessionLen!==before.sessionLen&&sDone>=S.sessionLen){sDone=Math.max(0,S.sessionLen-1);sOk=Math.min(sOk,sDone);sStk=Math.min(sStk,sDone)} // after the baselines: this IS a local change, so save() stamps it
   save();renderLevels();renderHard();renderAlbum();updateHello();
   if(S.lang!==before.lang)applyLang();else renderSession();
-  renderGoal();renderWorlds();
-  if(S.lang!==before.lang||S.mode!==before.mode)pre?pre.refresh():next(); // a different context needs a new exercise; otherwise the card on screen stays
+  renderGoal();
+  if(S.world!==before.world)renderWorlds(); // not on every pull: it would replace the buttons (and the focus) of an open worlds overlay
+  if(S.lang!==before.lang||(S.mode!==before.mode&&!resting))pre?pre.refresh():next(); // while resting, next() would start (and stamp) a new session // a different context needs a new exercise; otherwise the card on screen stays
 }
 // Returns the merged data. The child may have answered while the request was in flight, so the server's data is merged
 // into the CURRENT local state (never copied over it): a sync can only add progress, never take it away.
@@ -499,7 +505,7 @@ function storeState(id,data){
     const now=Date.now();
     for(const k of PREF_KEYS){ // keep what was changed here a moment ago; renewing its stamp makes it win on the next push
       const m=mine.prefs[k];
-      if(m&&now-m.at<IDLE_MS&&(!merged.prefs[k]||merged.prefs[k].at!==m.at))merged.prefs[k]={v:m.v,at:Math.max(now,(merged.prefs[k]?merged.prefs[k].at:0)+1)}; // the renewed stamp must beat the one it overrides
+      if(m&&isFresh(m.at,IDLE_MS)&&(!merged.prefs[k]||merged.prefs[k].at!==m.at))merged.prefs[k]={v:m.v,at:Math.max(now,(merged.prefs[k]?merged.prefs[k].at:0)+1)}; // the renewed stamp must beat the one it overrides
     }
     // the language is never switched under an open recorder: recordings are stored under the current language's keys
     if(RS.on||!$('recorder').hidden){
@@ -507,7 +513,7 @@ function storeState(id,data){
       if(m)merged.prefs.lang={v:m.v,at:Math.max(now,(merged.prefs.lang?merged.prefs.lang.at:0)+1)};else delete merged.prefs.lang;
     }
     let adopt=true; // whether the merged session replaces this device's counters
-    if(mine.session.at&&now-mine.session.at<IDLE_MS&&merged.session.at!==mine.session.at){merged.session={...mine.session,at:Math.max(now,merged.session.at+1)};adopt=false}
+    if(mine.session.at&&isFresh(mine.session.at,IDLE_MS)&&merged.session.at!==mine.session.at){merged.session={...mine.session,at:Math.max(now,merged.session.at+1)};adopt=false}
     if(merged.session.at===mine.session.at)adopt=false; // the merged session is this device's own (the echo of its own push): nothing to adopt
     if(pendingEnd||!$('reward').hidden||!$('end').hidden)adopt=false; // the end of a session is on screen: its counters feed the end screen
     applyMerged(merged,adopt);

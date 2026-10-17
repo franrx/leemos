@@ -133,5 +133,10 @@ const T = { theme: 'light', sound: true, voiceURI: 'keep-me' };
 applySynced(T, { session: sess(4, 3, 1, 500), prefs: { theme: pf('dark', 9), sound: pf(false, 9) } });
 check('applySynced: the session, the prefs and the plain preference fields are set; the voice is untouched', T.session.done === 4 && T.prefs.theme.v === 'dark' && T.theme === 'dark' && T.sound === false && T.voiceURI === 'keep-me', JSON.stringify(T));
 
+// ---------- review minors: timestamp bounds and session counters that cannot exceed each other ----------
+check('bounds: a timestamp beyond the largest JS date counts as invalid', same(mergeData({ session: sess(5, 1, 0, 9e15) }, {}).session, sess(0, 0, 0, 0)) && !('theme' in mergeData({ prefs: { theme: pf('dark', 9e15) } }, {}).prefs) && mergeData({ modAt: 9e15 }, {}).modAt === 0);
+check('bounds: the largest valid timestamp is still accepted', mergeData({ session: sess(1, 0, 0, 8.64e15) }, {}).session.at === 8.64e15);
+check('session: correct answers and stickers cannot exceed the answers done', same(mergeData({ session: sess(3, 1e6, 99, 7) }, {}).session, sess(3, 3, 3, 7)));
+
 console.log(failures ? `\n${failures} merge test(s) FAILED` : '\nAll merge tests passed');
 process.exit(failures ? 1 : 0);
