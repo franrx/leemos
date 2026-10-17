@@ -427,8 +427,14 @@ function syncInit(){
       const [sm,mm]=await Promise.all([imp('./sync.js'),imp('./merge.js')]);
       mergeMod=mm;
       sync=sm.createSync({url:cfg.url,anonKey:cfg.anonKey,fetch:window.__leemosSyncFetch||undefined,storage:localStorage}); // the page's own localStorage, also under the jsdom tests
-      document.addEventListener('visibilitychange',()=>{if(document.hidden)syncAll()});
+      // Push when the page is hidden or closing; PULL what other devices did when it is shown again, focused, back online,
+      // and once a minute while it stays visible (an open page never asks the server by itself otherwise).
+      const wake=()=>{if(!document.hidden)syncAll()};
+      document.addEventListener('visibilitychange',()=>{document.hidden?syncAll():wake()});
       window.addEventListener('pagehide',()=>syncAll());
+      window.addEventListener('focus',wake);
+      window.addEventListener('online',()=>syncAll());
+      setInterval(wake,window.__leemosSyncEvery||60000);
       return sync;
     }catch(err){syncP=null;return null} // a failed load can be retried later
   })());
@@ -447,7 +453,7 @@ function storeState(id,data){
   if(id===PROFILE.id){
     if(S.level>=LEVELS.length)S.level=0;
     lastFp=fpOf(); // data that came from the server is not a local change: no modAt stamp, no new sync
-    save();renderLevels();renderHard();updateHello();
+    save();renderLevels();renderHard();renderAlbum();updateHello(); // renderAlbum: the sticker counter
   }else{
     try{localStorage.setItem(keyFor(id),JSON.stringify(cur))}catch(e){}
   }

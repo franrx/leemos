@@ -15,7 +15,7 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null, reduced = false, voice = null, syncConfig = null, supa = null } = {}) {
+async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null, reduced = false, voice = null, syncConfig = null, supa = null, syncEvery = 0 } = {}) {
   const errors = [];
   const audioCalls = [];
   const vc = new VirtualConsole();
@@ -41,6 +41,7 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
         w.AudioContext = class { constructor() { this.state = mic.state || 'running'; } resume() {} createMediaStreamSource() { return { connect() {}, disconnect() {} }; } createAnalyser() { const an = { fftSize: 1024 }; if (!mic.noFloat) an.getFloatTimeDomainData = (a) => a.fill(mic.peak); return an; } };
       }
       w.__fetched = [];
+      if (syncEvery) w.__leemosSyncEvery = syncEvery; // shortens the once-a-minute pull so a test does not wait a minute
       if (supa) w.__leemosSyncFetch = supa.fetch; // the fake Supabase the app's sync client talks to
       if (swMock) {
         Object.defineProperty(w.navigator, 'serviceWorker', { value: { controller: {}, register: () => Promise.resolve() } });
@@ -911,6 +912,58 @@ await signInUi(a, 'mama@example.com');
 await sleep(120);
 check('review m11: if the linked profile list cannot be saved the linking is undone and the adult is told', a.w.localStorage.getItem('leemos-auth') === null && /No se pudo/.test(a.$('acctMsg').textContent), a.$('acctMsg').textContent);
 a.w.Storage.prototype.setItem = origSet;
+
+// ---------- 28. pulling what other devices did: page visible again, back online, once a minute while visible ----------
+const bumpRemote = (srv, total) => { const r = srv.rows.get(RID_A); r.data = { ...r.data, total }; r.version++; };
+const localTotal = (app) => JSON.parse(app.w.localStorage.getItem('leemos-v1')).total;
+const signedBoot = async (extra = {}) => {
+  const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);
+  const app = await boot({ supa: s, syncConfig: CFG, ...extra, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', total: 2, modAt: 10 } } });
+  await until(() => s.rows.has(RID_A), 3000); await sleep(40);
+  return { s, app };
+};
+{
+  const { s, app } = await signedBoot({ syncEvery: 150 });
+  bumpRemote(s, 30);
+  await until(() => localTotal(app) >= 30, 3000);
+  check('pull: an open page picks up another device\'s progress on its own (periodic pull)', localTotal(app) >= 30, String(localTotal(app)));
+}
+{
+  const { s, app } = await signedBoot();
+  bumpRemote(s, 31);
+  Object.defineProperty(app.d, 'hidden', { value: false, configurable: true });
+  app.d.dispatchEvent(new app.w.Event('visibilitychange'));
+  await until(() => localTotal(app) >= 31, 3000);
+  check('pull: coming back to the page (visible again) pulls', localTotal(app) >= 31, String(localTotal(app)));
+}
+{
+  const { s, app } = await signedBoot();
+  bumpRemote(s, 32);
+  app.w.dispatchEvent(new app.w.Event('focus'));
+  await until(() => localTotal(app) >= 32, 3000);
+  check('pull: focusing the window pulls', localTotal(app) >= 32, String(localTotal(app)));
+}
+{
+  const { s, app } = await signedBoot();
+  bumpRemote(s, 33);
+  app.w.dispatchEvent(new app.w.Event('online'));
+  await until(() => localTotal(app) >= 33, 3000);
+  check('pull: the connection coming back pulls', localTotal(app) >= 33, String(localTotal(app)));
+}
+{
+  const { s, app } = await signedBoot({ syncEvery: 100 });
+  Object.defineProperty(app.d, 'hidden', { value: true, configurable: true }); // hidden, and no visibilitychange event fired
+  bumpRemote(s, 34);
+  await sleep(450);
+  check('pull: a hidden page does not poll in the background', localTotal(app) < 34, String(localTotal(app)));
+}
+{
+  const { s, app } = await signedBoot({ syncEvery: 120 });
+  const r = s.rows.get(RID_A); r.data = { ...r.data, stickers: 3 }; r.version++;
+  await until(() => JSON.parse(app.w.localStorage.getItem('leemos-v1')).stickers === 3, 3000);
+  await sleep(40);
+  check('pull: stickers earned on another device show in the counter without a reload', app.$('albumCount').textContent === '3', app.$('albumCount').textContent);
+}
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
