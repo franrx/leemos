@@ -496,11 +496,51 @@ $('acctVerify').onclick=async()=>{
 };
 $('acctSync').onclick=()=>syncAll();
 $('acctOutBtn').onclick=()=>{if(sync)sync.signOut();syncState='idle';acctMsg('');renderAcct()};
-// First version: every local profile without a rid gets one and is uploaded. The linking dialog replaces this.
+// Asks which account profile (if any) a local profile is. Resolves with a remote id, or null for "add as a new child".
+// Closing the dialog ("Ahora no") rejects, and the caller leaves everything as it was.
+function askLink(local,candidates){
+  return new Promise((resolve,reject)=>{
+    $('linkAsk').textContent=t('linkAsk',{n:local.name});
+    const box=$('linkOpts');box.innerHTML='';
+    const done=v=>{$('link').hidden=true;v===undefined?reject(new Error('cancelled')):resolve(v)};
+    candidates.forEach(r=>{const b=document.createElement('button');b.className='wbtn';b.textContent=r.name;b.onclick=()=>done(r.id);box.appendChild(b)});
+    const nb=document.createElement('button');nb.className='wbtn';nb.textContent=t('linkNew');nb.onclick=()=>done(null);box.appendChild(nb);
+    $('linkCancel').onclick=()=>done(undefined);
+    $('link').hidden=false;
+  });
+}
+// First sign-in on this device (spec section 4): link the local profiles to the account's, upload the new ones, bring the rest here.
 async function afterSignIn(user){
-  try{localStorage.setItem(AUTH_USER_KEY,user.id)}catch(e){}
-  PROFILES.list.forEach(p=>{if(!p.rid)p.rid=uuid()});
-  saveProfiles();
+  const prev=localStorage.getItem(AUTH_USER_KEY);
+  const snapshot=JSON.stringify(PROFILES.list);
+  try{
+    if(prev&&prev!==user.id)PROFILES.list.forEach(p=>{delete p.rid}); // another account used this tablet: never upload its children into this one unasked
+    const remote=await sync.listProfiles();
+    const known=new Set(remote.map(r=>r.id));
+    const claimed=new Set(PROFILES.list.filter(p=>p.rid&&known.has(p.rid)).map(p=>p.rid));
+    for(const p of PROFILES.list.filter(x=>!x.rid)){
+      const cands=remote.filter(r=>!claimed.has(r.id));
+      const pick=cands.length?await askLink(p,cands):null;
+      p.rid=pick||uuid();
+      if(pick)claimed.add(pick);
+    }
+    for(const r of remote){
+      if(claimed.has(r.id)||PROFILES.list.some(p=>p.rid===r.id))continue;
+      const base=profileSlug(r.name)||'nino';let id=base,i=2;
+      while(PROFILES.list.some(x=>x.id===id))id=base+'-'+i++;
+      PROFILES.list.push({id,name:r.name,kind:r.kind==='pre'?'pre':'reader',rid:r.id});
+      const st=mergeMod.applySynced({},r.data);
+      try{localStorage.setItem(keyFor(id),JSON.stringify(st))}catch(e){}
+    }
+    saveProfiles();
+    try{localStorage.setItem(AUTH_USER_KEY,user.id)}catch(e){}
+  }catch(e){
+    PROFILES.list.splice(0,PROFILES.list.length,...JSON.parse(snapshot)); // cancelled or failed half way: nothing stays half-linked
+    $('link').hidden=true;
+    acctMsg(e&&e.kind==='offline'?'acctNetwork':e&&e.message==='cancelled'?'':'acctError');
+    renderAcct();
+    return;
+  }
   await syncAll();
 }
 // A session from an earlier visit: sync at start (only if signed in; otherwise nothing is loaded or sent).

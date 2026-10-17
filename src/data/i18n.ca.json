@@ -128,5 +128,9 @@
   "acctError": "No s'ha pogut completar. Torna-ho a provar.",
   "acctExpired": "La sessió ha caducat. Torna a entrar.",
   "acctMinAgo": "fa {n} min",
-  "acctJustNow": "ara mateix"
+  "acctJustNow": "ara mateix",
+  "linkTitle": "Unir amb el teu compte",
+  "linkAsk": "«{n}» d'aquesta tauleta és el mateix infant que algun del teu compte?",
+  "linkNew": "No, afegir com a nou",
+  "linkCancel": "Ara no"
 }

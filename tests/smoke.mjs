@@ -640,5 +640,92 @@ const swText = readFileSync(join(ROOT, 'sw.js'), 'utf8');
 check('account: the service worker pre-caches the sync modules and config', ['src/merge.js', 'src/sync.js', 'src/data/sync.config.json'].every((f) => swText.includes(`'${f}'`)));
 check('account: the nickname hint is present under the name field', !!a.d.querySelector('[data-i="nickHint"]'));
 
+// ---------- 24. linking on first sign-in, other account on the same device ----------
+const signInUi = async (app, email) => {
+  app.$('parents').open = true; app.$('parents').dispatchEvent(new app.w.Event('toggle'));
+  await until(() => !app.$('acct').hidden);
+  app.$('acctEmail').value = email; app.$('acctConsent').checked = true; app.$('acctSend').click();
+  await until(() => !app.$('acctCodeRow').hidden);
+  app.$('acctCode').value = '123456'; app.$('acctVerify').click();
+};
+const LINK_PROFILES = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader' }, { id: 'leo', name: 'Leo', kind: 'pre' }] } };
+const withAccount = async (rows) => { // a fake project whose account already has children created by another device
+  const s = createFakeSupabase();
+  await s.fetch('https://x/auth/v1/otp', { method: 'POST', body: JSON.stringify({ email: 'mama@example.com' }) });
+  await s.fetch('https://x/auth/v1/verify', { method: 'POST', body: JSON.stringify({ email: 'mama@example.com', token: '123456', type: 'email' }) });
+  const uid = s.userByEmail('mama@example.com').id;
+  rows.forEach(([id, name, kind, d]) => s.rows.set(id, { id, owner: uid, name, kind, data: d, version: 1 }));
+  return s;
+};
+const dat = (o = {}) => ({ stats: {}, total: 0, stickers: 0, pre: { es: 0, ca: 0 }, resets: { es: 0, ca: 0 }, level: 0, name: '', modAt: 1, ...o });
+const RID_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', RID_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const linkButtons = (app) => [...app.$('linkOpts').querySelectorAll('button')];
+const profList = (app) => (JSON.parse(app.w.localStorage.getItem('leemos-profiles') || 'null') || { list: [] }).list;
+
+// 24a: empty account: every local profile is uploaded, no questions
+supa = createFakeSupabase();
+a = await boot({ supa, syncConfig: CFG, storage: LINK_PROFILES });
+await signInUi(a, 'mama@example.com');
+await until(() => supa.rows.size === 2, 3000);
+check('link: an empty account receives every local profile without asking', supa.rows.size === 2 && a.$('link').hidden);
+
+// 24b: the account already has "Elsa" from another tablet: ask, and linking merges both sides' progress
+supa = await withAccount([[RID_A, 'Elsa', 'reader', dat({ stats: { 's:pa': { ok: 6, fail: 0 } }, total: 20, stickers: 2, level: 1, name: 'Elsa', modAt: 5 })]]);
+a = await boot({ supa, syncConfig: CFG, storage: { ...LINK_PROFILES, 'leemos-v1': { name: 'Elsa', total: 3, stickers: 1, stats: { 's:ma': { ok: 2, fail: 1 } } } } });
+await signInUi(a, 'mama@example.com');
+await until(() => !a.$('link').hidden);
+check('link: with account profiles present the adult is asked about the first local profile', !a.$('link').hidden && /Elsa/.test(a.$('linkAsk').textContent), a.$('linkAsk').textContent);
+check('link: the options are the account profiles plus "add as a new child"', linkButtons(a).length === 2 && /Elsa/.test(linkButtons(a)[0].textContent), linkButtons(a).map((b) => b.textContent).join('|'));
+linkButtons(a)[0].click(); // yes, same child as the account's Elsa
+await until(() => supa.rows.size === 2 && supa.rows.get(RID_A).data.stats['s:ma'], 3000);
+const merged = supa.rows.get(RID_A).data;
+check('link: linking keeps the progress of both devices', merged.total === 20 && merged.stats['s:pa'].ok === 6 && merged.stats['s:ma'].ok === 2 && merged.stickers === 2, JSON.stringify(merged));
+check('link: the local profile now points at the account profile', JSON.parse(a.w.localStorage.getItem('leemos-profiles')).list.find((p) => p.id === 'elsa').rid === RID_A);
+check('link: with no account profile left to match, the next local profile (Leo) is added as new without asking', a.$('link').hidden && supa.rows.size === 2 && [...supa.rows.values()].some((r) => r.name === 'Leo'));
+
+// 24c: account profiles that no local profile claimed are added to this device
+supa = await withAccount([[RID_A, 'Elsa', 'reader', dat({ total: 4, stickers: 1, name: 'Elsa' })], [RID_B, 'Mateo', 'reader', dat({ stats: { 's:ma': { ok: 3, fail: 0 } }, total: 8, level: 2, name: 'Mateo', modAt: 2 })]]);
+a = await boot({ supa, syncConfig: CFG });
+await signInUi(a, 'mama@example.com');
+await until(() => !a.$('link').hidden);
+linkButtons(a)[0].click(); // local Elsa = account Elsa
+await until(() => profList(a).length === 2, 3000);
+const lp = profList(a);
+const mateo = lp.find((p) => p.rid === RID_B);
+check('link: a child that exists only in the account is added to this device', !!mateo && mateo.name === 'Mateo' && mateo.kind === 'reader', JSON.stringify(lp));
+const mst = JSON.parse(a.w.localStorage.getItem('leemos-v1:' + mateo.id));
+check("link: and arrives with the account's progress", mst.total === 8 && mst.stats['s:ma'].ok === 3 && mst.level === 2, JSON.stringify(mst));
+
+// 24d: a different account on the same device: old rids are dropped before anything is uploaded
+supa = createFakeSupabase();
+a = await boot({ supa, syncConfig: CFG, storage: { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }] }, 'leemos-auth-user': 'user-from-another-account' } });
+await signInUi(a, 'otra@example.com');
+await until(() => supa.rows.size === 1, 3000);
+const newRid = [...supa.rows.keys()][0];
+check('other account: the old link is dropped and the profile is uploaded under a new id', newRid !== RID_A && JSON.parse(a.w.localStorage.getItem('leemos-profiles')).list[0].rid === newRid);
+check('other account: the new user id is remembered', a.w.localStorage.getItem('leemos-auth-user') === supa.userByEmail('otra@example.com').id);
+
+// 24e: the network drops after the adult chose: local data is untouched and nothing is half-linked
+supa = await withAccount([[RID_A, 'Elsa', 'reader', dat({ total: 1, name: 'Elsa' })]]);
+a = await boot({ supa, syncConfig: CFG, storage: { ...LINK_PROFILES, 'leemos-v1': { name: 'Elsa', total: 3, stats: { 's:ma': { ok: 2, fail: 1 } } } } });
+await signInUi(a, 'mama@example.com');
+await until(() => !a.$('link').hidden);
+supa.setOffline(true);
+linkButtons(a)[0].click();
+await sleep(100);
+const afterDrop = JSON.parse(a.w.localStorage.getItem('leemos-v1'));
+check('network drop: local progress is untouched', afterDrop.total === 3 && afterDrop.stats['s:ma'].ok === 2);
+check('network drop: nothing was uploaded and there was no error', supa.rows.get(RID_A).data.total === 1 && a.errors.length === 0, a.errors.join(' | '));
+
+// 24f: closing the dialog cancels the linking and leaves the profiles as they were
+supa = await withAccount([[RID_A, 'Elsa', 'reader', dat({ total: 1, name: 'Elsa' })]]);
+a = await boot({ supa, syncConfig: CFG, storage: LINK_PROFILES });
+await signInUi(a, 'mama@example.com');
+await until(() => !a.$('link').hidden);
+a.$('linkCancel').click();
+await sleep(60);
+const listAfterCancel = JSON.parse(a.w.localStorage.getItem('leemos-profiles')).list;
+check('cancel: closing the dialog links nothing and uploads nothing', a.$('link').hidden && listAfterCancel.every((p) => !p.rid) && supa.rows.size === 1);
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

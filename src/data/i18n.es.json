@@ -128,5 +128,9 @@
   "acctError": "No se pudo completar. Inténtalo de nuevo.",
   "acctExpired": "La sesión ha caducado. Vuelve a entrar.",
   "acctMinAgo": "hace {n} min",
-  "acctJustNow": "ahora mismo"
+  "acctJustNow": "ahora mismo",
+  "linkTitle": "Unir con tu cuenta",
+  "linkAsk": "¿«{n}» de esta tablet es el mismo niño o niña que alguno de tu cuenta?",
+  "linkNew": "No, añadir como nuevo",
+  "linkCancel": "Ahora no"
 }
