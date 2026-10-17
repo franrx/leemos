@@ -41,7 +41,7 @@ export function buildClipList({ name = 'Elsa', langs = ['es', 'ca'] } = {}) {
       }
     }
     const fill = (s) => s.split('{n}').join(name);
-    [...i18n.oks, ...i18n.nos, i18n.rewardTitle, i18n.endTitle].forEach((s) => add(lang, fill(s), 'phrase'));
+    [...i18n.oks, ...i18n.nos, i18n.rewardTitle, i18n.endTitle, i18n.hintSyl, i18n.hintWord, i18n.hintJudge].forEach((s) => add(lang, fill(s), 'phrase'));
     add(lang, i18n.sample, 'word');
   }
   return [...out.values()];

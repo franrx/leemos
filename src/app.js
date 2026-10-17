@@ -210,6 +210,17 @@ function renderHard(){
 const hintFor=p=>p==='read'
   ? t(S.mode==='syl'?'hintSyl':'hintWord',{n:nm()})
   : t('hintJudge');
+// Lumi's instruction sentence: a recording or a generated clip only. The browser voice is robotic, so with no clip she stays silent.
+let hintIntro=false; // the first sentence of a session plays by itself, once
+function sayHint(){
+  if(phase!=='read'&&phase!=='judge')return false;
+  const x=hintFor(phase);
+  if(playClip(ck(x)))return true;
+  const f=genFile(x);if(!f)return false;
+  try{if(curAudio)curAudio.pause();curAudio=new Audio(clipUrl(S.lang,x.toLowerCase(),f));curAudio.play().catch(()=>{});return true}catch(e){return false}
+}
+// Only counts as said once a clip really played (the manifest may still be loading when the first exercise appears).
+function introHint(){if(sDone===0&&!hintIntro&&phase==='read'&&sayHint())hintIntro=true}
 function setPhase(p){
   phase=p;
   $('joinBtn').hidden=p!=='read';
@@ -234,6 +245,7 @@ function show(){
   pic.hidden=S.mode!=='word'||!it.emoji; // a word without a picture (e.g. "no", "dia") has no slot at all
   pic.className='pic q';pic.textContent='?';
   setPhase('read');
+  introHint();
 }
 const worldNow=()=>S.world==='auto'?curWorld:Math.min(S.world,WORLDS.length-1);
 function newWorld(){if(S.world==='auto')curWorld=(curWorld+1)%WORLDS.length}
@@ -288,7 +300,7 @@ function record(ok){
     const tl=$('tiles');tl.classList.remove('win');void tl.getBoundingClientRect();tl.classList.add('win');
     setTimeout(()=>tl.classList.remove('win'),700);
   }else{sfx.retry();poke('tilt',800)}
-  sDone++;if(ok)sOk++;
+  sDone++;hintIntro=false;if(ok)sOk++;
   const finished=sDone>=S.sessionLen;
   let reward=null;
   if(finished&&S.stickers<STICKERS.length){S.stickers++;reward=STICKERS[S.stickers-1];sStk++}
@@ -640,6 +652,8 @@ $('recClear').onclick=async e=>{
 };
 $('voiceSel').onchange=e=>{S.voiceURIs[S.lang]=e.target.value;save();pickVoice();say(t('sample'))};
 $('sessionSel').value=String(S.sessionLen);
+$('hint').onclick=sayHint;
+$('hint').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();sayHint()}};
 $('sessionSel').onchange=e=>{S.sessionLen=parseInt(e.target.value,10);save();renderSession()};
 $('endMore').onclick=()=>{$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();pre?pre.begin():next()};
 $('endLevelUpBtn').onclick=()=>{if(pre)pre.unlockNext();else{S.level++;save();renderLevels()}$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();pre?pre.begin():next()};
@@ -667,7 +681,7 @@ function setLang(l){
 $('langBtn').onclick=()=>setLang(S.lang==='es'?'ca':'es');
 
 applyTheme();applyCase();applySound();applyLang();loadClips();updateProfileChip();
-loadManifest().then(()=>setTimeout(warmAudio,3000));
+loadManifest().then(()=>{introHint();setTimeout(warmAudio,3000)});
 renderGoal();next();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 

@@ -474,5 +474,23 @@ await until(() => a.$('prePlay'));
 const leoRaw = a.w.localStorage.getItem('leemos-v1:leo');
 check("capitals: Leo's profile is never migrated", !leoRaw || JSON.parse(leoRaw).upperMigrated === undefined, leoRaw);
 
+// ---------- 18. Lumi speaks her instruction sentences (generated clip only, never the browser voice) ----------
+const HINT_KEYS = ['Elsa, lee la sílaba en voz alta. Luego pulsa «Juntar».', 'Elsa, lee cada sílaba y únelas. Toca una para oírla.', '¡Escucha! Ahora papá o mamá me dicen cómo te salió.'].map((s) => s.toLowerCase());
+const hintManifest = { generated: 'test', clips: { es: Object.fromEntries(HINT_KEYS.map((k) => [k, 'h.mp3'])), ca: {} } };
+const hintPlays = (x) => x.audioCalls.filter((s) => s === 'audio/es/h.mp3').length;
+a = await boot({ manifest: hintManifest });
+check("hint: Lumi's first sentence of the session plays by itself", hintPlays(a) === 1, String(hintPlays(a)));
+a.$('hint').click();
+check('hint: tapping the bubble plays it again', hintPlays(a) === 2, String(hintPlays(a)));
+a.$('joinBtn').click();
+a.$('hint').click();
+check('hint: in the judging phase the bubble says the judging sentence', hintPlays(a) === 3, String(hintPlays(a)));
+a.$('okBtn').click();
+const afterFirst = hintPlays(a);
+check('hint: the next exercise does not repeat the sentence by itself', afterFirst === 3, String(afterFirst));
+a = await boot();
+a.$('hint').click();
+check('hint: with no clip the bubble stays silent (no robotic browser voice)', !(a.w.__tts || []).length && !a.audioCalls.length, `tts=${(a.w.__tts || []).length} audio=${a.audioCalls.length}`);
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

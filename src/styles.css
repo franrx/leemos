@@ -51,6 +51,7 @@ h1{margin:0;font-size:1.5rem;letter-spacing:.01em}
 .mascot{flex:0 0 auto;width:92px;height:92px;overflow:visible;transition:transform .25s;animation:sway 3.6s ease-in-out infinite}
 .bubble{position:relative;margin:0;flex:1;background:var(--panel);border:2px solid var(--line);border-radius:18px;
   padding:10px 14px;font-size:1rem;line-height:1.35;min-height:3.4em;display:flex;align-items:center}
+.bubble[role=button]{cursor:pointer}
 .bubble::before{content:"";position:absolute;left:-9px;top:50%;width:14px;height:14px;background:var(--panel);
   border-left:2px solid var(--line);border-bottom:2px solid var(--line);transform:translateY(-50%) rotate(45deg)}
 .eyes{transform-origin:60px 53px;animation:blink 5.5s infinite}
