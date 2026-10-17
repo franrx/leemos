@@ -223,15 +223,10 @@ const itemsFor=(lv,mode)=>{
   const L=LEVELS[lv];
   return mode==='syl'
     ? L.syl.map(s=>({key:(S.lang==='ca'?'ca:':'')+'s:'+s,parts:splitSyl(s),text:s,emoji:null}))
-    : L.words.map(o=>({key:(S.lang==='ca'?'ca:':'')+'w:'+o.w,parts:o.w.split('-'),text:o.w.replace(/-/g,''),emoji:o.e,tags:(o.g||'').split(' ')}));
+    : L.words.map(o=>({key:(S.lang==='ca'?'ca:':'')+'w:'+o.w,parts:o.w.split('-'),text:o.w.replace(/-/g,''),emoji:o.e}));
 };
 function pick(){
-  let pool=itemsFor(S.level,S.mode).filter(i=>!last||i.key!==last||itemsFor(S.level,S.mode).length<2);
-  if(S.mode==='word'){
-    const wid=WORLDS[worldNow()].id;
-    const themed=pool.filter(i=>i.tags&&i.tags.indexOf(wid)>=0);
-    if(themed.length&&Math.random()<(themed.length>=3?.8:.4))pool=themed;
-  }
+  const pool=itemsFor(S.level,S.mode).filter(i=>!last||i.key!==last||itemsFor(S.level,S.mode).length<2); // the world is only scenery: it never narrows the words
   const wts=pool.map(i=>{const s=S.stats[i.key]||{ok:0,fail:0};return Math.max(.25,1+s.fail*2.5-s.ok*.35+(s.ok+s.fail===0?1.5:0))});
   let r=Math.random()*wts.reduce((a,b)=>a+b,0);
   for(let i=0;i<pool.length;i++){r-=wts[i];if(r<=0)return pool[i]}

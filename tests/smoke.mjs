@@ -119,7 +119,7 @@ for (const lang of ['es', 'ca']) {
 }
 check('no runtime errors across the run', a.errors.length === 0, a.errors.slice(0, 3).join(' | '));
 
-// ---------- 4. themed words ----------
+// ---------- 4. the world is only scenery: it does not bias the words ----------
 a = await boot();
 a.d.querySelectorAll('.level')[2].click();
 a.$('mWord').click();
@@ -138,7 +138,10 @@ for (let i = 0; i < N; i++) {
   a.$('okBtn').click(); await sleep(0);
   if (!a.$('reward').hidden) a.$('rewardOk').click();
 }
-check('word mode prefers the current world (Granja, level 3)', themed / N >= 0.55, `${themed}/${N} themed`);
+check('word mode does not favour the words tagged with the current world (Granja is 10 of 60 words at level 3)', themed / N < 0.4, `${themed}/${N} themed`);
+a = await boot();
+a.$('worldBtn').click();
+check('a new child starts with Sorpresa (the world rotates each session)', a.d.querySelectorAll('#worldGrid .wbtn')[0].getAttribute('aria-pressed') === 'true' && a.d.querySelectorAll('#worldGrid .wbtn')[1].getAttribute('aria-pressed') === 'false');
 
 // ---------- 5. session end + stickers ----------
 a = await boot();

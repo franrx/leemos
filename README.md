@@ -79,7 +79,7 @@ El adulto inicia sesión desde «Para papá y mamá → Guardar mi progreso» (e
 Es un sitio estático: sirve cualquier hosting con **https** (Netlify, Cloudflare Pages, GitHub Pages…). Hace falta https para el micrófono y el modo offline. Una vez abierta en la tablet, «Añadir a pantalla de inicio» la instala; tras la primera visita con conexión, descarga los audios y funciona sin internet.
 
 ## Personalizar contenido
-- Palabras y sílabas: `src/data/levels.<idioma>.json`. El campo `g` etiqueta la palabra con mundos (ids de `worlds.json`, separados por espacios) para que salga más en ese paisaje.
+- Palabras y sílabas: `src/data/levels.<idioma>.json`. El campo `g` (mundos, ids de `worlds.json`) ya no se usa: el mundo es solo el paisaje y no cambia qué palabras salen.
 - Textos de interfaz: `src/data/i18n.<idioma>.json` (mismas claves en los dos).
 - Mundos y pegatinas: `worlds.json` (cada mundo trae su conjunto de 6 pegatinas en `stk`). `stickers.json` solo conserva el orden de las 24 pegatinas originales para migrar guardados antiguos: no lo cambies.
 - Tras cambiar palabras: `npm run audio:plan` y `npm run audio` generan solo los clips nuevos.
