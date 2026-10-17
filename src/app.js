@@ -213,7 +213,7 @@ const hintFor=p=>p==='read'
 // Lumi's instruction sentence: a recording or a generated clip only. The browser voice is robotic, so with no clip he stays silent.
 // While it plays his beak moves; tapped (big) he also grows to the middle of the screen.
 const reducedMotion=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
-let talkT=null,rafT=null,jawEls=[],closeT=null,hintIntro=false,jawV=0,talkCtx=null; // hintIntro: the first sentence of a session plays by itself, once
+let talkT=null,rafT=null,jawEls=[],closeGen=0,hintIntro=false,jawV=0,talkCtx=null; // closeGen: opening again cancels a pending close // hintIntro: the first sentence of a session plays by itself, once
 const jawSet=v=>jawEls.forEach(e=>e.style.setProperty('--jaw',v));
 // The beak follows the real loudness of the clip (Web Audio analyser): closed in silence, wide on loud syllables.
 // The audio element is rerouted through the context, so only use it when the context is running (otherwise the clip would be mute).
@@ -249,7 +249,7 @@ function flyTo(art,m){ // place the big Lumi over the small one (translate + sca
 }
 function openBig(text){
   const ov=$('lumiBig'),art=$('lumiBigArt'),m=$('mascot'),still=reducedMotion();
-  clearTimeout(closeT);
+  closeGen++;
   const c=m.cloneNode(true);
   ['id','role','aria-label','data-ia','style'].forEach(a=>c.removeAttribute(a));
   c.setAttribute('class','mascot');c.setAttribute('aria-hidden','true');
@@ -265,7 +265,8 @@ function closeBig(){
   const ov=$('lumiBig');if(ov.hidden)return;
   ov.classList.remove('talking');ov.classList.add('closing');
   if(!reducedMotion())flyTo($('lumiBigArt'),$('mascot')); // shrinks back to his corner
-  closeT=setTimeout(()=>{ov.hidden=true;ov.classList.remove('closing')},reducedMotion()?250:450);
+  const g=++closeGen;
+  setTimeout(()=>{if(g===closeGen){ov.hidden=true;ov.classList.remove('closing')}},reducedMotion()?250:450);
 }
 function talkStart(big,text,meter){
   talkStop();
@@ -282,9 +283,9 @@ function hintAudio(x){
   const u=clipURL[ck(x)];if(u)return new Audio(u);
   const f=genFile(x);return f?new Audio(clipUrl(S.lang,x.toLowerCase(),f)):null;
 }
-function sayHint(big){
-  if(phase!=='read'&&phase!=='judge')return false;
-  const x=hintFor(phase),au=hintAudio(x);if(!au)return false;
+// Plays a clip or recording of `x` with Lumi talking (big = he comes to the middle of the screen). False if there is neither.
+function lumiPlay(x,big){
+  const au=hintAudio(x);if(!au)return false;
   try{
     if(curAudio)curAudio.pause();curAudio=au;
     talkStart(big,x,levelMeter(au,big));
@@ -293,6 +294,12 @@ function sayHint(big){
     au.play().catch(done);
     return true;
   }catch(e){talkStop();return false}
+}
+function sayHint(big){return phase!=='read'&&phase!=='judge'?false:lumiPlay(hintFor(phase),big)}
+// His praise (after an answer, a sticker, the end of a session): he comes big; with no clip it falls back to the browser voice, as before.
+function sayLumi(x){
+  try{if(hasTTS)speechSynthesis.cancel()}catch(e){}
+  if(!lumiPlay(x,true))ttsSpeak(x);
 }
 // Only counts as said once a clip really played (the manifest may still be loading when the first exercise appears).
 function introHint(){if(sDone===0&&!hintIntro&&phase==='read'&&sayHint(false))hintIntro=true}
@@ -387,7 +394,7 @@ function record(ok){
     setTimeout(()=>showReward(reward),500);
     pendingEnd=true;
   }else if(S.sound&&(!ok||Math.random()<.6)){
-    setTimeout(()=>say(msg),200);
+    setTimeout(()=>sayLumi(msg),200);
   }
   renderLevels();renderHard();renderAlbum();
   if(finished){if(!reward)setTimeout(showEnd,ok?1100:900)}
@@ -496,7 +503,7 @@ function showReward(e){
   $('reward').hidden=false;
   confetti();sfx.win();flash();poke('dance',1600);
   sparkleBurst($('rewardEmoji'),18);
-  if(S.sound)say(t('rewardTitle',{n:nm()}));
+  if(S.sound)sayLumi(t('rewardTitle',{n:nm()}));
   $('rewardOk').focus();
 }
 function closeOverlays(){
@@ -527,7 +534,7 @@ function showEnd(){
     if(canLevelUp)$('endLevelUp').textContent=t('endLevelUp',{n:S.level+2,t:LEVELS[S.level+1].name});
   }
   confetti();sfx.win();flash();poke('dance',1600);
-  if(S.sound)say(t('endTitle',{n:nm()}));
+  if(S.sound)sayLumi(t('endTitle',{n:nm()}));
   (canLevelUp&&!pre?$('endLevelUpBtn'):$('endMore')).focus();
 }
 function restState(){

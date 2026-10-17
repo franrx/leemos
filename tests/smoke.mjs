@@ -538,5 +538,32 @@ check('beak: the automatic sentence creates no audio context (one made without a
 a.$('hint').click();
 check('beak: a tap creates it', (a.w.__acs || []).length === 1, String((a.w.__acs || []).length));
 
+// ---------- 21. Lumi comes big for his praise too (each answer, the sticker, the end of the session) ----------
+const praiseManifest = { generated: 'test', clips: { es: new Proxy({}, { get: (_, k) => (typeof k === 'string' ? 'x.mp3' : undefined) }), ca: {} } };
+const fillElsa = (list) => list.map((s) => s.replace('{n}', 'Elsa'));
+a = await boot({ manifest: praiseManifest });
+a.$('joinBtn').click(); a.$('noBtn').click();
+await sleep(300);
+check('praise: after a wrong answer Lumi comes big with the encouragement', !a.$('lumiBig').hidden && fillElsa(ies.nos).includes(a.$('lumiBigText').textContent), a.$('lumiBigText').textContent);
+a = await boot({ manifest: praiseManifest });
+a.w.Math.random = () => 0.1; // the praise after a right answer plays 60% of the time
+a.$('joinBtn').click(); a.$('okBtn').click();
+await sleep(300);
+check('praise: after a right answer Lumi comes big with the praise', !a.$('lumiBig').hidden && fillElsa(ies.oks).includes(a.$('lumiBigText').textContent), a.$('lumiBigText').textContent);
+a = await boot({ manifest: praiseManifest });
+await playSession(a, 9);
+a.$('joinBtn').click(); await sleep(0); a.$('okBtn').click(); // the 10th answer, by hand: playSession would close the sticker at once
+await until(() => !a.$('reward').hidden);
+await sleep(20);
+check('praise: the sticker brings Lumi big with its title', !a.$('lumiBig').hidden && a.$('lumiBigText').textContent === a.$('rewardTitle').textContent, a.$('lumiBigText').textContent);
+a.$('rewardOk').click();
+await until(() => !a.$('end').hidden);
+await sleep(20);
+check('praise: the end of the session brings Lumi big with its title', !a.$('lumiBig').hidden && a.$('lumiBigText').textContent === a.$('endTitle').textContent, a.$('lumiBigText').textContent);
+a = await boot();
+a.$('joinBtn').click(); a.$('noBtn').click();
+await sleep(300);
+check('praise: with no clip there is no zoom (the browser voice speaks as before)', a.$('lumiBig').hidden && (a.w.__tts || []).length > 0);
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
