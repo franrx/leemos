@@ -84,6 +84,7 @@
       <label for="nm" data-i="lName">Nombre</label>
       <input type="text" id="nm" maxlength="20" autocomplete="off">
     </div>
+    <p class="small" data-i="nickHint">Usa un apodo, no el nombre completo.</p>
     <div class="row">
       <label for="sessionSel" data-i="lSession">Sesión</label>
       <select id="sessionSel">
@@ -115,6 +116,32 @@
     </div>
     <div class="row">
       <button class="icon-btn" id="profileOpen" data-i="aProfile">Cambiar de niño o niña</button>
+    </div>
+    <div class="acct" id="acct" hidden>
+      <div class="row"><strong data-i="acctTitle">Guardar mi progreso</strong></div>
+      <div id="acctOut">
+        <p class="small" data-i="acctIntro">Entra con tu email para ver el progreso y las pegatinas en todos tus dispositivos. Lo haces tú, no ella.</p>
+        <div class="row">
+          <label for="acctEmail" data-i="acctEmail">Email</label>
+          <input type="email" id="acctEmail" autocomplete="email" maxlength="120">
+        </div>
+        <label class="row acct-consent"><input type="checkbox" id="acctConsent"> <span data-i="acctConsent">Soy el padre, la madre o tutor y acepto la política de privacidad.</span></label>
+        <div class="row"><button class="icon-btn" id="acctSend" data-i="acctSend">Enviar código</button></div>
+        <div class="row" id="acctCodeRow" hidden>
+          <label for="acctCode" data-i="acctCode">Código</label>
+          <input type="text" id="acctCode" inputmode="numeric" maxlength="8" autocomplete="one-time-code">
+          <button class="icon-btn" id="acctVerify" data-i="acctVerify">Entrar</button>
+        </div>
+      </div>
+      <div id="acctIn" hidden>
+        <p id="acctWho"></p>
+        <p class="small" id="acctStatus" aria-live="polite"></p>
+        <div class="row">
+          <button class="icon-btn" id="acctSync" data-i="acctSync">Sincronizar ahora</button>
+          <button class="icon-btn" id="acctOutBtn" data-i="acctSignOut">Cerrar sesión</button>
+        </div>
+      </div>
+      <p class="small" id="acctMsg" aria-live="polite"></p>
     </div>
     <p class="small" id="voiceInfo"></p>
   </details>
@@ -156,6 +183,7 @@
       <label for="pfName" data-i="lName">Nombre</label>
       <input type="text" id="pfName" maxlength="20" autocomplete="off">
     </div>
+    <p class="small" data-i="nickHint">Usa un apodo, no el nombre completo.</p>
     <div class="pf-row">
       <select id="pfKind" data-ia="aria-label:pfKind" aria-label="Tipo">
         <option value="reader" data-i="pfKindReader">Ya lee sílabas</option>

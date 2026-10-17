@@ -40,5 +40,11 @@ await get('/audio/es/ma.mp3');
 await get('/audio/es/ma.mp3');
 check('sw: a clip without a revision is still cached by its plain path', network.length === 3);
 
+// accounts: requests to Supabase (another origin) must never be intercepted or cached by the service worker
+const before = network.length;
+const supaAnswer = await get('https://x.supabase.co/rest/v1/child_profiles?select=id');
+const authAnswer = await get('https://x.supabase.co/auth/v1/token?grant_type=refresh_token');
+check('sw: requests to the Supabase origin are left alone (never intercepted or cached)', supaAnswer === null && authAnswer === null && network.length === before && ![...store.keys()].some((k) => k.includes('supabase')));
+
 console.log(failures ? `\n${failures} sw test(s) FAILED` : '\nAll sw tests passed');
 process.exit(failures ? 1 : 0);

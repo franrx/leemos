@@ -4,6 +4,7 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createFakeSupabase } from './lib/fake-supabase.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(ROOT, 'index.html'), 'utf8').replace(/<script type="module"[^>]*><\/script>/, '');
@@ -14,7 +15,7 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null, reduced = false, voice = null } = {}) {
+async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null, reduced = false, voice = null, syncConfig = null, supa = null } = {}) {
   const errors = [];
   const audioCalls = [];
   const vc = new VirtualConsole();
@@ -40,12 +41,14 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
         w.AudioContext = class { constructor() { this.state = mic.state || 'running'; } resume() {} createMediaStreamSource() { return { connect() {}, disconnect() {} }; } createAnalyser() { const an = { fftSize: 1024 }; if (!mic.noFloat) an.getFloatTimeDomainData = (a) => a.fill(mic.peak); return an; } };
       }
       w.__fetched = [];
+      if (supa) w.__leemosSyncFetch = supa.fetch; // the fake Supabase the app's sync client talks to
       if (swMock) {
         Object.defineProperty(w.navigator, 'serviceWorker', { value: { controller: {}, register: () => Promise.resolve() } });
         w.caches = { match: async () => (swMock.cached ? {} : undefined) };
       }
       w.fetch = async (u) => {
         w.__fetched.push(u);
+        if (syncConfig && u === 'src/data/sync.config.json') return { ok: true, status: 200, json: async () => syncConfig };
         if (u === 'audio/manifest.json') return manifest ? { ok: true, status: 200, json: async () => manifest } : { ok: false, status: 404, json: async () => ({}) };
         const p = join(ROOT, u);
         if (!existsSync(p)) return { ok: false, status: 404, json: async () => ({}) };
@@ -588,6 +591,54 @@ check('sync state: the reset deleted the Spanish counters', !Object.keys(st3.sta
 a = await boot({ storage: { 'leemos-v1': { name: 'Elsa', total: 3, stats: { 's:ma': { ok: 1, fail: 0 } }, modAt: 0 } } });
 const old = JSON.parse(a.w.localStorage.getItem('leemos-v1') || '{}');
 check('sync state: loading an old saved state does not stamp modAt by itself', !old.modAt);
+
+// ---------- 23. account block: hidden without config, zero Supabase traffic until the adult signs in ----------
+const CFG = { url: 'https://x.supabase.co', anonKey: 'anon' };
+let supa = createFakeSupabase();
+a = await boot({ supa });
+a.$('parents').open = true; a.$('parents').dispatchEvent(new a.w.Event('toggle'));
+await sleep(30);
+check('account: with an empty config the account block stays hidden', a.$('acct').hidden);
+check('account: and nothing was sent to Supabase', supa.log.length === 0);
+
+supa = createFakeSupabase();
+a = await boot({ supa, syncConfig: CFG });
+check('account: a configured app that was never signed in sends nothing at start', supa.log.length === 0);
+a.$('parents').open = true; a.$('parents').dispatchEvent(new a.w.Event('toggle'));
+await until(() => !a.$('acct').hidden);
+check("account: opening the parents' panel shows the sign-in block", !a.$('acct').hidden && !a.$('acctOut').hidden && a.$('acctIn').hidden);
+check('account: and still nothing was sent to Supabase', supa.log.length === 0, supa.log.join(' | '));
+
+a.$('acctEmail').value = 'mama@example.com';
+a.$('acctSend').click();
+await sleep(20);
+check('account: sending a code without accepting the consent is refused and sends nothing', supa.log.length === 0 && a.$('acctMsg').textContent.length > 0 && a.$('acctCodeRow').hidden);
+a.$('acctEmail').value = 'not-an-email';
+a.$('acctConsent').checked = true;
+a.$('acctSend').click();
+await sleep(20);
+check('account: an invalid email is refused locally', supa.log.length === 0 && a.$('acctCodeRow').hidden);
+a.$('acctEmail').value = 'mama@example.com';
+a.$('acctSend').click();
+await until(() => !a.$('acctCodeRow').hidden);
+check('account: a valid email and consent request the code and reveal the code field', supa.log.includes('POST /auth/v1/otp') && !a.$('acctCodeRow').hidden);
+a.$('acctCode').value = '000000';
+a.$('acctVerify').click();
+await sleep(30);
+check('account: a wrong code shows a message and stays signed out', a.$('acctIn').hidden && /código/i.test(a.$('acctMsg').textContent), a.$('acctMsg').textContent);
+a.$('acctCode').value = '123456';
+a.$('acctVerify').click();
+await until(() => !a.$('acctIn').hidden);
+check('account: the right code signs in and shows the email', !a.$('acctIn').hidden && a.$('acctOut').hidden && a.$('acctWho').textContent.includes('mama@example.com'));
+await until(() => supa.rows.size === 1, 3000);
+check('account: the first sign-in uploads the local profile', supa.rows.size === 1 && JSON.parse(a.w.localStorage.getItem('leemos-profiles')).list[0].rid === [...supa.rows.keys()][0]);
+a.$('acctOutBtn').click();
+await sleep(20);
+check('account: sign out returns to the sign-in view and keeps local progress and the link', !a.$('acctOut').hidden && a.$('acctIn').hidden && !!JSON.parse(a.w.localStorage.getItem('leemos-profiles')).list[0].rid && a.w.localStorage.getItem('leemos-auth') === null);
+
+const swText = readFileSync(join(ROOT, 'sw.js'), 'utf8');
+check('account: the service worker pre-caches the sync modules and config', ['src/merge.js', 'src/sync.js', 'src/data/sync.config.json'].every((f) => swText.includes(`'${f}'`)));
+check('account: the nickname hint is present under the name field', !!a.d.querySelector('[data-i="nickHint"]'));
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

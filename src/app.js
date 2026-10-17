@@ -410,6 +410,102 @@ function record(ok){
   else setTimeout(next,ok?1100:900);
 }
 
+// ---------- accounts and sync (optional; spec: docs/superpowers/specs/2026-10-17-accounts-sync-design.md) ----------
+let sync=null,mergeMod=null,syncBusy=false,syncTimer=null,syncState='idle'; // idle | syncing | offline | error
+const AUTH_USER_KEY='leemos-auth-user',SYNC_AT_KEY='leemos-sync-at';
+const uuid=()=>(window.crypto&&crypto.randomUUID)?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&3|8)).toString(16)});
+// Loads the sync modules only when the config has a project; with an empty config nothing is loaded and no request is made.
+async function syncInit(){
+  if(sync)return sync;
+  try{
+    const cfg=await loadJSON('src/data/sync.config.json');
+    if(!cfg||!cfg.url||!cfg.anonKey)return null;
+    const imp=window.__leemosImport||(p=>import(p));
+    const [sm,mm]=await Promise.all([imp('./sync.js'),imp('./merge.js')]);
+    mergeMod=mm;
+    sync=sm.createSync({url:cfg.url,anonKey:cfg.anonKey,fetch:window.__leemosSyncFetch||undefined,storage:localStorage}); // the page's own localStorage, also under the jsdom tests
+    document.addEventListener('visibilitychange',()=>{if(document.hidden)syncAll()});
+    window.addEventListener('pagehide',()=>syncAll());
+    return sync;
+  }catch(e){return null}
+}
+const stateOf=id=>{
+  if(id===PROFILE.id)return S;
+  try{return JSON.parse(localStorage.getItem(keyFor(id)))||{}}catch(e){return {}}
+};
+// Write merged data into a profile (the active one lives in S; the others only in localStorage).
+function storeState(id,data){
+  if(id===PROFILE.id){
+    mergeMod.applySynced(S,data);
+    if(S.level>=LEVELS.length)S.level=0;
+    lastFp=fpOf(); // data that came from the server is not a local change: no modAt stamp, no new sync
+    save();renderLevels();renderHard();updateHello();
+  }else{
+    const cur=stateOf(id);mergeMod.applySynced(cur,data);
+    try{localStorage.setItem(keyFor(id),JSON.stringify(cur))}catch(e){}
+  }
+}
+function schedSync(){if(!sync)return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncAll(),5000)}
+onProgressChange=schedSync;
+async function syncAll(){
+  if(syncBusy||!sync)return;
+  let ok=false;
+  try{ok=!!(await sync.session())}catch(e){renderAcct();return}
+  if(!ok)return;
+  syncBusy=true;syncState='syncing';renderAcct();
+  try{
+    for(const p of PROFILES.list){
+      if(!p.rid)continue;
+      const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:mergeMod.pickSynced(stateOf(p.id))});
+      storeState(p.id,r.data);
+    }
+    syncState='idle';
+    try{localStorage.setItem(SYNC_AT_KEY,String(Date.now()))}catch(e){}
+  }catch(e){syncState=e&&e.kind==='offline'?'offline':'error';if(e&&e.kind==='auth')acctMsg('acctExpired')}
+  finally{syncBusy=false;renderAcct()}
+}
+function acctMsg(key,vars){$('acctMsg').textContent=key?t(key,vars):''}
+function renderAcct(){
+  if(!sync)return;
+  $('acct').hidden=false;
+  let email='';try{const s=JSON.parse(localStorage.getItem('leemos-auth'));email=s&&s.user&&s.user.email||''}catch(e){}
+  const signedIn=!!email&&!!sync.userId();
+  $('acctOut').hidden=signedIn;$('acctIn').hidden=!signedIn;
+  if(!signedIn)return;
+  $('acctWho').textContent=t('acctWho',{e:email});
+  const at=Number(localStorage.getItem(SYNC_AT_KEY))||0;
+  const mins=Math.max(0,Math.round((Date.now()-at)/60000));
+  $('acctStatus').textContent=syncState==='syncing'?t('acctSyncing'):syncState==='offline'?t('acctOffline'):!at?t('acctNever'):t('acctSynced',{m:mins<1?t('acctJustNow'):t('acctMinAgo',{n:mins})});
+}
+$('parents').addEventListener('toggle',async()=>{if($('parents').open&&await syncInit())renderAcct()});
+$('acctSend').onclick=async()=>{
+  const email=$('acctEmail').value.trim();
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){acctMsg('acctBadEmail');return}
+  if(!$('acctConsent').checked){acctMsg('acctNeedConsent');return}
+  const sy=await syncInit();if(!sy)return;
+  try{await sy.requestCode(email);$('acctCodeRow').hidden=false;acctMsg('acctSent');$('acctCode').focus()}
+  catch(e){acctMsg(e&&e.kind==='offline'?'acctNetwork':'acctError')}
+};
+$('acctVerify').onclick=async()=>{
+  const sy=await syncInit();if(!sy)return;
+  try{
+    const s=await sy.verifyCode($('acctEmail').value.trim(),$('acctCode').value);
+    acctMsg('');$('acctCode').value='';$('acctCodeRow').hidden=true;
+    await afterSignIn(s.user);
+  }catch(e){acctMsg(e&&e.kind==='code'?'acctBadCode':e&&e.kind==='offline'?'acctNetwork':'acctError')}
+};
+$('acctSync').onclick=()=>syncAll();
+$('acctOutBtn').onclick=()=>{if(sync)sync.signOut();syncState='idle';acctMsg('');renderAcct()};
+// First version: every local profile without a rid gets one and is uploaded. The linking dialog replaces this.
+async function afterSignIn(user){
+  try{localStorage.setItem(AUTH_USER_KEY,user.id)}catch(e){}
+  PROFILES.list.forEach(p=>{if(!p.rid)p.rid=uuid()});
+  saveProfiles();
+  await syncAll();
+}
+// A session from an earlier visit: sync at start (only if signed in; otherwise nothing is loaded or sent).
+try{if(localStorage.getItem('leemos-auth'))syncInit().then(sy=>{if(sy){renderAcct();syncAll()}})}catch(e){}
+
 // ---------- mascot, sound, rewards ----------
 const MASCOT_STATES=['cheer','tilt','dance','antic-look','antic-stretch','antic-wave'];
 let lastActivity=Date.now();
