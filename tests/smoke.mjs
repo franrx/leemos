@@ -1294,7 +1294,7 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     return seen;
   };
   const st = (app) => JSON.parse(app.w.localStorage.getItem('leemos-v1'));
-  let x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', level: 4, sessionLen: 20, pathEs: 1, pathCa: 1 } } });
+  let x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', level: 4, sessionLen: 20, pathEs: 1, pathCa: 1, pathAuto: false } } });
   let seen = await drawn(x, 40);
   check('path: with only M open every exercise needs no other letter (even at level 5)', seen.every((s) => stepOf(s) <= 1), seen.filter((s) => stepOf(s) > 1).join(','));
   x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', level: 2, sessionLen: 100, pathEs: 12, pathCa: 12 } } });
@@ -1335,6 +1335,47 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   x = await boot({ importFails: true, storage: { 'leemos-v1': { name: 'Elsa', pathEs: 1, pathCa: 1 } } });
   x.$('joinBtn').click();
   check('path: if the rule cannot load the app still shows an exercise', [...x.d.querySelectorAll('#tiles .tile')].length > 0 && x.errors.length === 0, x.errors.join(' | '));
+}
+
+// ---------- 36. Camino de Elsa: opening letters ----------
+{
+  const { stepOf } = await import('../src/levelrule.js');
+  const LVES = readJSON('src/data/levels.es.json');
+  const st = (app) => JSON.parse(app.w.localStorage.getItem('leemos-v1'));
+  const m1 = Object.fromEntries([...LVES[0].syl.map((s) => ['s:' + s, s]), ...LVES[0].words.map((o) => ['w:' + o.w, o.w])].filter(([, h]) => stepOf(h) === 1).map(([k]) => [k, { ok: 3, fail: 0 }]));
+  let x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, pathEs: 1, pathCa: 1, stats: m1 } } });
+  await playSession(x, 5);
+  check('path: mastering the letter that just opened opens the next one, once', st(x).pathEs === 2 && st(x).prefs.pathEs.v === 2, JSON.stringify([st(x).pathEs]));
+  check('path: the end screen announces the new letter', !x.$('endPath').hidden && /P/.test(x.$('endPath').textContent), x.$('endPath').textContent);
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, pathEs: 1, pathCa: 1 } } });
+  await playSession(x, 5);
+  check('path: a new letter does not open before it is mastered', st(x).pathEs === 1 && x.$('endPath').hidden);
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, pathEs: 1, pathCa: 1, pathAuto: false, stats: m1 } } });
+  await playSession(x, 5);
+  check('path: with the automatic switch off the position stays', st(x).pathEs === 1 && x.$('endPath').hidden);
+  // the parent's block
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 3, pathCa: 12 } } });
+  const btns = () => [...x.d.querySelectorAll('#pathRow button')];
+  check('path: the Camino block shows 12 steps for this language, open ones lit', btns().length === 12 && btns().filter((b) => !b.classList.contains('closed')).length === 3 && btns()[2].getAttribute('aria-pressed') === 'true' && /M/.test(btns()[0].textContent));
+  btns()[1].click(); await sleep(5);
+  check('path: tapping a letter opens up to it and closes the rest, and it is saved as a preference', st(x).pathEs === 2 && st(x).prefs.pathEs.v === 2 && btns().filter((b) => !b.classList.contains('closed')).length === 2, JSON.stringify(st(x).pathEs));
+  x.$('pathAuto').click(); await sleep(5);
+  check('path: the automatic switch is saved', st(x).pathAuto === false && st(x).prefs.pathAuto.v === false);
+  btns()[11].click(); await sleep(5);
+  check('path: the last step opens everything', st(x).pathEs === 12 && x.$('mWord').getAttribute('aria-disabled') === 'false');
+  // Catalan has its own position and texts
+  x = await boot({ lang: 'ca-ES', storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 2 } } });
+  check('path: Catalan uses its own position and its own texts', [...x.d.querySelectorAll('#pathRow button')].filter((b) => !b.classList.contains('closed')).length === 2 && /Camí/.test(x.$('path').textContent), x.$('path').textContent.slice(0, 40));
+  // pulls
+  const { s: supa, app } = await signedBoot({ syncEvery: 120 });
+  const row = supa.rows.get(RID_A); row.data = { ...row.data, prefs: { ...(row.data.prefs || {}), pathEs: { v: 3, at: Date.now() + 5000 } } }; row.version++;
+  await until(() => JSON.parse(app.w.localStorage.getItem('leemos-v1')).pathEs === 3, 3000);
+  await sleep(40);
+  check('path: a position pulled from another device is applied and redrawn', [...app.d.querySelectorAll('#pathRow button')].filter((b) => !b.classList.contains('closed')).length === 3);
+  const { s: supa2, app: app2 } = await signedBoot({ syncEvery: 120 });
+  const row2 = supa2.rows.get(RID_A); row2.data = { ...row2.data, prefs: { pathEs: { v: 99, at: Date.now() + 5000 }, pathAuto: { v: 'yes', at: Date.now() + 5000 } } }; row2.version++;
+  await sleep(500);
+  check('path: hostile pulled values never reach the app', JSON.parse(app2.w.localStorage.getItem('leemos-v1')).pathEs !== 99 && app2.errors.length === 0, app2.errors.join(' | '));
 }
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');

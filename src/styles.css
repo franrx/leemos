@@ -227,3 +227,10 @@ html.pre #endLevelUpBtn{order:3}
 .acct-consent{align-items:flex-start;gap:10px;min-height:44px}
 .acct-consent input{width:24px;height:24px;flex:none;margin-top:2px}
 .mode.dim{opacity:.45}
+.path{margin-top:14px;padding-top:12px;border-top:2px dashed var(--line)}
+.path-row{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.path-row button{min-width:44px;min-height:44px;border:2px solid var(--line);background:var(--panel);border-radius:12px;font-weight:700;font-size:1rem;color:inherit;padding:0 8px}
+.path-row button[aria-pressed="true"]{background:var(--c2);border-color:var(--c2);color:#fff}
+.path-row button.closed{opacity:.45}
+.path-auto{min-height:44px}
+.path-auto input{width:24px;height:24px;flex:none}

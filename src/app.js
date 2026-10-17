@@ -521,7 +521,7 @@ const stateOf=id=>{
 // Write merged data into a profile (the active one lives in S; the others only in localStorage).
 const IDLE_MS=30000; // a value changed on THIS device within the last 30 s is kept: nobody is interrupted while playing
 function applyMerged(m,adoptSession){
-  const before={lang:S.lang,mode:S.mode,world:S.world,sessionLen:S.sessionLen};
+  const before={lang:S.lang,mode:S.mode,world:S.world,sessionLen:S.sessionLen,pos:pathPos()};
   mergeMod.applySynced(S,m); // sets the progress fields, S.session, S.prefs and the plain preference fields (never the voice)
   S.stickers=stkTotal(); // the merge caps a world at 24 and keeps unknown worlds; the counter must follow the sets that exist
   if(S.lang!==before.lang){LEVELS=LV[S.lang]||LV_ES;pendingEnd=false;resting=false}
@@ -539,11 +539,11 @@ function applyMerged(m,adoptSession){
   lastFp=fpOf();lastSessFp=sessFp();lastPref=prefSnap(); // data that came from the server is not a local change: no stamps, no new sync
   // a shorter session length from another device must not leave a protected session at or above it (it would count as finished)
   if(!adoptSession&&S.sessionLen!==before.sessionLen&&sDone>=S.sessionLen){sDone=Math.max(0,S.sessionLen-1);sOk=Math.min(sOk,sDone);sStk=Math.min(sStk,sDone)} // after the baselines: this IS a local change, so save() stamps it
-  save();renderLevels();renderHard();renderAlbum();updateHello();
+  save();renderLevels();renderPath();renderMode();renderHard();renderAlbum();updateHello();
   if(S.lang!==before.lang)applyLang();else renderSession();
   renderGoal();
   if(S.world!==before.world)renderWorlds(); // not on every pull: it would replace the buttons (and the focus) of an open worlds overlay
-  if(S.lang!==before.lang||(S.mode!==before.mode&&!resting))pre?pre.refresh():next(); // while resting, next() would start (and stamp) a new session // a different context needs a new exercise; otherwise the card on screen stays
+  if(S.lang!==before.lang||((S.mode!==before.mode||pathPos()!==before.pos)&&!resting))pre?pre.refresh():next(); // while resting, next() would start (and stamp) a new session // a different context needs a new exercise; otherwise the card on screen stays
 }
 // Returns the merged data. The child may have answered while the request was in flight, so the server's data is merged
 // into the CURRENT local state (never copied over it): a sync can only add progress, never take it away.
@@ -826,8 +826,12 @@ function showEnd(){
   $('endInfo').textContent=t(pre?'preEndInfo':'endInfo',{o:sOk,n:n})+(sStk?(sStk===1?t('endOne'):t('endMany',{k:sStk})):'');
   $('end').hidden=false;
   let canLevelUp;
+  $('endPath').hidden=true;
   if(pre)canLevelUp=pre.showEnd();
   else{
+    const opened=advancePath();
+    $('endPath').hidden=!opened;
+    if(opened)$('endPath').textContent=opened>=12?t('endAllLetters'):t('endNewLetter',{l:LR.STEPS[opened-1].toUpperCase()});
     const all=[...itemsFor(S.level,'syl'),...itemsFor(S.level,'word')].filter(eligible);
     const pct=all.length?Math.round(100*all.filter(x=>mastered(x.key)).length/all.length):0;
     canLevelUp=pathPos()>=12&&pct>=90&&S.level<LEVELS.length-1; // the next level only when every letter is open
@@ -870,6 +874,33 @@ function setMode(m){
   S.mode=m;save();
   renderMode();
   next();
+}
+// The parent's block and the automatic rule (spec: 2026-10-17-elsas-path-design.md). Both go through setPath, which saves (and so stamps) the preference.
+function renderPath(){
+  const row=$('pathRow');row.innerHTML='';const pos=pathPos();
+  LR.STEPS.forEach((l,i)=>{
+    const name=l==='*'?t('pathRest'):l.toUpperCase();
+    const b=document.createElement('button');
+    b.textContent=name;b.className=i<pos?'':'closed';b.setAttribute('aria-pressed',i===pos-1);
+    b.setAttribute('aria-label',name+', '+t(i<pos?'pathOpen':'pathClosed'));
+    b.onclick=()=>setPath(i+1);
+    row.appendChild(b);
+  });
+  $('pathAuto').checked=!!S.pathAuto;
+}
+function setPath(n){
+  n=Math.max(1,Math.min(12,n|0));
+  if(S.lang==='ca')S.pathCa=n;else S.pathEs=n;
+  save();renderPath();renderMode();renderLevels();
+}
+$('pathAuto').onchange=()=>{S.pathAuto=$('pathAuto').checked;save()};
+// After a session: the next letter opens when at least 75% of the items the current letter just made available are mastered (or there are none).
+function advancePath(){
+  const pos=pathPos();
+  if(!S.pathAuto||pos>=12)return 0;
+  const fresh=[...openItems('syl'),...openItems('word')].filter(i=>LR.stepOf(i.h)===pos);
+  if(fresh.length&&fresh.filter(i=>mastered(i.key)).length/fresh.length<.75)return 0;
+  setPath(pos+1);return pos+1;
 }
 $('caseBtn').onclick=()=>{S.upper=!S.upper;save();applyCase()};
 function applyCase(){
@@ -1057,7 +1088,7 @@ function applyLang(){
     el.getAttribute('data-ia').split(';').forEach(p=>{const kv=p.split(':');el.setAttribute(kv[0],t(kv[1]))});
   });
   $('langBtn').textContent=S.lang==='ca'?'CA':'ES';
-  updateHello();renderLevels();renderHard();renderSession();renderAlbum();renderWorlds();updateRecInfo();
+  updateHello();renderLevels();renderPath();renderMode();renderHard();renderSession();renderAlbum();renderWorlds();updateRecInfo();
   if(hasTTS)pickVoice();
   if(phase==='read'||phase==='judge')$('hint').textContent=hintFor(phase);
 }

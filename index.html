@@ -117,6 +117,12 @@
     <div class="row">
       <button class="icon-btn" id="profileOpen" data-i="aProfile">Cambiar de niño o niña</button>
     </div>
+    <div class="path" id="path">
+      <div class="row"><strong data-i="pathTitle">Camino de letras</strong></div>
+      <p class="small" data-i="pathHelp">Las letras abiertas son las que practica. Toca una letra para abrir hasta ella y cerrar las siguientes, según el libro del cole.</p>
+      <div class="path-row" id="pathRow" role="group" data-ia="aria-label:pathTitle"></div>
+      <label class="row path-auto"><input type="checkbox" id="pathAuto"> <span data-i="pathAuto">Abrir letras solas cuando domine las de ahora</span></label>
+    </div>
     <div class="acct" id="acct" hidden>
       <div class="row"><strong data-i="acctTitle">Guardar mi progreso</strong></div>
       <div id="acctOut">
@@ -216,6 +222,7 @@
     <div class="big">🎉</div>
     <h2 id="endTitle"></h2>
     <p id="endInfo"></p>
+    <p id="endPath" class="small" hidden></p>
     <p id="endLevelUp" class="small" hidden></p>
     <div class="actions">
       <button class="btn primary" id="endLevelUpBtn" data-i="endLevelUpBtn" hidden>Sí, siguiente nivel</button>
