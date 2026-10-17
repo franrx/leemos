@@ -229,7 +229,7 @@ function show(){
     t.appendChild(b);
   });
   const pic=$('pic');
-  pic.hidden=S.mode!=='word';
+  pic.hidden=S.mode!=='word'||!it.emoji; // a word without a picture (e.g. "no", "dia") has no slot at all
   pic.className='pic q';pic.textContent='?';
   setPhase('read');
 }

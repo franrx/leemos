@@ -14,7 +14,7 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null } = {}) {
+async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null } = {}) {
   const errors = [];
   const audioCalls = [];
   const vc = new VirtualConsole();
@@ -47,7 +47,7 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
         if (u === 'audio/manifest.json') return manifest ? { ok: true, status: 200, json: async () => manifest } : { ok: false, status: 404, json: async () => ({}) };
         const p = join(ROOT, u);
         if (!existsSync(p)) return { ok: false, status: 404, json: async () => ({}) };
-        return { ok: true, status: 200, json: async () => JSON.parse(readFileSync(p, 'utf8')) };
+        return { ok: true, status: 200, json: async () => { const d = JSON.parse(readFileSync(p, 'utf8')); return levelsPatch && /levels\.(es|ca)\.json$/.test(u) ? levelsPatch(d) : d; } };
       };
       // run the short UI timers immediately so a whole session fits in one test
       const st = w.setTimeout;
@@ -431,6 +431,18 @@ check('revisions: a clip with a revision is played from a versioned URL', a.audi
 a = await boot({ manifest: revManifest, swMock: { cached: false }, storage: { 'leemos-v1': { warmed: 'g2' } } });
 await sleep(30);
 check('revisions: warming the cache uses the same versioned URLs', a.w.__fetched.includes('audio/es/a.mp3?v=11') && a.w.__fetched.includes('audio/es/ma.mp3'), a.w.__fetched.filter((u) => u.startsWith('audio/es')).join(','));
+
+// ---------- 15. optional pictures ----------
+a = await boot({ levelsPatch: (d) => { d[0].words = [{ w: 'ma-mi' }]; return d; } }); // level 1 with a single picture-less word
+a.$('mWord').click();
+check('pictures: a word without an emoji shows no picture slot before reading', a.$('pic').hidden === true);
+a.$('joinBtn').click();
+check('pictures: ... and none after reading it', a.$('pic').hidden === true);
+a = await boot();
+a.$('mWord').click();
+check('pictures: a word with an emoji still shows the "?" slot before reading', a.$('pic').hidden === false && a.$('pic').textContent === '?');
+a.$('joinBtn').click();
+check('pictures: ... and its picture after reading', a.$('pic').hidden === false && a.$('pic').textContent !== '?' && a.$('pic').textContent.length > 0);
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
