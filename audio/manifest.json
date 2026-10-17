@@ -1091,7 +1091,7 @@
    "deus": "deus.mp3"
   }
  },
- "generated": "2026-10-17T09:38:52.417Z",
+ "generated": "2026-10-17T09:49:04.651Z",
  "provider": "azure",
  "name": "Elsa",
  "rev": {
@@ -1199,7 +1199,17 @@
    "dul": 1792227124220,
    "mochila": 1792227124256,
    "taza": 1792227124417,
-   "techo": 1792227124478
+   "techo": 1792227124478,
+   "¡genial, elsa!": 1792230537035,
+   "¡muy bien, elsa!": 1792230537133,
+   "¡lo has clavado, elsa!": 1792230537228,
+   "¡bravo, elsa!": 1792230538063,
+   "¡casi, elsa! otra vez.": 1792230538106,
+   "¡qué gran lectora, elsa!": 1792230538158,
+   "poco a poco, elsa. ¡otra vez!": 1792230539000,
+   "¡sesión completada, elsa!": 1792230539715,
+   "¡nueva pegatina, elsa!": 1792230540191,
+   "¡tú puedes, elsa! vamos otra vez.": 1792230540236
   },
   "ca": {
    "niu": 1792227124940,
@@ -1371,7 +1381,17 @@
    "titella": 1792227156334,
    "xai": 1792227156394,
    "ampolla": 1792227156828,
-   "deus": 1792229932417
+   "deus": 1792229932417,
+   "molt bé, elsa!": 1792230540374,
+   "genial, elsa!": 1792230540828,
+   "l'has clavat, elsa!": 1792230541498,
+   "quina gran lectora, elsa!": 1792230541541,
+   "bravo, elsa!": 1792230542023,
+   "tu pots, elsa! torna-hi.": 1792230542720,
+   "gairebé, elsa! un altre cop.": 1792230542942,
+   "nova enganxina, elsa!": 1792230543584,
+   "poc a poc, elsa. un altre cop!": 1792230544219,
+   "sessió completada, elsa!": 1792230544651
   }
  }
 }

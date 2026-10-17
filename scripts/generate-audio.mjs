@@ -6,7 +6,7 @@
 //   npm run audio -- --provider elevenlabs --lang ca real run for Catalan only
 //   npm run audio -- --provider azure --only "ma,me" regenerate specific clips (case-insensitive text)
 //
-// Flags: --provider <name>  --lang es|ca|all  --only a,b,c  --force  --limit N  --concurrency N
+// Flags: --provider <name>  --lang es|ca|all  --only a,b,c  --kind phrase|word|syllable|sound  --force  --limit N  --concurrency N
 //        --no-post (skip ffmpeg trim/normalise)  --name Elsa  --dry-run
 // Existing files are skipped unless --force or --only. Config comes from .env (see .env.example).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -56,8 +56,9 @@ const usePost = !args['no-post'] && hasFfmpeg();
 
 let clips = buildClipList({ name, langs });
 if (only) clips = clips.filter((c) => only.has(c.key));
+if (args.kind) clips = clips.filter((c) => c.kind === args.kind); // phrase keys contain commas, so --only cannot select them
 const audioPath = (c) => join(ROOT, 'audio', c.lang, c.file);
-let todo = clips.filter((c) => force || only || !existsSync(audioPath(c)));
+let todo = clips.filter((c) => force || only || args.kind || !existsSync(audioPath(c)));
 
 if (args['dry-run']) {
   const chars = todo.reduce((n, c) => n + spokenFor(c).length, 0);

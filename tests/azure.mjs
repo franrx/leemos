@@ -23,6 +23,15 @@ await synthesize({ text: 'a & b < c', lang: 'es', env });
 check('azure: plain text is XML-escaped', last().opts.body.includes('a &amp; b &lt; c'), last().opts.body);
 await synthesize({ text: 'ma', lang: 'es', env: { ...env, AZURE_VOICE_ES: 'es-ES-AlvaroNeural', AZURE_RATE: '-30%' } });
 check('azure: voice and rate can be overridden from .env', /voice name="es-ES-AlvaroNeural"/.test(last().opts.body) && /rate="-30%"/.test(last().opts.body));
+// Lumi (phrase clips) speaks with one warm voice in both languages; syllables and words keep the per-language voices.
+for (const lang of ['es', 'ca']) {
+  await synthesize({ text: 'Molt bé, Elsa!', lang, kind: 'phrase', env });
+  check(`azure: a ${lang} phrase uses Lumi's voice, in the language's locale, at rate -5%`, new RegExp(`xml:lang="${lang === 'es' ? 'es-ES' : 'ca-ES'}"><voice name="es-ES-XimenaMultilingualNeural"><prosody rate="-5%"`).test(last().body ?? last().opts.body), last().opts.body);
+}
+await synthesize({ text: 'ma', lang: 'ca', kind: 'syllable', env });
+check('azure: a syllable keeps the language voice', /voice name="ca-ES-JoanaNeural"/.test(last().opts.body), last().opts.body);
+await synthesize({ text: 'Hola', lang: 'es', kind: 'phrase', env: { ...env, AZURE_VOICE_LUMI: 'es-ES-ElviraNeural', AZURE_RATE_LUMI: '-20%' } });
+check("azure: Lumi's voice and rate can be overridden from .env", /voice name="es-ES-ElviraNeural"><prosody rate="-20%"/.test(last().opts.body), last().opts.body);
 let msg = '';
 try { await synthesize({ text: 'ma', lang: 'es', env: {} }); } catch (e) { msg = e.message; }
 check('azure: a missing key or region is a clear error', /AZURE_SPEECH_KEY/.test(msg), msg);
