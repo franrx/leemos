@@ -11,7 +11,7 @@ export function sylLevel(raw){
   const m=s.match(/^([^aeiou]*)([aeiou]+)(.*)$/);
   if(!m)return 5;
   if(m[3])return 4; // closed syllable (al, et, am...)
-  if(m[2].length>1&&/[iu]$/.test(m[2])&&!/^[iu][aeiou]$/.test(m[2]))return 4; // glide ending (neu, bou, rei)
+  if(m[2].length>1&&/[iu]$/.test(m[2])&&!/^[iu][aeo]$/.test(m[2]))return 4; // glide ending (neu, bou, rei)
   const c=m[1][0]||'';
   if(!c)return 1;
   if('msln'.includes(c))return 1;

@@ -12,7 +12,7 @@ const eq = (fn, cases) => cases.every(([i, o]) => fn(i) === o);
 
 // ---------- the placement rule ----------
 check('sylLevel: direct syllables by consonant group', eq(sylLevel, [['ma', 1], ['a', 1], ['pa', 2], ['ca', 2], ['co', 2], ['fa', 3], ['ja', 3], ['ga', 3], ['gu', 3], ['gua', 3], ['ra', 3]]));
-check('sylLevel: closed, glide and cluster syllables are level 4', eq(sylLevel, [['al', 4], ['et', 4], ['am', 4], ['neu', 4], ['bou', 4], ['rei', 4], ['tra', 4], ['pla', 4], ['gro', 4]]));
+check('sylLevel: closed, glide and cluster syllables are level 4', eq(sylLevel, [['al', 4], ['et', 4], ['am', 4], ['neu', 4], ['bou', 4], ['rei', 4], ['niu', 4], ['cui', 4], ['riu', 4], ['nia', 1], ['cua', 2], ['tra', 4], ['pla', 4], ['gro', 4]]));
 check('sylLevel: special spellings are level 5', eq(sylLevel, [['txa', 5], ['nya', 5], ['lla', 5], ['rra', 5], ['qui', 5], ['gue', 5], ['gui', 5], ['ça', 5], ['xa', 5], ['za', 5], ['ha', 5], ['ña', 5], ['cha', 5], ['ce', 5], ['gi', 5]]));
 check('minLevel: whole words', eq(minLevel, [['ne-na', 1], ['ca-sa', 2], ['fo-ca', 3], ['ba-na-na', 3], ['sol', 4], ['neu', 4], ['llu-na', 5], ['pin-güí', 5], ['a-vi', 3], ['mà', 1]]));
 check('letterOf: first grapheme', eq(letterOf, [['ne-na', 'n'], ['llu-na', 'll'], ['que-so', 'qu'], ['cha-ta', 'ch'], ['à-nec', 'a'], ['ós', 'o'], ['xo-co-la-ta', 'x']]));

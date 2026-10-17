@@ -1087,10 +1087,11 @@
    "raqueta": "raqueta.mp3",
    "titella": "titella.mp3",
    "xai": "xai.mp3",
-   "ampolla": "ampolla.mp3"
+   "ampolla": "ampolla.mp3",
+   "deus": "deus.mp3"
   }
  },
- "generated": "2026-10-17T09:29:15.498Z",
+ "generated": "2026-10-17T09:38:52.417Z",
  "provider": "azure",
  "name": "Elsa",
  "rev": {
@@ -1369,7 +1370,8 @@
    "raqueta": 1792227156294,
    "titella": 1792227156334,
    "xai": 1792227156394,
-   "ampolla": 1792227156828
+   "ampolla": 1792227156828,
+   "deus": 1792229932417
   }
  }
 }
