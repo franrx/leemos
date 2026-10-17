@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sylLevel, minLevel, letterOf } from '../src/levelrule.js';
+import { sylLevel, minLevel, letterOf, STEPS, unitsOf, stepOfUnit, stepOf } from '../src/levelrule.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readJSON = (p) => JSON.parse(readFileSync(join(ROOT, p), 'utf8'));
@@ -57,6 +57,22 @@ const SERIES_LANGS = ['ca', 'es'];
 for (const l of SERIES_LANGS) {
   const missing = [...'aeiou'].flatMap((v) => [...'mctpb'].map((c) => v + c)).filter((s) => !LV[l][3].syl.includes(s));
   check(`[${l}] inverse syllables (vowel + m c t p b) are in level 4`, missing.length === 0, missing.join(' '));
+}
+
+// ---------- Camino de Elsa: the letter path (spec: 2026-10-17-elsas-path-design.md) ----------
+check('path: STEPS has the 11 book letters and a last step for the rest', STEPS.length === 12 && STEPS.slice(0, 11).join('') === 'mplntsfbdrc' && STEPS[11] === '*');
+check('path: units skip vowels and keep digraphs whole', eq((s) => unitsOf(s).join(','), [['ma', 'm'], ['ca-sa', 'c,s'], ['car-ro', 'c,rr'], ['xi-ca', 'x,c'], ['mus-sol', 'm,ss,l'], ['nyo', 'ny'], ['ñu', 'ny'], ['ço', 'ss'], ['que', 'qu'], ['guí', 'gu'], ['txa', 'tx'], ['chi', 'ch'], ['calle', 'c,ll'], ['a', '']]));
+check('path: each book letter opens at its own step, rr is an R, everything else opens last', eq(stepOfUnit, [['m', 1], ['p', 2], ['l', 3], ['n', 4], ['t', 5], ['s', 6], ['f', 7], ['b', 8], ['d', 9], ['r', 10], ['c', 11], ['rr', 10], ['v', 12], ['ch', 12], ['ny', 12], ['x', 12], ['*', 12], ['zz', 12], ['·', 12]]));
+check('path: an item needs its hardest letter; a bare vowel needs none', eq(stepOf, [['ma', 1], ['mapa', 2], ['mesa', 6], ['mono', 4], ['ca-sa', 11], ['car-ro', 11], ['a', 0], ['va', 12], ['ñu', 12], ['cha', 12], ['pa-ta', 5]]));
+for (const l of ['es', 'ca']) {
+  const lv = readJSON(`src/data/levels.${l}.json`);
+  const items = lv.flatMap((L) => [...L.syl, ...L.words.map((o) => o.w)]);
+  check(`[${l}] path: every syllable and word gets a step from 0 to 12`, items.every((h) => Number.isInteger(stepOf(h)) && stepOf(h) >= 0 && stepOf(h) <= 12));
+  check(`[${l}] path: at step 12 everything is open and at step 1 only m-items and bare vowels are`, items.filter((h) => stepOf(h) <= 12).length === items.length && items.filter((h) => stepOf(h) <= 1).every((h) => unitsOf(h).every((u) => u === 'm')));
+  const syl1 = new Set(lv.flatMap((L) => L.syl).filter((h) => stepOf(h) <= 1));
+  check(`[${l}] path: step 1 still has at least 5 syllables to practice`, syl1.size >= 5, String(syl1.size));
+  const counts = Array.from({ length: 12 }, (_, i) => items.filter((h) => stepOf(h) <= i + 1).length);
+  check(`[${l}] path: each step opens at least as many items as the one before`, counts.every((c, i) => i === 0 || c >= counts[i - 1]), counts.join(' '));
 }
 
 console.log(failures ? `\n${failures} levels test(s) FAILED` : '\nAll levels tests passed');

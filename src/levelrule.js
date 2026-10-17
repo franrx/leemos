@@ -33,3 +33,21 @@ export function letterOf(hyphenated){
   const m=s.match(/^(ch|ll|ny|qu|tx|rr|gu)/);
   return m?m[1]:s[0];
 }
+
+// ---------- Camino de Elsa: the letter path (spec: docs/superpowers/specs/2026-10-17-elsas-path-design.md) ----------
+// Step n (1-based) means the first n entries are open; the last step opens every other letter.
+export const STEPS=['m','p','l','n','t','s','f','b','d','r','c','*'];
+// Consonant units of a word or syllable: vowels are skipped and ch ll ny qu tx rr gu ss count as one unit.
+export function unitsOf(hyphenated){
+  return norm(hyphenated.replace(/-/g,'')).match(/ch|ll|ny|qu|tx|rr|gu|ss|[^aeiou]/g)||[];
+}
+// The step that opens one unit: the book letters 1..11 (rr is an R); every other unit, known or not, opens with the last step.
+export function stepOfUnit(u){
+  if(u==='rr')return STEPS.indexOf('r')+1;
+  const i=STEPS.indexOf(u);
+  return i>=0&&i<STEPS.length-1?i+1:STEPS.length;
+}
+// The step an item needs: its hardest unit; 0 when it has no consonant (a bare vowel).
+export function stepOf(hyphenated){
+  return unitsOf(hyphenated).reduce((m,u)=>Math.max(m,stepOfUnit(u)),0);
+}
