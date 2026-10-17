@@ -13,6 +13,11 @@ check('migration: the owner column defaults to the caller and cascades on user d
 check('migration: name, kind and data size are constrained', /char_length\(name\) between 1 and 40/.test(sql) && /kind in \('reader','pre'\)/.test(sql) && /octet_length\(data::text\) < 200000/.test(sql));
 check('migration: at most 8 profiles per account', /count\(\*\)[^;]*>= 8/.test(sql));
 check('migration: no policy is granted to anon', !/to anon/.test(sql));
+check('migration: concurrent inserts cannot slip past the 8-profile limit (per-owner advisory lock)', /pg_advisory_xact_lock\(hashtext\(new\.owner::text\)\)/.test(sql));
+check('migration: the limit trigger runs with the caller\'s rights (no security definer)', !/security definer/i.test(sql));
+check('migration: anon has no privileges on the table', /revoke all on public\.child_profiles from anon/.test(sql));
+check('migration: an owner can update only name, data and version (never id or owner)', /revoke update on public\.child_profiles from authenticated/.test(sql) && /grant update \(name, data, version\) on public\.child_profiles to authenticated/.test(sql));
+check('migration: every function body has its opening and closing dollar quote', (sql.match(/\$\$/g) || []).length === 4);
 check('config: the committed sync config is empty (the feature is off until Fran fills it in locally)', cfg.url === '' && cfg.anonKey === '');
 check('config: only the two expected keys exist', Object.keys(cfg).sort().join() === 'anonKey,url');
 

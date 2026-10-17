@@ -2,7 +2,10 @@
 // No globals: tests, the sync module and the app (through import()) all use it.
 const LANGS = ['es', 'ca'];
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
-const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+const CAP = 1e6; // counters stay below this, so a hostile 1e300 can never absorb later +1 increments
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(CAP, Math.floor(v)) : 0);
+const stamp = (v) => (Number.isSafeInteger(v) && v > 0 ? v : 0); // modAt is a millisecond timestamp, not a counter
+const ITEM_KEY = /^(ca:)?(s|w|snd):.{1,40}$/; // the stat keys the app really writes
 const unsafe = (k) => k === '__proto__' || k === 'constructor' || k === 'prototype';
 const langOf = (k) => (k.indexOf('ca:') === 0 ? 'ca' : 'es');
 const pair = (o) => ({ es: num(isObj(o) ? o.es : 0), ca: num(isObj(o) ? o.ca : 0) });
@@ -11,12 +14,12 @@ const nm = (x) => (x && typeof x.name === 'string' ? x.name.trim().slice(0, 40) 
 
 const cleanStat = (s) => {
   const o = {};
-  if (isObj(s)) for (const f of Object.keys(s)) if (!unsafe(f) && typeof s[f] === 'number' && Number.isFinite(s[f]) && s[f] >= 0) o[f] = s[f];
+  if (isObj(s)) for (const f of Object.keys(s).slice(0, 8)) if (!unsafe(f) && f.length <= 16 && typeof s[f] === 'number' && Number.isFinite(s[f]) && s[f] >= 0) o[f] = Math.min(CAP, Math.floor(s[f]));
   return o;
 };
 const statsOf = (d, L) => {
   const out = {};
-  if (isObj(d.stats)) for (const k of Object.keys(d.stats)) if (!unsafe(k) && langOf(k) === L) out[k] = cleanStat(d.stats[k]);
+  if (isObj(d.stats)) for (const k of Object.keys(d.stats)) if (!unsafe(k) && ITEM_KEY.test(k) && langOf(k) === L) out[k] = cleanStat(d.stats[k]);
   return out;
 };
 const maxStat = (x, y) => {
@@ -37,7 +40,7 @@ export function mergeData(a, b) {
     else for (const k of new Set([...Object.keys(sa), ...Object.keys(sb)])) stats[k] = maxStat(sa[k], sb[k]);
   }
   const pa = pair(a.pre), pb = pair(b.pre);
-  const ta = num(a.modAt), tb = num(b.modAt);
+  const ta = stamp(a.modAt), tb = stamp(b.modAt);
   // current position (level, name): the side changed last; ties by (level, name) so the argument order never matters
   const aWins = ta !== tb ? ta > tb : lvl(a) !== lvl(b) ? lvl(a) > lvl(b) : nm(a) >= nm(b);
   const w = aWins ? a : b;

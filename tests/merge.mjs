@@ -73,5 +73,14 @@ applySynced(S, m);
 check('applySynced: synced fields are replaced and device settings are left alone', S.total === 12 && S.level === 0 && S.name === 'Elsita' && S.theme === 'dark' && S.sound === false && S.world === 3);
 check('applySynced: an empty remote name does not erase the local one', applySynced({ name: 'Leo' }, { name: '' }).name === 'Leo');
 
+// bounds: hostile or broken numbers and keys cannot grow or freeze the data (review minor m5)
+const huge = mergeData({ resets: { es: 1e300, ca: 2 }, total: 1e300, stickers: Infinity, stats: { 's:ma': { ok: 1e300, fail: 3 }, evil: { ok: 5 }, ['s:' + 'x'.repeat(200)]: { ok: 5 }, 'w:ne-na': { ok: 1.9 }, 'snd:m': { ok: 1, [('f').repeat(50)]: 9 } }, modAt: 1e300 }, {});
+check('bounds: counters and resets are capped, so 1e300 cannot absorb later increments', huge.total === 1e6 && huge.resets.es === 1e6 && huge.stats['s:ma'].ok === 1e6 && huge.stickers === 0, JSON.stringify([huge.total, huge.resets, huge.stickers]));
+check('bounds: a reset counter at the cap is still just a counter', huge.resets.ca === 2);
+check('bounds: stats keys that are not item keys, or are too long, are dropped', !('evil' in huge.stats) && !Object.keys(huge.stats).some((k) => k.length > 44), Object.keys(huge.stats).join('|'));
+check('bounds: fractional counters become whole numbers', huge.stats['w:ne-na'].ok === 1);
+check('bounds: field names inside a stat are limited too', Object.keys(huge.stats['snd:m']).every((f) => f.length <= 16));
+check('bounds: an unsafe modAt counts as zero', huge.modAt === 0);
+
 console.log(failures ? `\n${failures} merge test(s) FAILED` : '\nAll merge tests passed');
 process.exit(failures ? 1 : 0);

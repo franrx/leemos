@@ -50,7 +50,7 @@ const loadProfiles=()=>{
 };
 const PROFILES=loadProfiles();
 const PROFILE=PROFILES.list.find(x=>x.id===PROFILES.active);
-const saveProfiles=()=>{try{localStorage.setItem(PKEY,JSON.stringify(PROFILES))}catch(e){}};
+const saveProfiles=()=>{try{localStorage.setItem(PKEY,JSON.stringify(PROFILES));return true}catch(e){return false}};
 const keyFor=id=>id==='elsa'?'leemos-v1':'leemos-v1:'+id;
 const profileSlug=n=>n.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 function switchProfile(id){PROFILES.active=id;saveProfiles();location.reload()}
@@ -77,6 +77,7 @@ if(!S.pre)S.pre={es:0,ca:0};
 // One-time switch to capitals (the school book is all capitals): readers only, once per profile; she can switch back with Aa.
 if(PROFILE.kind==='reader'&&!S.upperMigrated){S.upper=true;S.upperMigrated=true;save()}
 LEVELS=LV[S.lang]||LV_ES;
+if(!(S.level>=0&&S.level<LEVELS.length))S.level=0; // a saved level that does not exist (newer app version, bad data) falls back to the first
 let cur=null,last=null,phase='read',resetArmed=false;
 let pre=null;
 let sDone=0,sOk=0,sStk=0,pendingEnd=false,resting=false;
@@ -415,19 +416,22 @@ let sync=null,mergeMod=null,syncBusy=false,syncTimer=null,syncState='idle'; // i
 const AUTH_USER_KEY='leemos-auth-user',SYNC_AT_KEY='leemos-sync-at';
 const uuid=()=>(window.crypto&&crypto.randomUUID)?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&3|8)).toString(16)});
 // Loads the sync modules only when the config has a project; with an empty config nothing is loaded and no request is made.
-async function syncInit(){
-  if(sync)return sync;
-  try{
-    const cfg=await loadJSON('src/data/sync.config.json');
-    if(!cfg||!cfg.url||!cfg.anonKey)return null;
-    const imp=window.__leemosImport||(p=>import(p));
-    const [sm,mm]=await Promise.all([imp('./sync.js'),imp('./merge.js')]);
-    mergeMod=mm;
-    sync=sm.createSync({url:cfg.url,anonKey:cfg.anonKey,fetch:window.__leemosSyncFetch||undefined,storage:localStorage}); // the page's own localStorage, also under the jsdom tests
-    document.addEventListener('visibilitychange',()=>{if(document.hidden)syncAll()});
-    window.addEventListener('pagehide',()=>syncAll());
-    return sync;
-  }catch(e){return null}
+let syncP=null; // the one pending or finished init, so two calls at once never create two clients or register the listeners twice
+function syncInit(){
+  if(sync)return Promise.resolve(sync);
+  return syncP||(syncP=(async()=>{
+    try{
+      const cfg=await loadJSON('src/data/sync.config.json');
+      if(!cfg||!cfg.url||!cfg.anonKey)return null;
+      const imp=window.__leemosImport||(p=>import(p));
+      const [sm,mm]=await Promise.all([imp('./sync.js'),imp('./merge.js')]);
+      mergeMod=mm;
+      sync=sm.createSync({url:cfg.url,anonKey:cfg.anonKey,fetch:window.__leemosSyncFetch||undefined,storage:localStorage}); // the page's own localStorage, also under the jsdom tests
+      document.addEventListener('visibilitychange',()=>{if(document.hidden)syncAll()});
+      window.addEventListener('pagehide',()=>syncAll());
+      return sync;
+    }catch(err){syncP=null;return null} // a failed load can be retried later
+  })());
 }
 const stateOf=id=>{
   if(id===PROFILE.id)return S;
@@ -485,7 +489,7 @@ function renderAcct(){
   $('acctOut').hidden=signedIn;$('acctIn').hidden=!signedIn;
   if(!signedIn)return;
   $('acctWho').textContent=t('acctWho',{e:email});
-  const at=Number(localStorage.getItem(SYNC_AT_KEY))||0;
+  let at=0;try{at=Number(localStorage.getItem(SYNC_AT_KEY))||0}catch(err){}
   const mins=Math.max(0,Math.round((Date.now()-at)/60000));
   $('acctStatus').textContent=syncState==='syncing'?t('acctSyncing'):syncState==='offline'?t('acctOffline'):!at?t('acctNever'):t('acctSynced',{m:mins<1?t('acctJustNow'):t('acctMinAgo',{n:mins})});
 }
@@ -510,20 +514,24 @@ $('acctSync').onclick=()=>syncAll();
 $('acctOutBtn').onclick=()=>{if(sync)sync.signOut();syncState='idle';acctMsg('');renderAcct()};
 // Asks which account profile (if any) a local profile is. Resolves with a remote id, or null for "add as a new child".
 // Closing the dialog ("Ahora no") rejects, and the caller leaves everything as it was.
+const remoteName=r=>typeof(r&&r.name)==='string'?r.name.trim().slice(0,20):''; // account data is untrusted: only a real, short string is a name
 function askLink(local,candidates){
   return new Promise((resolve,reject)=>{
     $('linkAsk').textContent=t('linkAsk',{n:local.name});
     const box=$('linkOpts');box.innerHTML='';
-    const done=v=>{$('link').hidden=true;v===undefined?reject(new Error('cancelled')):resolve(v)};
-    candidates.forEach(r=>{const b=document.createElement('button');b.className='wbtn';b.textContent=r.name;b.onclick=()=>done(r.id);box.appendChild(b)});
+    const onKey=e=>{if(e.key==='Escape')done(undefined)};
+    const done=v=>{document.removeEventListener('keydown',onKey);$('link').hidden=true;v===undefined?reject(new Error('cancelled')):resolve(v)};
+    candidates.forEach(r=>{const b=document.createElement('button');b.className='wbtn';b.textContent=remoteName(r)||'?';b.onclick=()=>done(r.id);box.appendChild(b)});
     const nb=document.createElement('button');nb.className='wbtn';nb.textContent=t('linkNew');nb.onclick=()=>done(null);box.appendChild(nb);
     $('linkCancel').onclick=()=>done(undefined);
+    document.addEventListener('keydown',onKey);
     $('link').hidden=false;
+    box.firstChild.focus();
   });
 }
 // First sign-in on this device (spec section 4): link the local profiles to the account's, upload the new ones, bring the rest here.
 async function afterSignIn(user){
-  const prev=localStorage.getItem(AUTH_USER_KEY);
+  let prev=null;try{prev=localStorage.getItem(AUTH_USER_KEY)}catch(err){}
   const snapshot=JSON.stringify(PROFILES.list);
   try{
     if(prev&&prev!==user.id)PROFILES.list.forEach(p=>{delete p.rid}); // another account used this tablet: never upload its children into this one unasked
@@ -531,27 +539,29 @@ async function afterSignIn(user){
     const known=new Set(remote.map(r=>r.id));
     const claimed=new Set(PROFILES.list.filter(p=>p.rid&&known.has(p.rid)).map(p=>p.rid));
     for(const p of PROFILES.list.filter(x=>!x.rid)){
-      const cands=remote.filter(r=>!claimed.has(r.id));
+      const cands=remote.filter(r=>!claimed.has(r.id)&&r.kind===p.kind); // only a child of the same kind can be the same child
       const pick=cands.length?await askLink(p,cands):null;
       p.rid=pick||uuid();
-      if(pick)claimed.add(pick);
+      if(pick){claimed.add(pick);const rn=remoteName(remote.find(r=>r.id===pick));if(rn)p.name=rn} // the account's name is the one that follows the child
     }
     for(const r of remote){
       if(claimed.has(r.id)||PROFILES.list.some(p=>p.rid===r.id))continue;
-      const base=profileSlug(r.name)||'nino';let id=base,i=2;
-      while(PROFILES.list.some(x=>x.id===id))id=base+'-'+i++;
-      PROFILES.list.push({id,name:r.name,kind:r.kind==='pre'?'pre':'reader',rid:r.id});
+      const rn=remoteName(r);
+      if(!rn)continue; // a remote row without a usable name is skipped, never allowed to break the linking
+      const base=profileSlug(rn)||'nino';let id=base,i=2;
+      while(PROFILES.list.some(x=>x.id===id)||localStorage.getItem(keyFor(id))!==null)id=base+'-'+i++; // never reuse a storage key that already holds something
+      PROFILES.list.push({id,name:rn,kind:r.kind==='pre'?'pre':'reader',rid:r.id});
       const st=mergeMod.applySynced({},r.data);
-      try{localStorage.setItem(keyFor(id),JSON.stringify(st))}catch(e){}
+      try{localStorage.setItem(keyFor(id),JSON.stringify(st))}catch(err){}
     }
-    saveProfiles();
-    try{localStorage.setItem(AUTH_USER_KEY,user.id)}catch(e){}
+    if(!saveProfiles())throw new Error('storage'); // if the list cannot be saved the links would be lost at the next load: undo, do not pretend
+    try{localStorage.setItem(AUTH_USER_KEY,user.id)}catch(err){}
   }catch(e){
     // cancelled or failed half way: nothing stays linked and the device is signed out again. The list is restored in place,
     // so PROFILE (the active entry) is still one of its objects and renaming the child keeps persisting.
     const keep=JSON.parse(snapshot);
     for(let i=PROFILES.list.length-1;i>=0;i--)if(!keep.some(k=>k.id===PROFILES.list[i].id))PROFILES.list.splice(i,1);
-    PROFILES.list.forEach(p=>{const k=keep.find(x=>x.id===p.id);delete p.rid;if(k&&k.rid)p.rid=k.rid});
+    PROFILES.list.forEach(p=>{const k=keep.find(x=>x.id===p.id);delete p.rid;if(k&&k.rid)p.rid=k.rid;if(k)p.name=k.name});
     sync.signOut();syncState='idle';
     $('link').hidden=true;
     acctMsg(e&&e.kind==='offline'?'acctNetwork':e&&e.message==='cancelled'?'':'acctError');

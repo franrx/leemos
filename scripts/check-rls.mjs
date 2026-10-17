@@ -43,6 +43,10 @@ try {
   check('a profile over 200 KB is rejected', big.status >= 400, String(big.status));
   const bad = await rest(A, 'child_profiles', { method: 'POST', body: JSON.stringify({ id: uuid(), name: 'Bad', kind: 'admin' }) });
   check('an unknown kind is rejected', bad.status >= 400, String(bad.status));
+  const own = await rest(A, `child_profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ owner: B.id }) });
+  check("A cannot hand a profile to B by changing 'owner'", own.status >= 400 || ((await own.json()).every((r) => r.owner === A.id)), String(own.status));
+  const idc = await rest(A, `child_profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ id: uuid() }) });
+  check("A cannot change a profile's id", idc.status >= 400 || ((await idc.json()).every((r) => r.id === id)), String(idc.status));
   let created = 1;
   for (let i = 0; i < 9; i++) { const r = await rest(A, 'child_profiles', { method: 'POST', body: JSON.stringify({ id: uuid(), name: 'P' + i, kind: 'pre' }) }); if (r.status === 201) created++; }
   check('an account is limited to 8 profiles', created === 8, String(created));

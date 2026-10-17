@@ -24,7 +24,14 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
     user: { id: (j.user && j.user.id) || (fallbackUser && fallbackUser.id) || null, email: (j.user && j.user.email) || (fallbackUser && fallbackUser.email) || '' },
   });
 
-  const signOut = () => { try { storage.removeItem(SESSION_KEY); } catch (e) { /* nothing to clear */ } };
+  const clearSession = () => { try { storage.removeItem(SESSION_KEY); } catch (e) { /* nothing to clear */ } };
+  // Signs out locally at once, then asks the server to revoke the session. Best effort: offline just skips the revocation.
+  async function signOut() {
+    const s = read(SESSION_KEY);
+    clearSession();
+    if (!s || typeof s.access_token !== 'string') return;
+    try { await raw('/auth/v1/logout', { method: 'POST', headers: headers(s.access_token) }); } catch (e) { /* the local sign-out already happened */ }
+  }
 
   async function requestCode(email) {
     const r = await raw('/auth/v1/otp', { method: 'POST', headers: headers(), body: JSON.stringify({ email, create_user: true }) });
@@ -42,7 +49,7 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
   async function refresh(old) {
     const r = await raw('/auth/v1/token?grant_type=refresh_token', { method: 'POST', headers: headers(), body: JSON.stringify({ refresh_token: old.refresh_token }) });
     if (!r.ok) {
-      if ([400, 401, 403].includes(r.status)) { signOut(); throw new SyncError('auth', 'session expired', r.status); }
+      if ([400, 401, 403].includes(r.status)) { clearSession(); throw new SyncError('auth', 'session expired', r.status); }
       throw new SyncError('http', 'could not refresh the session', r.status);
     }
     const s = toSession(await r.json(), old.user);
@@ -62,10 +69,12 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
   async function api(path, opts = {}) {
     let s = await session();
     if (!s) throw new SyncError('auth', 'not signed in');
-    const go = (tok) => raw('/rest/v1/' + path, { ...opts, headers: { ...headers(tok), Prefer: 'return=representation', ...(opts.headers || {}) } });
+    // keepalive lets a write finish while the page is closing; browsers reject it above 64 KB, so only small bodies ask for it
+    const ka = opts.method && opts.method !== 'GET' && typeof opts.body === 'string' && opts.body.length < 60000;
+    const go = (tok) => raw('/rest/v1/' + path, { ...opts, ...(ka ? { keepalive: true } : {}), headers: { ...headers(tok), Prefer: 'return=representation', ...(opts.headers || {}) } });
     let r = await go(s.access_token);
     if (r.status === 401) { s = await refresh(s); r = await go(s.access_token); } // the server rejected the token: renew once
-    if (r.status === 401) { signOut(); throw new SyncError('auth', 'not authorised', 401); }
+    if (r.status === 401) { clearSession(); throw new SyncError('auth', 'not authorised', 401); }
     return r;
   }
   const rows = async (r) => { try { const j = await r.json(); return Array.isArray(j) ? j : []; } catch (e) { return []; } };

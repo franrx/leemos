@@ -32,6 +32,12 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600 } = {}) 
       if (!user) { user = { id: 'user-' + (users.size + 1), email: body.email }; users.set(body.email, user); }
       return res(200, session(user));
     }
+    if (u.pathname === '/auth/v1/logout') { // revokes every refresh token of the caller
+      const h = opts.headers || {};
+      const tok = access.get(String(h.Authorization || h.authorization || '').replace('Bearer ', ''));
+      if (tok) for (const [rt, uid] of [...refresh]) if (uid === tok.uid) refresh.delete(rt);
+      return res(204, {});
+    }
     if (u.pathname === '/auth/v1/token') {
       const uid = refresh.get(body.refresh_token);
       if (!uid) return res(400, { msg: 'Invalid Refresh Token' });

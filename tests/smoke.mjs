@@ -838,5 +838,79 @@ a = await boot({ storage: { 'leemos-v1': { name: 'Elsa', total: 1, modAt: future
 a.$('joinBtn').click(); a.$('okBtn').click();
 check('review I4: modAt is always newer than the stamp already stored', JSON.parse(a.w.localStorage.getItem('leemos-v1')).modAt > future);
 
+// ---------- 27. review minors: init once, safe linking, level clamp, texts, blocked storage ----------
+// m1: opening the panel twice at once loads the sync modules once
+supa = createFakeSupabase();
+a = await boot({ supa, syncConfig: CFG });
+let imports = 0; const origImport = a.w.__leemosImport; a.w.__leemosImport = (p) => { imports++; return origImport(p); };
+a.$('parents').open = true; a.$('parents').dispatchEvent(new a.w.Event('toggle')); a.$('parents').dispatchEvent(new a.w.Event('toggle'));
+await until(() => !a.$('acct').hidden); await sleep(30);
+check('review m1: two syncInit calls at once load the sync modules only once', imports === 2, String(imports));
+
+// m3: a leftover storage key is never overwritten by a child that comes from the account, and a bad remote name cannot crash the linking
+supa = await withAccount([[RID_B, 'Mateo', 'reader', dat({ total: 8, name: 'Mateo', modAt: 2 })]]);
+a = await boot({ supa, syncConfig: CFG, storage: { 'leemos-v1:mateo': { name: 'Other child', total: 99 } } });
+await signInUi(a, 'mama@example.com');
+await until(() => !a.$('link').hidden);
+linkButtons(a).pop().click(); // local Elsa is a new child: the account's Mateo is then added to this device
+await until(() => profList(a).length === 2, 3000);
+const mt = profList(a).find((p) => p.rid === RID_B);
+check('review m3: the account child gets a free storage slot instead of overwriting a leftover one', !!mt && mt.id !== 'mateo' && JSON.parse(a.w.localStorage.getItem('leemos-v1:mateo')).total === 99, JSON.stringify(profList(a)));
+supa = await withAccount([[RID_B, 'x', 'reader', dat({ total: 8, modAt: 2 })]]);
+supa.rows.get(RID_B).name = 123; // a broken remote row
+a = await boot({ supa, syncConfig: CFG });
+await signInUi(a, 'mama@example.com');
+await until(() => !a.$('link').hidden);
+linkButtons(a).pop().click();
+await until(() => !a.$('acctIn').hidden, 3000);
+check('review m3: a remote profile with an invalid name is skipped and the sign-in still completes', !a.$('acctIn').hidden && !profList(a).some((p) => p.rid === RID_B) && a.errors.length === 0, a.errors.join(' | '));
+
+// m4: a saved level beyond the known levels cannot crash the app
+a = await boot({ storage: { 'leemos-v1': { name: 'Elsa', level: 9, total: 3 } } });
+check('review m4: a saved level that does not exist falls back to the first one without errors', a.errors.length === 0 && a.d.querySelectorAll('#tiles .tile').length > 0, a.errors.join(' | '));
+
+// m6: linking offers only children of the same kind, adopts the account name, focuses the dialog and closes with Escape
+supa = await withAccount([[RID_B, 'Leo', 'pre', dat({ total: 4, name: 'Leo', modAt: 2 })]]);
+a = await boot({ supa, syncConfig: CFG });
+await signInUi(a, 'mama@example.com');
+await until(() => supa.rows.size === 2, 3000);
+check('review m6: a reader is never offered a pre-reader account profile, so no question is asked', a.$('link').hidden && [...supa.rows.values()].some((r) => r.name === 'Elsa' && r.kind === 'reader'));
+supa = await withAccount([[RID_A, 'Elsita', 'reader', dat({ total: 1, name: 'Elsita', modAt: 2 })]]);
+a = await boot({ supa, syncConfig: CFG, storage: LINK_PROFILES });
+await signInUi(a, 'mama@example.com');
+await until(() => !a.$('link').hidden);
+check('review m6: the dialog moves focus to its first option', a.d.activeElement === linkButtons(a)[0], String(a.d.activeElement && a.d.activeElement.textContent));
+linkButtons(a)[0].click();
+await until(() => profList(a).some((p) => p.rid === RID_A), 3000);
+check('review m6: a linked profile takes the name it has in the account', profList(a).find((p) => p.rid === RID_A).name === 'Elsita', JSON.stringify(profList(a)));
+supa = await withAccount([[RID_A, 'Elsa', 'reader', dat({ total: 1, name: 'Elsa' })]]);
+a = await boot({ supa, syncConfig: CFG, storage: LINK_PROFILES });
+await signInUi(a, 'mama@example.com');
+await until(() => !a.$('link').hidden);
+a.d.dispatchEvent(new a.w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+await sleep(60);
+check('review m6: Escape closes the dialog like "Ahora no" (signed out, nothing linked)', a.$('link').hidden && a.w.localStorage.getItem('leemos-auth') === null && profList(a).every((p) => !p.rid));
+
+// m10: the account texts do not assume the child is a girl
+check('review m10: the intro text is neutral in both languages', !/\bella\b/i.test(ies.acctIntro) && !/\bella\b/i.test(ica.acctIntro), ies.acctIntro + ' | ' + ica.acctIntro);
+
+// m11: blocked or full storage
+supa = createFakeSupabase();
+a = await boot({ supa, syncConfig: CFG });
+const origGet = a.w.Storage.prototype.getItem;
+a.w.Storage.prototype.getItem = function (k) { if (k === 'leemos-auth-user' || k === 'leemos-sync-at') throw new Error('storage blocked'); return origGet.call(this, k); };
+await signInUi(a, 'mama@example.com');
+await until(() => !a.$('acctIn').hidden, 3000);
+check('review m11: reading a blocked storage key never breaks sign-in or the panel', !a.$('acctIn').hidden && a.errors.length === 0, a.errors.join(' | '));
+a.w.Storage.prototype.getItem = origGet;
+supa = createFakeSupabase();
+a = await boot({ supa, syncConfig: CFG, storage: LINK_PROFILES });
+const origSet = a.w.Storage.prototype.setItem;
+a.w.Storage.prototype.setItem = function (k, v) { if (k === 'leemos-profiles') throw new Error('quota exceeded'); return origSet.call(this, k, v); };
+await signInUi(a, 'mama@example.com');
+await sleep(120);
+check('review m11: if the linked profile list cannot be saved the linking is undone and the adult is told', a.w.localStorage.getItem('leemos-auth') === null && /No se pudo/.test(a.$('acctMsg').textContent), a.$('acctMsg').textContent);
+a.w.Storage.prototype.setItem = origSet;
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

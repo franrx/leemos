@@ -136,5 +136,33 @@ const signedIn = async () => { const x = mk(); await x.sync.requestCode('m@e.c')
   check('remote data: a malformed remote row is merged as if empty and never crashes', r.data.total === 5 && r.version === 5);
 }
 
+// ---------- review minors: sign-out revokes the session on the server, writes can finish while the page closes ----------
+{
+  const { srv, storage, sync } = await signedIn();
+  const rt = JSON.parse(storage.getItem('leemos-auth')).refresh_token;
+  await sync.signOut();
+  check('sign out: the session is removed locally', storage.getItem('leemos-auth') === null && sync.userId() === null);
+  check('sign out: the server is asked to revoke it', srv.log.includes('POST /auth/v1/logout'));
+  const reuse = await srv.fetch(URL_ + '/auth/v1/token?grant_type=refresh_token', { method: 'POST', body: JSON.stringify({ refresh_token: rt }) });
+  check('sign out: the old refresh token no longer works', reuse.status === 400, String(reuse.status));
+}
+{
+  const { srv, storage, sync } = await signedIn();
+  srv.setOffline(true);
+  const e = await rejects(sync.signOut());
+  check('sign out: with no connection it still signs out locally and never throws', e === null && storage.getItem('leemos-auth') === null);
+}
+{
+  const srv = createFakeSupabase(), storage = memoryStorage(), seen = [];
+  const sync = createSync({ url: URL_, anonKey: 'k', storage, fetch: async (u, o = {}) => { if (/child_profiles/.test(u) && o.method) seen.push({ m: o.method, keepalive: o.keepalive, len: (o.body || '').length }); return srv.fetch(u, o); } });
+  await sync.requestCode('m@e.c'); await sync.verifyCode('m@e.c', '123456');
+  await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+  await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ total: 9, modAt: 200 }) });
+  check('keepalive: small writes survive the page closing (POST and PATCH)', seen.length === 2 && seen.every((s) => s.keepalive === true), JSON.stringify(seen));
+  const many = {}; for (let i = 0; i < 3000; i++) many['s:item' + i] = { ok: 1, fail: 0 };
+  seen.length = 0;
+  await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ stats: many, modAt: 300 }) });
+  check('keepalive: a write over the 64 KB browser limit does not ask for it (it would be rejected)', seen.length === 1 && seen[0].len > 60000 && !seen[0].keepalive, JSON.stringify(seen.map((s) => ({ k: s.keepalive, l: s.len }))));
+}
 console.log(failures ? `\n${failures} sync test(s) FAILED` : '\nAll sync tests passed');
 process.exit(failures ? 1 : 0);
