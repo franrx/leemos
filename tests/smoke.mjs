@@ -1378,5 +1378,44 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('path: hostile pulled values never reach the app', JSON.parse(app2.w.localStorage.getItem('leemos-v1')).pathEs !== 99 && app2.errors.length === 0, app2.errors.join(' | '));
 }
 
+// ---------- 37. review of Camino de Elsa ----------
+{
+  const { stepOf } = await import('../src/levelrule.js');
+  const LVES = readJSON('src/data/levels.es.json'), LVCA = readJSON('src/data/levels.ca.json');
+  const st = (app) => JSON.parse(app.w.localStorage.getItem('leemos-v1'));
+  const masterSyl = (lv, pos, pre = '') => Object.fromEntries(lv[0].syl.filter((s) => stepOf(s) === pos).map((s) => [pre + 's:' + s, { ok: 3, fail: 0 }]));
+  // the automatic opening judges what she can practise (syllables in Sílabas), not words she cannot be shown
+  let x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, pathEs: 4, pathCa: 4, stats: masterSyl(LVES, 4) } } });
+  await playSession(x, 5);
+  check('review: mastering the syllables of a letter opens the next even though its words are not practised (Spanish N)', st(x).pathEs === 5, String(st(x).pathEs));
+  x = await boot({ lang: 'ca-ES', storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, pathEs: 12, pathCa: 1, stats: masterSyl(LVCA, 1, 'ca:') } } });
+  await playSession(x, 5);
+  check('review: the Catalan first letter opens the second once its syllables are mastered', st(x).pathCa === 2, String(st(x).pathCa));
+  // a second device that has never had progress must not lock an experienced child at M
+  {
+    const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);
+    s.rows.set(RID_A, { id: RID_A, owner: uid, name: 'Elsa', kind: 'reader', data: dat({ stats: { 's:ma': { ok: 5, fail: 0 } }, total: 200, name: 'Elsa', modAt: 5 }), version: 1 });
+    const app = await boot({ openPath: false, supa: s, syncConfig: CFG, syncEvery: 150, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A, 'leemos-v1': { name: 'Elsa' } } });
+    await until(() => JSON.parse(app.w.localStorage.getItem('leemos-v1')).total === 200, 3000); await sleep(40);
+    check('review: a fresh device that pulls an experienced child starts with every letter open', st(app).pathEs === 12 && st(app).pathCa === 12 && !(st(app).prefs && st(app).prefs.pathEs), JSON.stringify([st(app).pathEs, st(app).prefs]));
+  }
+  // the rule module cannot load: no letter is opened and the parent block is not offered
+  x = await boot({ importFails: true, storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, pathEs: 1, pathCa: 1 } } });
+  await playSession(x, 15);
+  check('review: without the rule module no letter opens and the Camino block is hidden', st(x).pathEs === 1 && x.$('path').hidden && x.$('endPath').hidden, String(st(x).pathEs));
+  // a parent closing letters swaps an exercise that is no longer allowed; opening more keeps it
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 } } });
+  const card = () => [...x.d.querySelectorAll('#tiles .tile')].map((b) => b.textContent).join('');
+  x.d.querySelectorAll('#pathRow button')[0].click(); await sleep(5);
+  check('review: closing letters leaves only an allowed exercise on screen', stepOf(card()) <= 1, card());
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 1, pathCa: 1 } } });
+  const before = card();
+  x.d.querySelectorAll('#pathRow button')[2].click(); await sleep(5);
+  check('review: opening more letters keeps the exercise she is reading', card() === before, before + ' -> ' + card());
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', mode: 'word', pathEs: 1, pathCa: 1 } } });
+  x.$('mWord').click(); await sleep(5);
+  check('review: tapping the dimmed Palabras explains why', /Palabras se abre/.test(x.$('hint').textContent), x.$('hint').textContent);
+}
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

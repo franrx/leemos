@@ -40,7 +40,7 @@ Practice follows the school book, one letter at a time (M P L N T S F B D R C, t
 
 ## 3. Unlocking
 
-- **Automatic**, evaluated when a session ends (where the end screen computes the level-up): if `pathAuto` is on and the position is below 12, take the items that are **new** at the current position across levels `0…S.level` (both syllables and words); the next step opens when at least **75%** of them are mastered (`ok >= 2 && ok > fail`, the existing rule) or there are none. It opens **one** step per session. The end screen shows "¡Nueva letra: P!" (for step 12: "¡Todas las letras!").
+- **Automatic**, evaluated when a session ends (where the end screen computes the level-up): if `pathAuto` is on and the position is below 12, take the items that are **new** at the current position across levels `0…S.level` **in the mode she is practising** (`effMode()`; found in review: counting words she is never shown made most steps impossible to open); the next step opens when at least **75%** of them are mastered (`ok >= 2 && ok > fail`, the existing rule) or there are none. It opens **one** step per session. The end screen shows "¡Nueva letra: P!" (for step 12: "¡Todas las letras!").
 - **Parent:** a **Camino** block in the parent panel (next to the account block) with 12 buttons (`M P L N T S F B D R C +`) for the current language. Tapping step `n` sets the position to `n` (opens or closes letters). A switch **"Abrir letras automáticamente"** controls `pathAuto` (default on). Switching it off is how a parent keeps Elsa from moving ahead of the school.
 - **Level-up:** the existing offer (≥90% of the level's eligible items mastered) is shown only when the position is 12.
 
@@ -48,7 +48,7 @@ Practice follows the school book, one letter at a time (M P L N T S F B D R C, t
 
 - New preferences, whitelisted in **both** `PREF_OK`/`PREF_KEYS` in `src/merge.js` and `PREF_KEYS` in `src/app.js` (keep them equal; a test checks): `pathEs`, `pathCa` (integers 1–12) and `pathAuto` (boolean). They live in `S.prefs {key:{v,at}}` and as plain fields `S.pathEs`, `S.pathCa`, `S.pathAuto`.
 - **Defaults on load** (a one-time correction, stamps nothing, set before the sync baselines are taken): a state with no `pathEs`/`pathCa` gets 12 when it already has progress (`total > 0` or any stats), otherwise 1; `pathAuto` defaults to `true`. A parent's tap and an automatic advance both go through the same setter, which changes the field and lets `save()` stamp it.
-- Applying a pull (`applyMerged`): a changed path redraws the Camino block and the level bars and, if the exercise on screen is no longer eligible, the next one is picked (the same place that already handles a mode or language change).
+- Applying a pull (`applyMerged`): a changed path redraws the Camino block and the level bars and the next exercise is picked only if the one on screen is no longer eligible (a parent closing letters does the same) (the same place that already handles a mode or language change).
 
 ## 5. What the adult sees
 
@@ -70,6 +70,9 @@ Leo's mode, the order of letters after C (one step for now), per-letter practice
 - Two devices change the path at once: latest change wins per key (the same rule as every preference).
 - An item with a letter the rule does not know: counts as step 12, never locked forever.
 - Elsa's existing profile at all-open: nothing changes until a parent closes letters.
+- A fresh device with no progress that receives an experienced child through the sync: its placeholder M (never chosen, never stamped) becomes all-open (found in review). A child who is genuinely new at M and unstamped, first seen on a second fresh device, would also be opened: accepted (rare).
+- The rule module cannot load (stub): nothing is locked, opened or offered; the Camino block is hidden.
+- Leo's panel does not show the Camino block.
 
 ## 8. Testing
 

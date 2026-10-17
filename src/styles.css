@@ -234,3 +234,4 @@ html.pre #endLevelUpBtn{order:3}
 .path-row button.closed{opacity:.45}
 .path-auto{min-height:44px}
 .path-auto input{width:24px;height:24px;flex:none}
+html.pre #path{display:none!important}

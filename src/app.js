@@ -7,7 +7,7 @@ const [LV_ES,LV_CA,WORLDS,STICKERS,T_ES,T_CA]=await Promise.all([
 ]);
 // The letter path rule (src/levelrule.js, pure; spec: docs/superpowers/specs/2026-10-17-elsas-path-design.md). Loaded through the
 // same import seam as the other modules; if it cannot load, the path is simply off (every item is open), never a blank app.
-const LR=await (async()=>{try{return await (window.__leemosImport||(p=>import(p)))('./levelrule.js')}catch(e){return {stepOf:()=>0,STEPS:['m','p','l','n','t','s','f','b','d','r','c','*']}}})();
+const LR=await (async()=>{try{return await (window.__leemosImport||(p=>import(p)))('./levelrule.js')}catch(e){return {stub:true,stepOf:()=>0,STEPS:['m','p','l','n','t','s','f','b','d','r','c','*']}}})(); // stub: no letter is ever locked, opened or offered
 const LV={es:LV_ES,ca:LV_CA};
 let LEVELS=LV_ES;
 const T={es:T_ES,ca:T_CA};
@@ -522,7 +522,10 @@ const stateOf=id=>{
 const IDLE_MS=30000; // a value changed on THIS device within the last 30 s is kept: nobody is interrupted while playing
 function applyMerged(m,adoptSession){
   const before={lang:S.lang,mode:S.mode,world:S.world,sessionLen:S.sessionLen,pos:pathPos()};
+  const wasStarted=S.total>0||Object.keys(S.stats).length>0;
   mergeMod.applySynced(S,m); // sets the progress fields, S.session, S.prefs and the plain preference fields (never the voice)
+  // a fresh device that has just received an experienced child: its placeholder M (never chosen, never stamped) is not what the child had
+  if(!wasStarted&&(S.total>0||Object.keys(S.stats).length>0)){if(!S.prefs.pathEs&&S.pathEs===1)S.pathEs=12;if(!S.prefs.pathCa&&S.pathCa===1)S.pathCa=12}
   S.stickers=stkTotal(); // the merge caps a world at 24 and keeps unknown worlds; the counter must follow the sets that exist
   if(S.lang!==before.lang){LEVELS=LV[S.lang]||LV_ES;pendingEnd=false;resting=false}
   if(S.level>=LEVELS.length)S.level=0;
@@ -543,7 +546,7 @@ function applyMerged(m,adoptSession){
   if(S.lang!==before.lang)applyLang();else renderSession();
   renderGoal();
   if(S.world!==before.world)renderWorlds(); // not on every pull: it would replace the buttons (and the focus) of an open worlds overlay
-  if(S.lang!==before.lang||((S.mode!==before.mode||pathPos()!==before.pos)&&!resting))pre?pre.refresh():next(); // while resting, next() would start (and stamp) a new session // a different context needs a new exercise; otherwise the card on screen stays
+  if(S.lang!==before.lang||((S.mode!==before.mode||(pathPos()!==before.pos&&cur&&!eligible(cur)))&&!resting))pre?pre.refresh():next(); // while resting, next() would start (and stamp) a new session // a different context needs a new exercise; otherwise the card on screen stays
 }
 // Returns the merged data. The child may have answered while the request was in flight, so the server's data is merged
 // into the CURRENT local state (never copied over it): a sync can only add progress, never take it away.
@@ -870,13 +873,14 @@ function renderMode(){
   $('mWord').setAttribute('aria-disabled',!ok);$('mWord').classList.toggle('dim',!ok);$('mWord').title=ok?'':t('wordsLocked');
 }
 function setMode(m){
-  if(m==='word'&&openItems('word').length<MIN_WORDS)return; // dimmed: not enough words are open yet
+  if(m==='word'&&openItems('word').length<MIN_WORDS){$('hint').textContent=t('wordsLocked');return} // dimmed: not enough words are open yet, and say so
   S.mode=m;save();
   renderMode();
   next();
 }
 // The parent's block and the automatic rule (spec: 2026-10-17-elsas-path-design.md). Both go through setPath, which saves (and so stamps) the preference.
 function renderPath(){
+  $('path').hidden=!!LR.stub; // without the rule module the block would do nothing
   const row=$('pathRow');row.innerHTML='';const pos=pathPos();
   LR.STEPS.forEach((l,i)=>{
     const name=l==='*'?t('pathRest'):l.toUpperCase();
@@ -888,19 +892,21 @@ function renderPath(){
   });
   $('pathAuto').checked=!!S.pathAuto;
 }
-function setPath(n){
+function setPath(n,quiet){
   n=Math.max(1,Math.min(12,n|0));
   if(S.lang==='ca')S.pathCa=n;else S.pathEs=n;
   save();renderPath();renderMode();renderLevels();
+  if(!quiet&&!pre&&cur&&!resting&&!eligible(cur))next(); // a parent closed letters: an exercise that is no longer allowed is swapped (opening more keeps it)
 }
 $('pathAuto').onchange=()=>{S.pathAuto=$('pathAuto').checked;save()};
 // After a session: the next letter opens when at least 75% of the items the current letter just made available are mastered (or there are none).
 function advancePath(){
   const pos=pathPos();
-  if(!S.pathAuto||pos>=12)return 0;
-  const fresh=[...openItems('syl'),...openItems('word')].filter(i=>LR.stepOf(i.h)===pos);
+  if(LR.stub||!S.pathAuto||pos>=12)return 0;
+  // only what she can actually be shown: the items of the mode she practises (words she is not drawing cannot hold the letter back)
+  const fresh=openItems(effMode()).filter(i=>LR.stepOf(i.h)===pos);
   if(fresh.length&&fresh.filter(i=>mastered(i.key)).length/fresh.length<.75)return 0;
-  setPath(pos+1);return pos+1;
+  setPath(pos+1,true);return pos+1;
 }
 $('caseBtn').onclick=()=>{S.upper=!S.upper;save();applyCase()};
 function applyCase(){
