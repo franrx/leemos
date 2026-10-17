@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "node scripts/dev-server.mjs",
-    "test": "node tests/smoke.mjs && node tests/sounds.mjs && node tests/clipstore.mjs && node tests/record.mjs && node tests/azure.mjs && node tests/staticserver.mjs && node tests/sw.mjs && node tests/levels.mjs && node tests/merge.mjs && node tests/migration.mjs",
+    "test": "node tests/smoke.mjs && node tests/sounds.mjs && node tests/clipstore.mjs && node tests/record.mjs && node tests/azure.mjs && node tests/staticserver.mjs && node tests/sw.mjs && node tests/levels.mjs && node tests/merge.mjs && node tests/migration.mjs && node tests/sync.mjs",
     "audio": "node scripts/generate-audio.mjs",
     "azure:voices": "node scripts/azure-voices.mjs",
     "audio:plan": "node scripts/generate-audio.mjs --dry-run",
