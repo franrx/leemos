@@ -965,5 +965,34 @@ const signedBoot = async (extra = {}) => {
   check('pull: stickers earned on another device show in the counter without a reload', app.$('albumCount').textContent === '3', app.$('albumCount').textContent);
 }
 
+// ---------- 29. the session and the preferences have their own timestamps; the session survives a reload ----------
+a = await boot();
+a.$('joinBtn').click(); a.$('okBtn').click(); await sleep(5); a.$('joinBtn').click(); a.$('noBtn').click(); await sleep(5);
+const s29 = JSON.parse(a.w.localStorage.getItem('leemos-v1'));
+check('session: counters and their own timestamp are saved after each answer', s29.session.done === 2 && s29.session.ok === 1 && s29.session.at > 0, JSON.stringify(s29.session));
+a = await boot({ storage: dump(a.w) });
+check('session: reloading the page keeps "2 de 10"', /2 de 10/.test(a.$('slabel').textContent), a.$('slabel').textContent);
+a = await boot({ storage: { 'leemos-v1': { name: 'Elsa', session: { done: 4, ok: 3, stk: 0, at: Date.now() - 13 * 3600 * 1000 } } } });
+check('session: one older than 12 hours does not resume', /0 de 10/.test(a.$('slabel').textContent), a.$('slabel').textContent);
+a = await boot({ storage: { 'leemos-v1': { name: 'Elsa', session: { done: 10, ok: 9, stk: 1, at: Date.now() - 1000 } } } });
+check('session: a finished one does not resume either', /0 de 10/.test(a.$('slabel').textContent), a.$('slabel').textContent);
+a = await boot();
+a.$('joinBtn').click(); a.$('okBtn').click();
+const afterAnswer = JSON.parse(a.w.localStorage.getItem('leemos-v1'));
+a.$('soundBtn').click();
+const afterSound = JSON.parse(a.w.localStorage.getItem('leemos-v1'));
+check('prefs: a preference change is stamped on its own key and does not touch modAt or the session stamp', afterSound.prefs.sound.v === false && afterSound.prefs.sound.at > 0 && afterSound.modAt === afterAnswer.modAt && afterSound.session.at === afterAnswer.session.at, JSON.stringify(afterSound.prefs));
+a.$('themeBtn').click();
+const afterTheme = JSON.parse(a.w.localStorage.getItem('leemos-v1'));
+check('prefs: only the changed keys are recorded (defaults never travel)', Object.keys(afterTheme.prefs).sort().join() === 'sound,theme', Object.keys(afterTheme.prefs).join());
+a = await boot();
+check('prefs: loading an untouched profile records no preference', Object.keys(JSON.parse(a.w.localStorage.getItem('leemos-v1') || '{}').prefs || {}).length === 0);
+a = await boot();
+await playSession(a, 10);
+await until(() => !a.$('end').hidden);
+a.$('endMore').click();
+await sleep(20);
+check('session: starting another session saves it as zero', JSON.parse(a.w.localStorage.getItem('leemos-v1')).session.done === 0);
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

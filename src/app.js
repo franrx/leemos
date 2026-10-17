@@ -65,22 +65,45 @@ const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||{}}catch(e){re
 const save=()=>{
   const fp=fpOf();
   if(fp!==lastFp){lastFp=fp;S.modAt=Math.max(Date.now(),(S.modAt||0)+1);onProgressChange()} // never older than a stamp that came from a device with a faster clock
+  if(lastSessFp!==null){
+    const sf=sessFp();
+    if(sf!==lastSessFp){lastSessFp=sf;S.session={done:sDone,ok:sOk,stk:sStk,at:stampAfter(S.session&&S.session.at)};onProgressChange()}
+  }
+  if(lastPref!==null){
+    for(const k of PREF_KEYS){
+      if(S[k]!==lastPref[k]){lastPref[k]=S[k];S.prefs[k]={v:S[k],at:stampAfter(S.prefs[k]&&S.prefs[k].at)};onProgressChange()}
+    }
+  }
   try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
 };
-const S=Object.assign({stats:{},level:0,mode:'syl',upper:true,rate:.75,theme:'',name:PROFILE.name,total:0,progress:0,stickers:0,sound:true,voiceURI:'',voiceURIs:{es:'',ca:''},world:'auto',lang:((navigator.language||'').toLowerCase().indexOf('ca')===0?'ca':'es'),sessionLen:PROFILE.kind==='pre'?5:10,pre:{es:0,ca:0},resets:{es:0,ca:0},modAt:0},load());
+const S=Object.assign({stats:{},level:0,mode:'syl',upper:true,rate:.75,theme:'',name:PROFILE.name,total:0,progress:0,stickers:0,sound:true,voiceURI:'',voiceURIs:{es:'',ca:''},world:'auto',lang:((navigator.language||'').toLowerCase().indexOf('ca')===0?'ca':'es'),sessionLen:PROFILE.kind==='pre'?5:10,pre:{es:0,ca:0},resets:{es:0,ca:0},modAt:0,session:{done:0,ok:0,stk:0,at:0},prefs:{}},load());
 // Progress-change detection for sync: modAt is stamped only when a synced field changed (not for theme, voice, session length...).
 const fpOf=()=>JSON.stringify([S.stats,S.total,S.stickers,S.pre,S.resets,S.level,S.name]);
 let lastFp=fpOf();
+let sDone=0,sOk=0,sStk=0,pendingEnd=false,resting=false; // declared early: save() reads the session counters and may run during load
 let onProgressChange=()=>{}; // replaced by the sync glue
+// Session in progress and preferences (spec: docs/superpowers/specs/2026-10-17-session-prefs-sync-design.md). Each has its own
+// timestamp, so none of them can overwrite another value on a second device or move modAt (which decides level and name).
+const PREF_KEYS=['mode','world','sessionLen','upper','lang','rate','sound','theme']; // keep identical to merge.js; never the voice
+const SESSION_TTL=12*3600*1000; // a session left over from yesterday must not resume
+const stampAfter=prev=>Math.max(Date.now(),(prev||0)+1);
+if(!S.prefs||typeof S.prefs!=='object')S.prefs={};
+const restoreSession=s=>{
+  if(s&&s.at&&Date.now()-s.at<SESSION_TTL&&s.done<S.sessionLen){sDone=s.done|0;sOk=s.ok|0;sStk=s.stk|0}
+};
+restoreSession(S.session);
+let lastSessFp=null,lastPref=null; // baselines, set once the state is loaded: a save() before that (a migration) stamps nothing
+const sessFp=()=>sDone+'|'+sOk+'|'+sStk;
+const prefSnap=()=>Object.fromEntries(PREF_KEYS.map(k=>[k,S[k]]));
 if(!S.voiceURIs)S.voiceURIs={es:'',ca:''};
 if(!S.pre)S.pre={es:0,ca:0};
 // One-time switch to capitals (the school book is all capitals): readers only, once per profile; she can switch back with Aa.
 if(PROFILE.kind==='reader'&&!S.upperMigrated){S.upper=true;S.upperMigrated=true;save()}
+lastSessFp=sessFp();lastPref=prefSnap();
 LEVELS=LV[S.lang]||LV_ES;
 if(!(S.level>=0&&S.level<LEVELS.length))S.level=0; // a saved level that does not exist (newer app version, bad data) falls back to the first
 let cur=null,last=null,phase='read',resetArmed=false;
 let pre=null;
-let sDone=0,sOk=0,sStk=0,pendingEnd=false,resting=false;
 let curWorld=Math.floor(Math.random()*WORLDS.length);
 
 const $=id=>document.getElementById(id);
@@ -695,6 +718,7 @@ function renderSession(){
   $('sfill').style.width=Math.round(100*d/n)+'%';
   $('slabel').textContent=t('recOf',{i:d,n:n});
   const b=$('sbar');b.setAttribute('aria-valuemax',n);b.setAttribute('aria-valuenow',d);
+  save(); // persists the session counters wherever they are reset or advanced
 }
 function showEnd(){
   const n=S.sessionLen;
