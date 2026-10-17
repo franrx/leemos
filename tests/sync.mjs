@@ -172,5 +172,16 @@ for (const pasted of ['https://x.supabase.co/rest/v1/', 'https://x.supabase.co/a
   await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ stats: many, modAt: 300 }) });
   check('keepalive: a write over the 64 KB browser limit does not ask for it (it would be rejected)', seen.length === 1 && seen[0].len > 60000 && !seen[0].keepalive, JSON.stringify(seen.map((s) => ({ k: s.keepalive, l: s.len }))));
 }
+// ---------- session and preferences travel through pull-merge-push ----------
+{
+  const { srv, sync } = await signedIn();
+  const withSp = (over = {}) => data({ session: { done: 3, ok: 2, stk: 0, at: 500 }, prefs: { theme: { v: 'dark', at: 500 }, sound: { v: false, at: 500 } }, ...over });
+  await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: withSp() });
+  check('session/prefs: they are uploaded with the profile', srv.rows.get(RID).data.session.done === 3 && srv.rows.get(RID).data.prefs.theme.v === 'dark');
+  const r = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ prefs: { sound: { v: true, at: 900 } } }) });
+  check('session/prefs: a later device keeps the newer sound and receives the other key and the session', r.data.prefs.sound.v === true && r.data.prefs.theme.v === 'dark' && r.data.session.done === 3, JSON.stringify(r.data.prefs));
+  check('session/prefs: nothing about the voice is ever sent', !JSON.stringify([...srv.rows.values()]).includes('voice'));
+}
+
 console.log(failures ? `\n${failures} sync test(s) FAILED` : '\nAll sync tests passed');
 process.exit(failures ? 1 : 0);
