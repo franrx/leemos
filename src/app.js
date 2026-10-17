@@ -39,7 +39,8 @@ const cleanProfiles=p=>{
   (p&&Array.isArray(p.list)?p.list:[]).forEach(x=>{
     if(!x||typeof x.id!=='string'||!x.id||seen.has(x.id))return;
     seen.add(x.id);
-    list.push({id:x.id,name:typeof x.name==='string'&&x.name.trim()?x.name.trim():x.id,kind:x.kind==='pre'?'pre':'reader'});
+    list.push({id:x.id,name:typeof x.name==='string'&&x.name.trim()?x.name.trim():x.id,kind:x.kind==='pre'?'pre':'reader',
+      ...(typeof x.rid==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x.rid)?{rid:x.rid}:{})});
   });
   return list.some(x=>x.id===p.active)?{active:p.active,list}:null;
 };
@@ -61,8 +62,16 @@ function addProfile(name,kind){
 }
 const KEY=keyFor(PROFILE.id);
 const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||{}}catch(e){return {}}};
-const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
-const S=Object.assign({stats:{},level:0,mode:'syl',upper:true,rate:.75,theme:'',name:PROFILE.name,total:0,progress:0,stickers:0,sound:true,voiceURI:'',voiceURIs:{es:'',ca:''},world:'auto',lang:((navigator.language||'').toLowerCase().indexOf('ca')===0?'ca':'es'),sessionLen:PROFILE.kind==='pre'?5:10,pre:{es:0,ca:0}},load());
+const save=()=>{
+  const fp=fpOf();
+  if(fp!==lastFp){lastFp=fp;S.modAt=Date.now();onProgressChange()}
+  try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
+};
+const S=Object.assign({stats:{},level:0,mode:'syl',upper:true,rate:.75,theme:'',name:PROFILE.name,total:0,progress:0,stickers:0,sound:true,voiceURI:'',voiceURIs:{es:'',ca:''},world:'auto',lang:((navigator.language||'').toLowerCase().indexOf('ca')===0?'ca':'es'),sessionLen:PROFILE.kind==='pre'?5:10,pre:{es:0,ca:0},resets:{es:0,ca:0},modAt:0},load());
+// Progress-change detection for sync: modAt is stamped only when a synced field changed (not for theme, voice, session length...).
+const fpOf=()=>JSON.stringify([S.stats,S.total,S.stickers,S.pre,S.resets,S.level,S.name]);
+let lastFp=fpOf();
+let onProgressChange=()=>{}; // replaced by the sync glue
 if(!S.voiceURIs)S.voiceURIs={es:'',ca:''};
 if(!S.pre)S.pre={es:0,ca:0};
 // One-time switch to capitals (the school book is all capitals): readers only, once per profile; she can switch back with Aa.
@@ -576,7 +585,7 @@ $('rate').oninput=e=>{S.rate=parseFloat(e.target.value);save()};
 $('testVoice').onclick=()=>say(t('sample'));
 $('resetBtn').onclick=e=>{
   if(!resetArmed){resetArmed=true;e.target.textContent=t('sure');setTimeout(()=>{resetArmed=false;e.target.textContent=t('resetBtn')},3500);return}
-  Object.keys(S.stats).forEach(k=>{if((S.lang==='ca')===(k.indexOf('ca:')===0))delete S.stats[k]});save();resetArmed=false;e.target.textContent=t('resetBtn');renderLevels();renderHard();pre?pre.refresh():next();
+  Object.keys(S.stats).forEach(k=>{if((S.lang==='ca')===(k.indexOf('ca:')===0))delete S.stats[k]});S.resets=Object.assign({es:0,ca:0},S.resets);S.resets[S.lang]=(S.resets[S.lang]||0)+1;save();resetArmed=false;e.target.textContent=t('resetBtn');renderLevels();renderHard();pre?pre.refresh():next();
 };
 function applyTheme(){
   if(S.theme)document.documentElement.setAttribute('data-theme',S.theme);

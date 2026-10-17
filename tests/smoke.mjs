@@ -565,5 +565,29 @@ a.$('joinBtn').click(); a.$('noBtn').click();
 await sleep(300);
 check('praise: with no clip there is no zoom (the browser voice speaks as before)', a.$('lumiBig').hidden && (a.w.__tts || []).length > 0);
 
+// ---------- 22. state for sync: profile rid, reset counters, modAt only when progress changes ----------
+const RID1 = '11111111-1111-4111-8111-111111111111';
+a = await boot({ storage: { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID1 }, { id: 'leo', name: 'Leo', kind: 'pre', rid: 'not-a-uuid' }] } } });
+a.$('pfName').value = 'Ana'; a.$('pfAdd').click(); // adding a child saves the profile list (and reloads the page, which jsdom ignores)
+const savedList = JSON.parse(a.w.localStorage.getItem('leemos-profiles')).list;
+check('sync state: a valid rid survives loading and saving the profile list', savedList.find((p) => p.id === 'elsa').rid === RID1, JSON.stringify(savedList));
+check('sync state: an invalid rid is dropped', !savedList.some((p) => p.rid === 'not-a-uuid') && !('rid' in savedList.find((p) => p.id === 'leo')), JSON.stringify(savedList));
+
+a = await boot();
+a.$('joinBtn').click(); a.$('okBtn').click();
+const st1 = JSON.parse(a.w.localStorage.getItem('leemos-v1'));
+check('sync state: answering stamps modAt and the counters', st1.modAt > 0 && st1.total === 1, JSON.stringify({ m: st1.modAt, t: st1.total }));
+a.$('themeBtn').click();
+check('sync state: changing the theme does not touch modAt', JSON.parse(a.w.localStorage.getItem('leemos-v1')).modAt === st1.modAt);
+a.$('sessionSel').value = '15'; a.$('sessionSel').dispatchEvent(new a.w.Event('change'));
+check('sync state: changing the session length does not touch modAt', JSON.parse(a.w.localStorage.getItem('leemos-v1')).modAt === st1.modAt);
+a.$('resetBtn').click(); a.$('resetBtn').click();
+const st3 = JSON.parse(a.w.localStorage.getItem('leemos-v1'));
+check('sync state: "Borrar progreso" counts a reset for the current language only', st3.resets.es === 1 && st3.resets.ca === 0 && st3.modAt >= st1.modAt, JSON.stringify(st3.resets));
+check('sync state: the reset deleted the Spanish counters', !Object.keys(st3.stats).some((k) => k.indexOf('ca:') !== 0));
+a = await boot({ storage: { 'leemos-v1': { name: 'Elsa', total: 3, stats: { 's:ma': { ok: 1, fail: 0 } }, modAt: 0 } } });
+const old = JSON.parse(a.w.localStorage.getItem('leemos-v1') || '{}');
+check('sync state: loading an old saved state does not stamp modAt by itself', !old.modAt);
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
