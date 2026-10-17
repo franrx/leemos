@@ -99,14 +99,11 @@
       {"w":"sol","e":"☀️","g":"playa nubes desierto"},
       {"w":"pan","e":"🍞","g":"granja ciudad"},
       {"w":"mar","e":"🌊","g":"mar playa"},
-      {"w":"luz","e":"💡","g":"ciudad"},
       {"w":"flor","e":"🌸","g":"jardin bosque"},
       {"w":"tren","e":"🚆","g":"ciudad"},
-      {"w":"pez","e":"🐟","g":"mar"},
       {"w":"pla-to","e":"🍽️"},
       {"w":"li-bro","e":"📖"},
       {"w":"glo-bo","e":"🎈","g":"circo nubes"},
-      {"w":"bra-zo","e":"💪"},
       {"w":"dra-gón","e":"🐉","g":"castillo"},
       {"w":"plu-ma","e":"🪶","g":"nubes bosque"},
       {"w":"ár-bol","e":"🌳","g":"bosque jardin selva"},
@@ -120,7 +117,6 @@
       {"w":"ti-bu-rón","e":"🦈","g":"mar"},
       {"w":"pul-po","e":"🐙","g":"mar"},
       {"w":"can-gre-jo","e":"🦀","g":"mar playa"},
-      {"w":"cer-do","e":"🐖","g":"granja"},
       {"w":"trac-tor","e":"🚜","g":"granja"},
       {"w":"pla-ne-ta","e":"🪐","g":"espacio"},
       {"w":"es-pa-da","e":"🗡️","g":"castillo"},
@@ -191,7 +187,11 @@
       {"w":"co-che","e":"🚗","g":"ciudad"},
       {"w":"ho-tel","e":"🏨","g":"ciudad"},
       {"w":"ci-ne","e":"🎬","g":"ciudad"},
-      {"w":"he-la-do","e":"🍦","g":"playa ciudad circo"}
+      {"w":"he-la-do","e":"🍦","g":"playa ciudad circo"},
+      {"w":"luz","e":"💡","g":"ciudad"},
+      {"w":"pez","e":"🐟","g":"mar"},
+      {"w":"bra-zo","e":"💪"},
+      {"w":"cer-do","e":"🐖","g":"granja"}
     ]
   }
 ]

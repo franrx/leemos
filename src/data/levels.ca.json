@@ -26,8 +26,6 @@
       {"w":"ca-pa","e":"🦸","g":"castillo circo"},
       {"w":"co-co","e":"🥥","g":"playa selva"},
       {"w":"di-no","e":"🦖","g":"dino"},
-      {"w":"ni-not","e":"⛄","g":"nieve"},
-      {"w":"bo-let","e":"🍄","g":"bosque"},
       {"w":"pi","e":"🌲","g":"bosque montana"}
     ]
   },
@@ -60,7 +58,6 @@
       {"w":"ro-ca","e":"🪨","g":"montana desierto playa dino"},
       {"w":"go-ta","e":"💧","g":"nubes jardin"},
       {"w":"fa-da","e":"🧚","g":"castillo jardin"},
-      {"w":"co-et","e":"🚀","g":"espacio"},
       {"w":"ba-te-ri-a","e":"🥁","g":"musica"},
       {"w":"me-lo-di-a","e":"🎼","g":"musica"},
       {"w":"a-vió","e":"✈️","g":"nubes ciudad"},
@@ -121,7 +118,10 @@
       {"w":"neu","e":"❄️","g":"nieve montana"},
       {"w":"se-mà-for","e":"🚦","g":"ciudad"},
       {"w":"ca-ra-mel","e":"🍬","g":"circo"},
-      {"w":"mag","e":"🧙","g":"circo castillo"}
+      {"w":"mag","e":"🧙","g":"circo castillo"},
+      {"w":"ni-not","e":"⛄","g":"nieve"},
+      {"w":"bo-let","e":"🍄","g":"bosque"},
+      {"w":"co-et","e":"🚀","g":"espacio"}
     ]
   },
   {
