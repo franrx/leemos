@@ -45,6 +45,9 @@ const PREF_OK = {
   rate: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0.5 && v <= 1.1,
   sound: (v) => typeof v === 'boolean',
   theme: (v) => v === '' || v === 'light' || v === 'dark',
+  pathEs: (v) => Number.isInteger(v) && v >= 1 && v <= 12, // letters open in Spanish (Camino de Elsa)
+  pathCa: (v) => Number.isInteger(v) && v >= 1 && v <= 12,
+  pathAuto: (v) => typeof v === 'boolean',
 };
 export const PREF_KEYS = Object.keys(PREF_OK); // never the voice: it differs per device
 const cleanPref = (k, prefs) => {

@@ -98,7 +98,7 @@ let sDone=0,sOk=0,sStk=0,pendingEnd=false,resting=false; // declared early: save
 let onProgressChange=()=>{}; // replaced by the sync glue
 // Session in progress and preferences (spec: docs/superpowers/specs/2026-10-17-session-prefs-sync-design.md). Each has its own
 // timestamp, so none of them can overwrite another value on a second device or move modAt (which decides level and name).
-const PREF_KEYS=['mode','world','sessionLen','upper','lang','rate','sound','theme']; // keep identical to merge.js; never the voice
+const PREF_KEYS=['mode','world','sessionLen','upper','lang','rate','sound','theme','pathEs','pathCa','pathAuto']; // keep identical to merge.js; never the voice
 const SESSION_TTL=12*3600*1000; // a session left over from yesterday must not resume
 const MAX_AT=8.64e15; // keep identical to merge.js: a stamp beyond it is invalid there
 const stampAfter=prev=>Math.min(MAX_AT,Math.max(Date.now(),(prev||0)+1));

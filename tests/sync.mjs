@@ -183,5 +183,14 @@ for (const pasted of ['https://x.supabase.co/rest/v1/', 'https://x.supabase.co/a
   check('session/prefs: nothing about the voice is ever sent', !JSON.stringify([...srv.rows.values()]).includes('voice'));
 }
 
+{
+  const { srv, sync } = await signedIn();
+  const wp = (over = {}) => data({ prefs: { pathEs: { v: 4, at: 500 }, pathAuto: { v: false, at: 500 } }, ...over });
+  await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: wp() });
+  check('path: the letter path and its switch are uploaded with the profile', srv.rows.get(RID).data.prefs.pathEs.v === 4 && srv.rows.get(RID).data.prefs.pathAuto.v === false);
+  const r = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ prefs: { pathEs: { v: 7, at: 900 } } }) });
+  check('path: a later change on another device wins and keeps the other key', r.data.prefs.pathEs.v === 7 && r.data.prefs.pathAuto.v === false);
+}
+
 console.log(failures ? `\n${failures} sync test(s) FAILED` : '\nAll sync tests passed');
 process.exit(failures ? 1 : 0);
