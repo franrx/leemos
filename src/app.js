@@ -468,7 +468,7 @@ const stateOf=id=>{
 };
 // Write merged data into a profile (the active one lives in S; the others only in localStorage).
 const IDLE_MS=30000; // a value changed on THIS device within the last 30 s is kept: nobody is interrupted while playing
-function applyMerged(m){
+function applyMerged(m,adoptSession){
   const before={lang:S.lang,mode:S.mode};
   mergeMod.applySynced(S,m); // sets the progress fields, S.session, S.prefs and the plain preference fields (never the voice)
   if(S.lang!==before.lang){LEVELS=LV[S.lang]||LV_ES;pendingEnd=false;resting=false}
@@ -479,7 +479,7 @@ function applyMerged(m){
   $('mSyl').setAttribute('aria-pressed',S.mode==='syl');$('mWord').setAttribute('aria-pressed',S.mode==='word');
   // the session in progress: a finished or stale one starts a new session
   const s=m.session;
-  if(s.at){
+  if(adoptSession&&s.at){
     if(Date.now()-s.at<SESSION_TTL&&s.done<S.sessionLen){sDone=s.done;sOk=s.ok;sStk=s.stk}
     else{sDone=sOk=sStk=0}
   }
@@ -501,8 +501,16 @@ function storeState(id,data){
       const m=mine.prefs[k];
       if(m&&now-m.at<IDLE_MS&&(!merged.prefs[k]||merged.prefs[k].at!==m.at))merged.prefs[k]={v:m.v,at:Math.max(now,(merged.prefs[k]?merged.prefs[k].at:0)+1)}; // the renewed stamp must beat the one it overrides
     }
-    if(mine.session.at&&now-mine.session.at<IDLE_MS&&merged.session.at!==mine.session.at)merged.session={...mine.session,at:Math.max(now,merged.session.at+1)};
-    applyMerged(merged);
+    // the language is never switched under an open recorder: recordings are stored under the current language's keys
+    if(RS.on||!$('recorder').hidden){
+      const m=mine.prefs.lang;
+      if(m)merged.prefs.lang={v:m.v,at:Math.max(now,(merged.prefs.lang?merged.prefs.lang.at:0)+1)};else delete merged.prefs.lang;
+    }
+    let adopt=true; // whether the merged session replaces this device's counters
+    if(mine.session.at&&now-mine.session.at<IDLE_MS&&merged.session.at!==mine.session.at){merged.session={...mine.session,at:Math.max(now,merged.session.at+1)};adopt=false}
+    if(merged.session.at===mine.session.at)adopt=false; // the merged session is this device's own (the echo of its own push): nothing to adopt
+    if(pendingEnd||!$('reward').hidden||!$('end').hidden)adopt=false; // the end of a session is on screen: its counters feed the end screen
+    applyMerged(merged,adopt);
   }else{
     mergeMod.applySynced(cur,merged);
     try{localStorage.setItem(keyFor(id),JSON.stringify(cur))}catch(e){}

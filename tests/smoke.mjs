@@ -1071,5 +1071,50 @@ const OLD = () => NOW() - 120000; // idle for two minutes
   check('pull h: invalid remote preferences are never applied and nothing crashes', app.errors.length === 0 && (st.theme || '') !== 'purple' && st.mode !== 'x' && st.sessionLen !== 7 && st.rate !== 99 && st.lang !== 'fr', app.errors.join(' | '));
 }
 
+// ---------- 31. review fixes for the session/preferences sync ----------
+// I1: the echo of this device's own push must not wipe a session that just finished (the end screen reads its counters)
+{
+  const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);
+  const app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', total: 0, modAt: 5 } } });
+  await until(() => s.rows.has(RID_A), 3000); await sleep(40);
+  let n = 0;
+  await playSession(app, 9, () => n++ % 2 === 0); // 5 right, 4 wrong
+  app.$('joinBtn').click(); await sleep(0); app.$('noBtn').click(); await sleep(5); // the 10th answer: wrong
+  await until(() => !app.$('reward').hidden, 3000);
+  app.w.dispatchEvent(new app.w.Event('online')); // a sync while the sticker is on screen
+  await sleep(200);
+  check('review I1: a sync while the sticker is showing does not wipe the finished session', /10 de 10/.test(app.$('slabel').textContent), app.$('slabel').textContent);
+  app.$('rewardOk').click();
+  await until(() => !app.$('end').hidden, 3000);
+  check('review I1: the end screen still reports the right answers and the new sticker', /\b5\b/.test(app.$('endInfo').textContent) && /pegatina/i.test(app.$('endInfo').textContent), app.$('endInfo').textContent);
+}
+// I2: a language change from another device never switches the language under an open recorder
+{
+  const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);
+  s.rows.set(RID_A, { id: RID_A, owner: uid, name: 'Elsa', kind: 'reader', version: 1, data: dat({ total: 1, name: 'Elsa', modAt: 5, prefs: { lang: { v: 'ca', at: Date.now() - 1000 } } }) });
+  let release; const gate = new Promise((r) => { release = r; });
+  const slowS = { ...s, fetch: async (u, o) => { if (String(u).includes('/rest/v1/')) await gate; return s.fetch(u, o); } };
+  const app = await boot({ supa: slowS, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', total: 1, modAt: 5 } } });
+  await sleep(60);
+  app.$('parents').open = true; app.$('recOpen').click(); // the parent is recording in Spanish
+  release();
+  await until(() => s.rows.get(RID_A).version >= 1 && true, 3000); await sleep(200);
+  check('review I2: a remote language change does not apply while the recorder is open', app.d.documentElement.lang === 'es' && JSON.parse(app.w.localStorage.getItem('leemos-v1')).lang !== 'ca', app.d.documentElement.lang);
+  app.$('recClose') && app.$('recClose').click();
+  app.w.dispatchEvent(new app.w.Event('online'));
+  await until(() => app.d.documentElement.lang === 'ca', 3000);
+  check('review I2: and it is applied after the recorder closes', app.d.documentElement.lang === 'ca', app.d.documentElement.lang);
+}
+// I3: Leo continues the session in progress instead of starting from zero when he presses Play
+{
+  const x = await bootLeo({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', session: { done: 3, ok: 3, stk: 0, at: Date.now() - 1000 } } } });
+  check('review I3: the home shows the restored session of the pre-reader', /3 de 5/.test(x.$('slabel').textContent), x.$('slabel').textContent);
+  x.$('prePlay').click(); await sleep(20);
+  check('review I3: pressing Play continues it ("3 de 5"), it does not reset to zero', /3 de 5/.test(x.$('slabel').textContent), x.$('slabel').textContent);
+  const y = await bootLeo({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', session: { done: 5, ok: 5, stk: 0, at: Date.now() - 1000 } } } });
+  y.$('prePlay').click(); await sleep(20);
+  check('review I3: a finished session does start again from zero', /0 de 5/.test(y.$('slabel').textContent), y.$('slabel').textContent);
+}
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

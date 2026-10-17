@@ -78,7 +78,7 @@ export function createSounds(ctx){
   function begin(){
     doc.body.classList.remove('pre-home');
     fresh=0;last=null;
-    ctx.sess.reset();
+    if(ctx.sess.done>=S.sessionLen)ctx.sess.reset(); // a session in progress (restored or synced from another device) continues; a finished one starts again
     next();
   }
   function next(){
