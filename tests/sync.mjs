@@ -136,6 +136,14 @@ const signedIn = async () => { const x = mk(); await x.sync.requestCode('m@e.c')
   check('remote data: a malformed remote row is merged as if empty and never crashes', r.data.total === 5 && r.version === 5);
 }
 
+// ---------- a project URL pasted with an API path still works ----------
+for (const pasted of ['https://x.supabase.co/rest/v1/', 'https://x.supabase.co/auth/v1', 'https://x.supabase.co/', 'https://x.supabase.co']) {
+  const srv = createFakeSupabase();
+  const s = createSync({ url: pasted, anonKey: 'k', fetch: srv.fetch, storage: memoryStorage() });
+  await s.requestCode('a@b.c').catch(() => {});
+  check(`url: "${pasted}" still reaches the auth endpoint at the project root`, srv.log[0] === 'POST /auth/v1/otp', String(srv.log[0]));
+}
+
 // ---------- review minors: sign-out revokes the session on the server, writes can finish while the page closes ----------
 {
   const { srv, storage, sync } = await signedIn();

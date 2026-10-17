@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs';
 let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sql = readFileSync('supabase/migrations/20261017000000_child_profiles.sql', 'utf8');
-const cfg = JSON.parse(readFileSync('src/data/sync.config.json', 'utf8'));
+// The COMMITTED config must be empty. Fran's local copy holds real values (kept out of git with skip-worktree), so read it from git when possible.
+import { execSync } from 'node:child_process';
+let cfgText;
+try { cfgText = execSync('git show HEAD:src/data/sync.config.json', { stdio: ['ignore', 'pipe', 'ignore'] }).toString(); } catch (e) { cfgText = readFileSync('src/data/sync.config.json', 'utf8'); }
+const cfg = JSON.parse(cfgText);
 const policies = [...sql.matchAll(/create policy "[^"]+" on public\.child_profiles for (select|insert|update|delete)/g)].map((m) => m[1]).sort();
 
 check('migration: row level security is enabled on child_profiles', /alter table public\.child_profiles enable row level security/.test(sql));

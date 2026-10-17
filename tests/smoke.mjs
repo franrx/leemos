@@ -48,7 +48,7 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
       }
       w.fetch = async (u) => {
         w.__fetched.push(u);
-        if (syncConfig && u === 'src/data/sync.config.json') return { ok: true, status: 200, json: async () => syncConfig };
+        if (u === 'src/data/sync.config.json') return { ok: true, status: 200, json: async () => syncConfig || { url: '', anonKey: '' } }; // never the real local file: tests must not depend on it
         if (u === 'audio/manifest.json') return manifest ? { ok: true, status: 200, json: async () => manifest } : { ok: false, status: 404, json: async () => ({}) };
         const p = join(ROOT, u);
         if (!existsSync(p)) return { ok: false, status: 404, json: async () => ({}) };

@@ -61,8 +61,14 @@ Sin configurar nada, la app funciona como siempre y no hace ninguna petición a 
 
 1. Crea un proyecto en [Supabase](https://supabase.com) en una región de la UE.
 2. En el editor SQL ejecuta `supabase/migrations/20261017000000_child_profiles.sql`.
-3. Authentication → Providers → Email: actívalo y edita las plantillas «Magic Link» y «Confirm signup» para que muestren `{{ .Token }}` (el código de 6 dígitos) en vez de un enlace.
-4. Copia la *Project URL* y la clave `anon` a `src/data/sync.config.json` (`{"url": "...", "anonKey": "..."}`). La clave `anon` es pública por diseño (los permisos los pone la base de datos); **nunca** pongas ahí la `service_role`.
+3. **Primero configura SMTP propio** (Authentication → Emails → SMTP Settings; p. ej. Resend con `smtp.resend.com`, puerto 465, usuario `resend`, la API key como contraseña): Supabase solo deja editar las plantillas con SMTP propio, y sin editarlas el email lleva un enlace en vez del código. Luego, en Emails → Templates, edita **Confirm sign up** y **Magic link** (vista Source) para que muestren `{{ .Token }}` y el texto en castellano y catalán a la vez (el email no sabe el idioma de la familia):
+   ```html
+   <h2>Tu código de Leemos · El teu codi de Leemos</h2>
+   <p style="font-size:28px;letter-spacing:6px"><b>{{ .Token }}</b></p>
+   <p>Escríbelo en la app. Caduca en una hora.<br>Escriu-lo a l'app. Caduca en una hora.</p>
+   ```
+   Asunto: `Leemos: tu código · el teu codi`. El remitente de prueba `onboarding@resend.dev` solo entrega a tu propio email; para otras familias hace falta un dominio verificado.
+4. Copia la *Project URL* (solo la raíz, `https://xxxx.supabase.co`) y la clave `anon` (pestaña «Legacy anon, service_role») a `src/data/sync.config.json` (`{"url": "...", "anonKey": "..."}`). La clave `anon` es pública por diseño (los permisos los pone la base de datos); **nunca** pongas ahí la `service_role`.
 5. Añade `SUPABASE_URL`, `SUPABASE_ANON_KEY` y `SUPABASE_SERVICE_KEY` a `.env` y ejecuta `node scripts/check-rls.mjs`: todas las líneas deben salir `PASS` (comprueba que un usuario no puede leer ni tocar los datos de otro).
 6. El envío de emails incluido en Supabase está limitado a unos pocos por hora: para uso real configura SMTP propio (Authentication → SMTP Settings).
 

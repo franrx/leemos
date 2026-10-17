@@ -9,7 +9,8 @@ export class SyncError extends Error {
 const SESSION_KEY = 'leemos-auth';
 
 export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, storage = globalThis.localStorage, now = Date.now }) {
-  const base = String(url).replace(/\/+$/, '');
+  // the project root: a URL copied with an API path (…/rest/v1/, …/auth/v1) or a trailing slash still works
+  const base = String(url).trim().replace(/\/+$/, '').replace(/\/(rest|auth)\/v1$/, '').replace(/\/+$/, '');
   const read = (k) => { try { return JSON.parse(storage.getItem(k)); } catch (e) { return null; } };
   const write = (k, v) => { try { storage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage full or blocked: the session just will not persist */ } };
   const headers = (token) => ({ apikey: anonKey, 'Content-Type': 'application/json', Authorization: 'Bearer ' + (token || anonKey) });
