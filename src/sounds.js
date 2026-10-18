@@ -60,7 +60,21 @@ export function createSounds(ctx){
   const room=()=>$('pre');
   let cur=null,last=null,wrong=false,busy=false,heard=false,again=()=>{},fresh=0,epoch=0; // heard: this round's sound has played; again: listens again (locks the answers)
 
+  // The level row, as for Elsa: one card per group of letters with how many are mastered. Display only: the groups open by themselves.
+  function renderGroups(){
+    const box=$('levels');if(!box)return;
+    const now=gi();box.replaceChildren();
+    groups().forEach((g,i)=>{
+      const done=g.letters.filter(x=>isMastered(S.stats[key(x.l)])).length;
+      const c=el('div','level group'+(i>now?' locked':''));
+      if(i===now)c.setAttribute('aria-current','true');
+      const bar=el('div','bar'),f=el('i');f.style.width=Math.round(100*done/g.letters.length)+'%';bar.append(f);
+      c.append(el('b','',(i+1)+'. '+g.letters.map(x=>x.l).join(' ')),el('small','',t('preGroupDone',{d:done,n:g.letters.length})),bar);
+      box.appendChild(c);
+    });
+  }
   function home(){
+    renderGroups();
     cur=null;busy=false;epoch++; // epoch: timers scheduled before this point must not resurrect a screen
     doc.body.classList.add('pre-home');
     const {done,total}=totals(groups(),S.stats,lang());
@@ -82,6 +96,7 @@ export function createSounds(ctx){
     next();
   }
   function next(){
+    renderGroups();
     let cands=pool();
     if(fresh>=NEW_PER_SESSION){const known=cands.filter(x=>seen(x.l));if(known.length)cands=known}
     const x=pickTarget(cands,S.stats,lang(),last);
@@ -165,7 +180,7 @@ export function createSounds(ctx){
     const finished=ctx.sess.done>=S.sessionLen;
     let reward=null;
     if(finished){reward=ctx.earnSticker();if(reward)ctx.sess.addSticker()}
-    save();
+    save();renderGroups();
     ctx.renderSession();ctx.renderGoal();ctx.renderAlbum();ctx.renderHard();
     const e=epoch,alive=()=>e===epoch;
     if(reward)ctx.reward(reward,alive);
@@ -182,7 +197,7 @@ export function createSounds(ctx){
     if(up){$('endLevelUp').textContent=t('preGroupUp');$('endLevelUpBtn').textContent=t('preGroupUpBtn')}
     return up;
   }
-  function unlockNext(){S.pre[lang()]=Math.min(gi()+1,groups().length-1);save()}
+  function unlockNext(){S.pre[lang()]=Math.min(gi()+1,groups().length-1);save();renderGroups()}
   function rest(){home();$('hint').textContent=t('preRest',{n:ctx.nm()})}
   // Everything the parent can record: all letter sounds first, then the picture words.
   function recItems(){
@@ -192,5 +207,5 @@ export function createSounds(ctx){
     return [...set];
   }
 
-  return {refresh:home,begin,next,showEnd,unlockNext,rest,recItems};
+  return {refresh:home,begin,next,showEnd,unlockNext,rest,recItems,renderGroups};
 }

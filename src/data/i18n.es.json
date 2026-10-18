@@ -127,6 +127,7 @@
   "pfAdd": "Añadir",
   "prePlay": "Jugar",
   "preHello": "¡Hola, {n}! ¿Jugamos con los sonidos?",
+  "preGroupDone": "{d} de {n}",
   "preProgress": "{d} de {n} letras dominadas",
   "preIntroHint": "Toca la letra para oír cómo suena.",
   "preNext": "Siguiente",

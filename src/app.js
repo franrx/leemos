@@ -272,6 +272,7 @@ function pick(){
 
 // ---------- render ----------
 function renderLevels(){
+  if(PROFILE.kind==='pre'){if(pre&&pre.renderGroups)pre.renderGroups();return} // Leo's cards are his letter groups (sounds.js)
   const box=$('levels');box.innerHTML='';
   LEVELS.forEach((L,i)=>{
     const all=[...itemsFor(i,'syl'),...itemsFor(i,'word')].filter(eligible); // only the open items count

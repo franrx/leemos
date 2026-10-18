@@ -1544,6 +1544,29 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('the whole run raised no errors', x.errors.length === 0, x.errors.join(' | '));
 }
 
+// ---------- 39b. Leo's top of screen matches Elsa's: same header buttons that suit him, and his letter groups as level cards ----------
+{
+  const MAS = { ok: 3, fail: 0 };
+  const cssT = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
+  const preHide = (cssT.match(/html\.pre #levels[^{]*\{[^}]*\}|html\.pre [^{]*#stage \.actions[^{]*\{[^}]*\}/) || [''])[0];
+  check('Leo header: the level row and the world button are no longer hidden for him; the profile switch and Aa still are', !/#levels/.test(preHide) && !/#worldBtn/.test(preHide) && /#caseBtn/.test(preHide) && /\.modes/.test(preHide), preHide.slice(0, 200));
+  check('Leo header: the profile chip stays parent-only (hidden for him)', (() => { const x = readFileSync(join(ROOT, 'src/app.js'), 'utf8'); return /\$\('profileBtn'\)\.hidden=true/.test(x); })());
+  const g0 = readJSON('src/data/sounds.es.json').groups, gca = readJSON('src/data/sounds.ca.json').groups;
+  const x = await boot({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', stats: Object.fromEntries(g0[0].letters.map((l) => ['snd:' + l.l, MAS])) } } });
+  x.w.__audioMode = 'auto'; await until(() => x.$('prePlay'));
+  const cards = () => [...x.d.querySelectorAll('#levels .level')];
+  check('Leo header: his letter groups are cards in the level row, in the same style as Elsa\'s', cards().length === g0.length && cards().every((c) => c.querySelector('b') && c.querySelector('small') && c.querySelector('.bar i')), String(cards().length));
+  check('Leo header: a card is titled with its number and letters, like "2. m s l p"', cards()[1].querySelector('b').textContent === '2. ' + g0[1].letters.map((l) => l.l).join(' '), cards()[1].querySelector('b').textContent);
+  check('Leo header: the group he is in is marked current, the ones ahead are dimmed, none is a button (they only show progress)', cards()[0].getAttribute('aria-current') === 'true' && !cards()[1].hasAttribute('aria-current') && cards().slice(1).every((c) => c.classList.contains('locked')) && cards().every((c) => c.tagName !== 'BUTTON'));
+  check('Leo header: each card shows how many letters of its group are mastered, with a bar', cards()[0].querySelector('small').textContent === '5 de 5' && cards()[0].querySelector('.bar i').style.width === '100%' && cards()[1].querySelector('small').textContent === '0 de 4' && cards()[1].querySelector('.bar i').style.width === '0%', cards().map((c) => c.querySelector('small').textContent).join(','));
+  check('Leo header: the world button is there for him, and the language switch redraws the groups in Catalan', (() => { x.$('langBtn').click(); return true; })());
+  await sleep(30);
+  check('Leo header (ca): the cards follow the language', cards().length === gca.length && cards()[1].querySelector('b').textContent === '2. ' + gca[1].letters.map((l) => l.l).join(' ') && x.errors.length === 0, x.errors.join(' | ') || cards()[1].querySelector('b').textContent);
+  // Elsa's own cards are untouched
+  const e = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 } } });
+  check('Leo header: Elsa still has her five level buttons', [...e.d.querySelectorAll('#levels .level')].length === 5 && [...e.d.querySelectorAll('#levels .level')].every((c) => c.tagName === 'BUTTON'));
+}
+
 // ---------- 40. a new session starts with an empty row of dots, and fast taps do not zoom ----------
 {
   const dotsOn = (x) => x.d.querySelectorAll('#goal i.on').length;
