@@ -35,12 +35,17 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
       w.speechSynthesis = { getVoices: () => [{ name: 'Joana Online (Natural)', lang: 'ca-ES', voiceURI: 'j' }, { name: 'Google español', lang: 'es-ES', voiceURI: 'g' }], cancel() {}, speak(u) { (w.__tts ||= []).push(u.text); } };
       w.SpeechSynthesisUtterance = function (t) { this.text = t; };
       // w.__audioMode: 'manual' (default: a clip never ends by itself), 'auto' (ends at once), 'blocked' (the browser refuses to start it: NotAllowedError), 'missing' (it cannot be loaded)
+      // w.__strict models iOS: an element that has never played may only start inside a tap (w.__inTap); one a tap already played may start any time, with any new src
       w.Audio = function (src) {
-        audioCalls.push(src); (w.__audios ||= []).push(this);
+        if (src !== undefined) audioCalls.push(src);
+        (w.__audios ||= []).push(this);
+        let cur = src; Object.defineProperty(this, 'src', { get: () => cur, set: (v) => { cur = v; audioCalls.push(v); } });
         this.play = () => {
           w.__plays = (w.__plays || 0) + 1;
           if (w.__audioMode === 'blocked') return Promise.reject(Object.assign(new Error('play() was not allowed'), { name: 'NotAllowedError' }));
           if (w.__audioMode === 'missing') return Promise.reject(Object.assign(new Error('no supported source'), { name: 'NotSupportedError' }));
+          if (w.__strict && !this.__unlocked && !w.__inTap) return Promise.reject(Object.assign(new Error('play() was not allowed'), { name: 'NotAllowedError' }));
+          this.__unlocked = true;
           if (w.__audioMode === 'auto' && this.onended) this.onended(); // ends at once, before play() returns
           return Promise.resolve();
         };
@@ -1499,6 +1504,42 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   const p0 = x.w.__plays;
   choices(x).find((b) => b.dataset.l === x.$('preChoices').dataset.answer).click(); await sleep(30);
   check('next round: after a right answer the next sound is attempted on its own', x.w.__plays > p0, `${p0} -> ${x.w.__plays}`);
+
+  // iOS: a timer cannot start a fresh audio element, but it can start the one a tap already played. Letters he has seen, so every round is a game.
+  {
+    const MA = { ok: 3, fail: 0 }, d0 = readJSON('src/data/sounds.es.json').groups[0].letters.map((x) => x.l); // the whole first group is already seen
+    const strictLeo = async () => {
+      const y = await boot({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', stats: Object.fromEntries(d0.map((l) => ['snd:' + l, MA])) } }, manifest: LEO_CLIPS });
+      y.w.__audioMode = 'auto'; y.w.__strict = true; await until(() => y.$('prePlay'));
+      y.w.__inTap = true; y.$('prePlay').click(); y.w.__inTap = false; await sleep(10);
+      return y;
+    };
+    const y = await strictLeo();
+    check('iOS rule: the first round (started by a tap) plays and unlocks the answers', !!y.$('preChoices') && choices(y).every((b) => !b.disabled) && !y.$('preHear').classList.contains('needed'));
+    const n0 = y.w.__audios.length, calls0 = y.audioCalls.filter((u) => u === 'audio/es/x.mp3').length;
+    y.w.__inTap = true; choices(y).find((b) => b.dataset.l === y.$('preChoices').dataset.answer).click(); y.w.__inTap = false; await sleep(30);
+    check('iOS rule: the next round (started by a timer) plays by itself, on the element the first tap unlocked', !y.$('preHear').classList.contains('needed') && choices(y).every((b) => !b.disabled) && y.audioCalls.filter((u) => u === 'audio/es/x.mp3').length === calls0 + 1 && y.w.__audios.length === n0, `needed=${y.$('preHear').classList.contains('needed')} audios ${n0}->${y.w.__audios.length}`);
+    check('iOS rule: no errors', y.errors.length === 0, y.errors.join(' | '));
+  }
+
+  // Lumi in Leo's screen: a tap on him or the bubble says the sentence on screen (a clip only, never the robot voice), but never over the letter sound
+  {
+    const G1 = 'escucha el sonido y toca su letra.';
+    const HINT_ONLY = { generated: 'test', clips: { es: { [G1]: 'g.mp3' }, ca: {} } };
+    const lumiRound = async (mode, manifest) => { const y = await bootLeo({ manifest }); y.w.__audioMode = mode; y.$('prePlay').click(); await sleep(10); if (y.$('preNext')) { y.$('preNext').click(); await sleep(10); } return y; };
+    const y = await lumiRound('auto', HINT_ONLY);
+    check('Lumi (Leo): the round shows the game hint', y.$('hint').textContent === 'Escucha el sonido y toca su letra.');
+    const c0 = y.audioCalls.length; y.$('hint').click();
+    check('Lumi (Leo): tapping the bubble plays the clip of the sentence on screen', y.audioCalls.length === c0 + 1 && y.audioCalls.at(-1) === 'audio/es/g.mp3', y.audioCalls.slice(-2).join(','));
+    const c1 = y.audioCalls.length; y.$('mascot').dispatchEvent(new y.w.Event('click'));
+    check('Lumi (Leo): so does tapping Lumi himself', y.audioCalls.length === c1 + 1 && y.audioCalls.at(-1) === 'audio/es/g.mp3');
+    const z = await lumiRound('auto', null); const tts0 = (z.w.__tts || []).length, c2 = z.audioCalls.length; z.$('hint').click(); z.$('mascot').dispatchEvent(new z.w.Event('click'));
+    check('Lumi (Leo): with no clip for the sentence he stays silent (no browser voice)', z.audioCalls.length === c2 && (z.w.__tts || []).length === tts0);
+    const w2 = await lumiRound('manual', { generated: 'test', clips: { es: new Proxy({}, { get: (_, k) => (typeof k === 'string' ? 'x.mp3' : undefined) }), ca: {} } });
+    const c3 = w2.audioCalls.length; w2.$('hint').click(); w2.$('mascot').dispatchEvent(new w2.w.Event('click'));
+    check('Lumi (Leo): while the letter sound is still playing a tap on him does not cut it, and the answers stay locked', w2.audioCalls.length === c3 && choices(w2).every((b) => b.disabled));
+    check('Lumi (Leo): no errors', y.errors.length + z.errors.length + w2.errors.length === 0, [...y.errors, ...z.errors, ...w2.errors].join(' | '));
+  }
   check('the whole run raised no errors', x.errors.length === 0, x.errors.join(' | '));
 }
 

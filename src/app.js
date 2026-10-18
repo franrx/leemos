@@ -361,25 +361,34 @@ function talkStop(){
   $('mascot').classList.remove('talking');
   closeBig();
 }
-function hintAudio(x){
-  const u=clipURL[ck(x)];if(u)return new Audio(u);
-  const f=genFile(x);return f?new Audio(clipUrl(S.lang,x.toLowerCase(),f)):null;
+function hintURL(x){
+  const u=clipURL[ck(x)];if(u)return u;
+  const f=genFile(x);return f?clipUrl(S.lang,x.toLowerCase(),f):null;
 }
+function hintAudio(x){const u=hintURL(x);return u?new Audio(u):null}
 // Plays the sound of `t` (a recording or a generated clip) like say() but tells `done` what happened, so Leo's game can keep the answers locked
 // until it was really heard: 'played' (it ended), 'blocked' (the browser refused to start it: there was no tap in this call stack, e.g. the next
 // round starting from a timer), 'none' (no clip, or one that cannot be loaded: nothing can be waited for, so nothing may stay locked; with no
 // clip at all `done` runs at once).
+// iOS only starts an audio element inside a tap, and the next round of Leo starts from a timer: so every letter sound plays on ONE element (hearEl) that
+// an earlier tap already played; a fresh `new Audio` here would be refused each time. Changing its src and calling play() again is allowed.
+let hearEl=null,hearing=false,hearStop=null;
 function hear(t,done){
   const fin0=done||(()=>{});
   try{if(hasTTS)speechSynthesis.cancel()}catch(e){}
-  const au=hintAudio(t);
-  if(!au){ttsSpeak(t);fin0('none');return}
+  if(hearStop)hearStop(); // a call still waiting for the end of the previous sound is over: its answer would be stale
+  const u=hintURL(t);
+  if(!u){ttsSpeak(t);fin0('none');return}
   let over=false,guard=0;
-  const fin=v=>{if(!over){over=true;clearTimeout(guard);fin0(v)}};
+  const fin=v=>{if(!over){over=true;hearing=false;hearStop=null;clearTimeout(guard);fin0(v)}};
+  hearStop=()=>{over=true;hearing=false;hearStop=null;clearTimeout(guard)};
   guard=setTimeout(()=>fin('played'),8000); // a clip that never reports its end must not lock the answers for ever
   try{
-    if(curAudio)curAudio.pause();curAudio=au;
-    au.onended=()=>fin('played');au.onerror=()=>fin('none');
+    if(curAudio&&curAudio!==hearEl)curAudio.pause();
+    if(!hearEl)hearEl=new Audio();
+    const au=hearEl;curAudio=au;hearing=true;
+    au.pause();au.onended=()=>fin('played');au.onerror=()=>fin('none');
+    au.src=u;
     const p=au.play();
     if(p&&p.catch)p.catch(e=>fin(e&&e.name==='NotAllowedError'?'blocked':'none'));
   }catch(e){fin('none')}
@@ -397,6 +406,8 @@ function lumiPlay(x,big){
   }catch(e){talkStop();return false}
 }
 function sayHint(big){
+  // Leo: the sentence on screen (a clip, never the browser voice), but never over the letter sound he has to hear first. The speaker emoji is not spoken.
+  if(PROFILE.kind==='pre')return hearing?false:lumiPlay($('hint').textContent.replace(/\s*🔊\s*/g,' ').trim(),big);
   const ag=activeGame();
   if(ag)return lumiPlay(t(ag.intro),big); // in a play mode the phase left over from a reading exercise must not pick the sentence
   return phase!=='read'&&phase!=='judge'?false:lumiPlay(hintFor(phase),big)

@@ -122,6 +122,9 @@ const hasClip = (lang, key, kind) => clips.some((c) => c.lang === lang && c.key 
 for (const lang of ['es', 'ca']) {
   const all = DATA[lang].groups.flatMap((g) => g.letters);
   check(`[${lang}] every letter sound is a clip of kind "sound"`, all.every((x) => hasClip(lang, x.l, 'sound')), all.filter((x) => !hasClip(lang, x.l, 'sound')).map((x) => x.l).join(','));
+  const I = readJSON(`src/data/i18n.${lang}.json`);
+  const leoLines = [I.preIntroHint, I.preGameHint, I.preRest, ...I.preNos, ...I.preOks].map((x) => x.split('{n}').join('Leo'));
+  check(`[${lang}] Leo's own lines (intro, game, rest, "almost" and praise) are phrase clips with his name`, leoLines.every((x) => hasClip(lang, x.toLowerCase(), 'phrase')), leoLines.filter((x) => !hasClip(lang, x.toLowerCase(), 'phrase')).join(' | '));
   check(`[${lang}] every picture word is a clip`, all.every((x) => hasClip(lang, x.w.toLowerCase())));
 }
 // A lone consonant read by a text voice comes out as the letter NAME ("eme"); an explicit IPA spelling avoids that.
