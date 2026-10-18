@@ -564,7 +564,16 @@
    "~cer": "_7ecer.mp3",
    "~tel": "_7etel.mp3",
    "~dis": "_7edis.mp3",
-   "~dul": "_7edul.mp3"
+   "~dul": "_7edul.mp3",
+   "leo, lee la palabra en voz alta, tú sola.": "leo_2c_20lee_20la_20palabra_20en_20voz_20alta_2c_20t_fa_20sola_2e.mp3",
+   "leo, lee cada sílaba y únelas. toca una para oírla.": "leo_2c_20lee_20cada_20s_edlaba_20y_20_fanelas_2e_20toca_20una_20para_20o_edrla_2e.mp3",
+   "toca la letra para oír cómo suena.": "toca_20la_20letra_20para_20o_edr_20c_f3mo_20suena_2e.mp3",
+   "leo, lee la sílaba en voz alta. luego pulsa «juntar».": "leo_2c_20lee_20la_20s_edlaba_20en_20voz_20alta_2e_20luego_20pulsa_20_abjuntar_bb_2e.mp3",
+   "escucha el sonido y toca su letra.": "escucha_20el_20sonido_20y_20toca_20su_20letra_2e.mp3",
+   "casi, leo. escucha otra vez.": "casi_2c_20leo_2e_20escucha_20otra_20vez_2e.mp3",
+   "¡hasta mañana, leo! si quieres seguir, toca jugar.": "_a1hasta_20ma_f1ana_2c_20leo_21_20si_20quieres_20seguir_2c_20toca_20jugar_2e.mp3",
+   "casi. escucha con atención, leo.": "casi_2e_20escucha_20con_20atenci_f3n_2c_20leo_2e.mp3",
+   "poco a poco, leo. escucha otra vez.": "poco_20a_20poco_2c_20leo_2e_20escucha_20otra_20vez_2e.mp3"
   },
   "ca": {
    "me": "me.mp3",
@@ -1183,12 +1192,21 @@
    "~mos": "_7emos.mp3",
    "~nel": "_7enel.mp3",
    "~pis": "_7epis.mp3",
-   "~tel": "_7etel.mp3"
+   "~tel": "_7etel.mp3",
+   "leo, llegeix la síl·laba en veu alta. després prem «ajuntar».": "leo_2c_20llegeix_20la_20s_edl_b7laba_20en_20veu_20alta_2e_20despr_e9s_20prem_20_abajuntar_bb_2e.mp3",
+   "leo, llegeix la paraula en veu alta, tu sola.": "leo_2c_20llegeix_20la_20paraula_20en_20veu_20alta_2c_20tu_20sola_2e.mp3",
+   "toca la lletra per sentir com sona.": "toca_20la_20lletra_20per_20sentir_20com_20sona_2e.mp3",
+   "escolta el so i toca la seva lletra.": "escolta_20el_20so_20i_20toca_20la_20seva_20lletra_2e.mp3",
+   "fins demà, leo! si vols continuar, toca jugar.": "fins_20dem_e0_2c_20leo_21_20si_20vols_20continuar_2c_20toca_20jugar_2e.mp3",
+   "gairebé, leo. escolta un altre cop.": "gaireb_e9_2c_20leo_2e_20escolta_20un_20altre_20cop_2e.mp3",
+   "leo, llegeix cada síl·laba i uneix-les. toca'n una per sentir-la.": "leo_2c_20llegeix_20cada_20s_edl_b7laba_20i_20uneix_2dles_2e_20toca_27n_20una_20per_20sentir_2dla_2e.mp3",
+   "gairebé. escolta amb atenció, leo.": "gaireb_e9_2e_20escolta_20amb_20atenci_f3_2c_20leo_2e.mp3",
+   "poc a poc, leo. escolta un altre cop.": "poc_20a_20poc_2c_20leo_2e_20escolta_20un_20altre_20cop_2e.mp3"
   }
  },
- "generated": "2026-10-18T17:56:49.498Z",
+ "generated": "2026-10-18T19:06:36.159Z",
  "provider": "azure",
- "name": "Elsa",
+ "name": "Leo",
  "rev": {
   "es": {
    "suma": 1792227113116,
@@ -1350,7 +1368,16 @@
    "~cer": 1792342491435,
    "~tel": 1792346206483,
    "~dis": 1792342491514,
-   "~dul": 1792346206523
+   "~dul": 1792346206523,
+   "leo, lee la palabra en voz alta, tú sola.": 1792350385681,
+   "leo, lee cada sílaba y únelas. toca una para oírla.": 1792350386365,
+   "toca la letra para oír cómo suena.": 1792350386571,
+   "leo, lee la sílaba en voz alta. luego pulsa «juntar».": 1792350386907,
+   "escucha el sonido y toca su letra.": 1792350387072,
+   "casi, leo. escucha otra vez.": 1792350387835,
+   "¡hasta mañana, leo! si quieres seguir, toca jugar.": 1792350387906,
+   "casi. escucha con atención, leo.": 1792350388329,
+   "poco a poco, leo. escucha otra vez.": 1792350394563
   },
   "ca": {
    "niu": 1792227124940,
@@ -1581,7 +1608,16 @@
    "~mos": 1792342492668,
    "~nel": 1792346209416,
    "~pis": 1792342492972,
-   "~tel": 1792346209498
+   "~tel": 1792346209498,
+   "leo, llegeix la síl·laba en veu alta. després prem «ajuntar».": 1792350389173,
+   "leo, llegeix la paraula en veu alta, tu sola.": 1792350390029,
+   "toca la lletra per sentir com sona.": 1792350391031,
+   "escolta el so i toca la seva lletra.": 1792350391747,
+   "fins demà, leo! si vols continuar, toca jugar.": 1792350392744,
+   "gairebé, leo. escolta un altre cop.": 1792350393828,
+   "leo, llegeix cada síl·laba i uneix-les. toca'n una per sentir-la.": 1792350394847,
+   "gairebé. escolta amb atenció, leo.": 1792350395221,
+   "poc a poc, leo. escolta un altre cop.": 1792350396159
   }
  }
 }
