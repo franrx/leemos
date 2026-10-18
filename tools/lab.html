@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leemos: experimento de voz</title>
+<style>
+  :root{color-scheme:light dark;font-family:system-ui,sans-serif}
+  body{margin:0 auto;max-width:640px;padding:16px;text-align:center}
+  header{text-align:left}
+  button{font:inherit;padding:10px 16px;min-height:44px;border-radius:12px;border:2px solid #8886;background:Canvas;color:CanvasText;cursor:pointer}
+  button.primary{background:#6D4AF0;border-color:#6D4AF0;color:#fff;font-weight:700}
+  button.ok{background:#00B368;border-color:#00B368;color:#fff;font-weight:700;font-size:1.4rem}
+  button.fail{background:#E0701B;border-color:#E0701B;color:#fff;font-weight:700;font-size:1.4rem}
+  button:focus-visible{outline:3px solid #6D4AF0;outline-offset:2px}
+  .muted{opacity:.75}
+  .big{font-size:clamp(96px,28vw,180px);font-weight:700;line-height:1.1;margin:12px 0 0}
+  .big.word{font-size:clamp(56px,16vw,100px)}
+  #ctx{font-size:1.2rem;margin:4px 0 12px;min-height:1.5em}
+  .meter{height:16px;max-width:320px;margin:14px auto;border-radius:99px;background:#8883;overflow:hidden}
+  .meter i{display:block;height:100%;width:0;border-radius:99px;background:#00B368;transition:width .08s linear}
+  #status{min-height:3.2em;margin:8px 0}
+  .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:10px 0}
+  [hidden]{display:none!important}
+  @media (prefers-reduced-motion: reduce){.meter i{transition:none}}
+</style>
+</head>
+<body>
+<h1>Experimento de voz</h1>
+<header>
+  <p class="muted">Las grabaciones se guardan solo en la carpeta <code>lab/</code> de este proyecto (no se sube nada, no se sincroniza). Parámetros: <code>?lang=es&amp;level=2&amp;n=40&amp;who=elsa&amp;kind=read&amp;seed=1</code>. La misma lista (mismo <code>level</code> y <code>seed</code>) se repite entre sesiones.</p>
+  <p id="info" role="status"></p>
+</header>
+<main>
+  <div class="big" id="big" aria-live="polite"></div>
+  <div id="ctx"></div>
+  <div class="meter" id="meter" role="meter" aria-label="Nivel del micrófono" hidden><i id="meterFill"></i></div>
+  <p id="status" aria-live="polite"></p>
+  <div class="row">
+    <button id="start" class="primary">🎙️ Empezar</button>
+    <button id="done" class="primary" hidden>⏹ Listo</button>
+    <button id="retry" hidden>↺ Repetir esta</button>
+  </div>
+  <div class="row">
+    <button id="ok" class="ok" hidden aria-label="Lo ha leído bien">✅</button>
+    <button id="fail" class="fail" hidden aria-label="Le ha costado o lo ha leído mal">🔁</button>
+  </div>
+  <div class="row"><button id="wipe" hidden>🗑 Borrar todo lo de esta sesión</button></div>
+</main>
+<script src="lab.js"></script>
+</body>
+</html>
