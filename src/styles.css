@@ -34,7 +34,7 @@ h1{margin:0;font-size:1.5rem;letter-spacing:.01em}
 .level .bar i{display:block;height:100%;background:var(--ok);width:0;transition:width .4s}
 .level[aria-pressed="true"]{border-color:var(--c2);box-shadow:0 0 0 3px color-mix(in srgb,var(--c2) 30%,transparent)}
 
-.modes{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0 14px}
+.modes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:6px 0 14px}
 .mode{border:2px solid var(--line);background:var(--panel);border-radius:14px;padding:12px;font-weight:700;min-height:48px;transition:opacity .2s ease-out}
 .mode[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 
