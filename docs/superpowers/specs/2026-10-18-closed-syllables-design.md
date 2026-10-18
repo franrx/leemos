@@ -30,11 +30,11 @@ Elsa reads open syllables (CV) but overloads her working memory when she blends 
 
 **Closed syllables** (`src/data/closed.es.json`, `closed.ca.json`): `{ "syl": ["mal", "pal", …] }`, a curated list of about 36 CVC syllables per language: onset (a consonant of the Camino) + vowel + coda s, r or l. Chosen so that every coda and every vowel appear, and so that there are **at least 6 syllables open at every step from 3 up** (step 3 has only the L coda: *mal mel mil mol mul pal pel pil pol pul*; step 6 adds S and the new onsets: *mas pas tos nas sal sol…*; step 10 adds R: *bar mar par tor…*). The two languages may differ in the list.
 
-**Words** are derived, not listed: from `levels.<lang>.json`, a word qualifies when it has **exactly 2 syllables, exactly one closed syllable, and that closed syllable is onset + vowel + s/r/l** (so *pul-po, car-pa, bar-co, mos-ca, fa-nal, cor-da, fus-ta, ho-tel* qualify; *tam-bor, can-tar, ár-bol, del-fín, dor-mir* do not: a closing n or m, no onset, or two closed syllables). Single-syllable words (*sol, mar, bus, dos*) are not used as word screens. Words use their picture from the level data, so no new pictures are needed.
+**Words** are derived, not listed: from `levels.<lang>.json`, a word qualifies when it has **exactly 2 syllables, exactly one closed syllable, and that closed syllable is onset + vowel + s/r/l** (so *pul-po, car-pa, bar-co, mos-ca, cor-da, fus-ta, ho-tel* qualify; a qualifying word with no picture in the level data, like *fa-nal*, is left out; *tam-bor, can-tar, ár-bol, del-fín, dor-mir* do not: a closing n or m, no onset, or two closed syllables). Single-syllable words (*sol, mar, bus, dos*) are not used as word screens. Words use their picture from the level data, so no new pictures are needed.
 
 **Gating:** an item is open when `stepOf(item) <= pathPos()`. The mode is **locked** while fewer than 6 closed syllables are open (that is, at steps 1–2, where no coda letter is open) and the hint says it opens with the L.
 
-**Word screens are optional per session:** in Spanish only *pul-po* (step 3) is open until step 11, where *car-pa, bar-co, cer-do, dis-co, dul-ce* arrive; Catalan has *tú-nel* (5) and *fa-nal, fus-ta* (7) earlier. A session uses 2 word screens when at least 2 distinct qualifying words are open; otherwise all 6 screens are syllable screens.
+**Word screens are optional per session:** in Spanish only *pul-po* (step 3) is open until step 11, where *car-pa, bar-co, cer-do, dis-co, dul-ce* arrive; Catalan has *tú-nel* (5) and *fus-ta* (7) earlier (*fa-nal* has no picture). A session uses 2 word screens when at least 2 distinct qualifying words are open; otherwise all 6 screens are syllable screens.
 
 ## 2. Session and screens
 

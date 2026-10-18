@@ -82,6 +82,7 @@ Es un sitio estático: sirve cualquier hosting con **https** (Netlify, Cloudflar
 - Palabras y sílabas: `src/data/levels.<idioma>.json`. El campo `g` (mundos, ids de `worlds.json`) ya no se usa: el mundo es solo el paisaje y no cambia qué palabras salen.
 - Camino de letras: el orden está en `STEPS` de `src/levelrule.js` (M P L N T S F B D R C y «el resto»); el adulto lo ajusta en «Para papá y mamá».
 - «Busca la paraula»: tercer modo (botón «Busca»). Encuentra las 3 copias de la palabra entre 12 parecidas, de la letra del Camino en la que va; 5 páginas y una pegatina. No cambia el progreso. Lógica en `src/find.js`.
+- «Cierra / Tanca»: cuarto modo (botón «Cierra»), sílabas cerradas con s/r/l armadas como «2+1», con sonido alargado y palabras con ficha ancla; se abre en el paso L del Camino. Banco en `src/data/closed.<idioma>.json`; los clips alargados (`stretch`) se escuchan en `/tools/review.html`. Lógica en `src/close.js`.
 - Textos de interfaz: `src/data/i18n.<idioma>.json` (mismas claves en los dos).
 - Mundos y pegatinas: `worlds.json` (cada mundo trae su conjunto de 6 pegatinas en `stk`). `stickers.json` solo conserva el orden de las 24 pegatinas originales para migrar guardados antiguos: no lo cambies.
 - Tras cambiar palabras: `npm run audio:plan` y `npm run audio` generan solo los clips nuevos.
