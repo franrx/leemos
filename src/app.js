@@ -170,6 +170,27 @@ else $('voiceInfo').textContent=t('voiceNoTTS');
 // Recorded clips (parent's voice) live in IndexedDB and win over the device voice.
 const clipURL={};
 let curAudio=null;
+// Diagnostics for a device with no console (the iPad): open the app with ?debug=1 (it stays on; ?debug=0 turns it off). A small panel lists what the app plays and what the
+// browser refuses (NotAllowedError...), the sound setting, language, name and the caches in use. Off by default: nothing is added to the page.
+if(/[?&]debug=1/.test(location.search)){try{localStorage.setItem('leemos-debug','1')}catch(e){}}
+if(/[?&]debug=0/.test(location.search)){try{localStorage.removeItem('leemos-debug')}catch(e){}}
+let DEBUG=false;try{DEBUG=!!localStorage.getItem('leemos-debug')}catch(e){}
+function dbg(m){const b=$('dbg');if(!b)return;b._l=(b._l||[]).concat(m).slice(-12);b.textContent=b._l.join('\n')}
+if(DEBUG){
+  const box=document.createElement('pre');box.id='dbg';
+  box.style.cssText='position:fixed;left:4px;bottom:4px;z-index:99;max-width:62vw;margin:0;padding:4px 6px;font:11px/1.3 monospace;background:rgba(0,0,0,.78);color:#9f9;border-radius:6px;pointer-events:none;white-space:pre-wrap';
+  document.body.appendChild(box);
+  const OA=window.Audio,short=u=>String(u||'').split('/').pop().slice(0,30);
+  window.Audio=function(src){
+    const a=new OA(src),pl=a.play.bind(a);
+    a.play=()=>{const p=pl();dbg('play '+short(a.src));if(p&&p.catch)p.catch(e=>dbg('REJECT '+e.name+' '+short(a.src)));return p};
+    try{a.addEventListener('ended',()=>dbg('ended '+short(a.src)));a.addEventListener('error',()=>dbg('error '+short(a.src)))}catch(e){} // the diagnostics must never be able to break audio
+    return a;
+  };
+  window.Audio.prototype=OA.prototype;
+  dbg('sound='+S.sound+' lang='+S.lang+' name='+nm());
+  try{window.caches&&caches.keys().then(k=>dbg('cache '+k.join(','))).catch(()=>{})}catch(e){}
+}
 function idb(){return new Promise((res,rej)=>{const r=indexedDB.open('leemos-audio',1);r.onupgradeneeded=()=>r.result.createObjectStore('clips');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
 async function idbSet(k,b){const db=await idb();return new Promise((res,rej)=>{const tx=db.transaction('clips','readwrite');tx.objectStore('clips').put(b,k);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}
 async function idbClear(){const db=await idb();return new Promise((res,rej)=>{const tx=db.transaction('clips','readwrite');tx.objectStore('clips').clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}
@@ -417,6 +438,7 @@ function sayHint(big){
 function sayLumi(x){
   try{if(hasTTS)speechSynthesis.cancel()}catch(e){}
   const clip=lumiPlay(x,true);
+  dbg('sayLumi clip='+clip+' '+String(x).slice(0,26));
   if(!clip)ttsSpeak(x);
   return clip; // true when a clip is playing (Leo's next round waits for it)
 }

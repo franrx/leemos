@@ -1545,6 +1545,19 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('Lumi (Leo): with the sounds button off he stays quiet', off.played === 0 && off.y.errors.length === 0, String(off.played));
   }
 
+  // ?debug=1 (kept in localStorage) shows what the app plays and what the browser refuses, for devices with no console (the iPad)
+  {
+    const MA3 = { ok: 3, fail: 0 }, seen1 = Object.fromEntries(readJSON('src/data/sounds.es.json').groups[0].letters.map((l) => ['snd:' + l.l, MA3]));
+    const plain = await bootLeo({ manifest: LEO_CLIPS });
+    check('debug: off by default, nothing is added to the page', !plain.$('dbg') && plain.errors.length === 0);
+    const y = await boot({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', stats: seen1 }, 'leemos-debug': '1' }, manifest: LEO_CLIPS });
+    y.w.__audioMode = 'blocked'; await until(() => y.$('prePlay'));
+    check('debug: with the flag the panel shows the sound setting, the language and the name', !!y.$('dbg') && /sound=true/.test(y.$('dbg').textContent) && /lang=es/.test(y.$('dbg').textContent) && /name=Leo/.test(y.$('dbg').textContent), (y.$('dbg') || {}).textContent);
+    y.$('prePlay').click(); await sleep(20);
+    check('debug: a play the browser refuses is listed with its error name and the clip', /REJECT NotAllowedError/.test(y.$('dbg').textContent) && /x\.mp3/.test(y.$('dbg').textContent), y.$('dbg').textContent);
+    check('debug: the page is still usable and raised no errors', y.errors.length === 0, y.errors.join(' | '));
+  }
+
   // Lumi in Leo's screen: a tap on him or the bubble says the sentence on screen (a clip only, never the robot voice), but never over the letter sound
   {
     const G1 = 'escucha el sonido y toca su letra.';
