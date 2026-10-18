@@ -37,7 +37,7 @@ export function stkOf(d) {
 const stkSum = (o) => Object.values(o).reduce((s, n) => s + n, 0);
 // ---------- session in progress and preferences (spec: 2026-10-17-session-prefs-sync-design.md) ----------
 const PREF_OK = {
-  mode: (v) => v === 'syl' || v === 'word',
+  mode: (v) => v === 'syl' || v === 'word' || v === 'find',
   world: (v) => v === 'auto' || (Number.isInteger(v) && v >= 0 && v <= 99),
   sessionLen: (v) => v === 5 || v === 10 || v === 15 || v === 20,
   upper: (v) => typeof v === 'boolean',
