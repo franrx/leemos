@@ -6,12 +6,19 @@ export const CODAS = ['s', 'r', 'l'];
 export const MIN_SYL = 6, SCREENS = 6;
 const V = 'aeiouáéíóúàèòïü';
 const CLOSED = new RegExp(`^(qu|gu|[^${V}]+)([${V}])([srl])$`); // one vowel: a diphthong (deus) is not a CVC syllable; qu/gu are one onset
+const NUCLEUS = new RegExp(`^(qu|gu|[^${V}]*)([${V}]+)(.*)$`); // the u of qu/gu belongs to the onset
 const ENDS_IN_VOWEL = new RegExp(`[${V}]$`);
 
 // "pas" -> {onset: 'p', vowel: 'a', coda: 's', base: 'pa'}; anything else (open, no onset, another coda) -> null.
 export function splitClosed(part) {
   const m = CLOSED.exec(String(part || ''));
   return m ? { onset: m[1], vowel: m[2], coda: m[3], base: m[1] + m[2] } : null;
+}
+
+// "pas" -> {pre: 'p', v: 'a', post: 's'}: the vowel run of a syllable, which the screen paints in its own colour. No vowel: all of it is pre.
+export function nucleus(text) {
+  const str = String(text || ''), m = NUCLEUS.exec(str);
+  return m ? { pre: m[1], v: m[2], post: m[3] } : { pre: str, v: '', post: '' };
 }
 
 // A word for a word screen: 2 syllables, exactly one of them closed, and that one is onset + vowel + s/r/l.
@@ -104,7 +111,16 @@ export function createClose(ctx) {
   ['hint', 'mascot'].forEach((id) => $(id).addEventListener('click', tapped));
   const bank = () => ((data() || {}).syl) || [];
   const canPlay = () => openSyllables(bank(), pathPos()).length >= MIN_SYL;
+  const buzz = () => { try { doc.defaultView.navigator.vibrate?.(15); } catch { /* no haptics here (iOS, desktop): nothing to do */ } };
   const el = (tag, cls, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  // The same text as before, with the vowel in its own span (the accessible name and textContent do not change).
+  const fill = (node, text) => {
+    const n = nucleus(text); node.textContent = '';
+    if (n.pre) node.append(doc.createTextNode(n.pre));
+    if (n.v) node.append(el('span', 'v', n.v));
+    if (n.post) node.append(doc.createTextNode(n.post));
+    return node;
+  };
 
   function leave() { gen++; disarm(); rescueFn = null; plan = null; room.hidden = true; room.innerHTML = ''; html.classList.remove('close'); }
 
@@ -122,14 +138,14 @@ export function createClose(ctx) {
   // One 2+1 unit: the CV base, then the coda (a glowing tile to dock, or a "?" card to turn over). onDone runs once, after the stretched sound starts.
   function unit(parent, u, onDone) {
     const wrap = el('div', 'close-unit'), row = el('div', 'close-syl'), arc = el('div', 'close-arc');
-    const base = el('button', 'close-tile base', u.base); base.onclick = () => { if (!done) say(u.base); }; // once the syllable is closed its stretched sound plays: the base must not cut it
+    const base = fill(el('button', 'close-tile base'), u.base); base.onclick = () => { if (!done) say(u.base); }; // once the syllable is closed its stretched sound plays: the base must not cut it
     const coda = u.peek ? el('button', 'close-card', '?') : el('button', 'close-coda glow', '+' + u.coda);
     coda.setAttribute('aria-label', u.peek ? t('closeCover') : t('closeAdd', { c: u.coda }));
     let done = false;
     const finish = () => {
       if (done) return; done = true;
       coda.classList.remove('glow', 'rescue'); coda.classList.add('docked'); coda.textContent = u.coda; coda.setAttribute('aria-label', u.coda);
-      arc.classList.add('wide'); sfx.ok(); lumiPlay('~' + u.text, false); // only a clip: without one it is silent
+      arc.classList.add('wide'); buzz(); sfx.ok(); lumiPlay('~' + u.text, false); // only a clip: without one it is silent
       onDone();
     };
     coda.onclick = finish;
@@ -140,7 +156,7 @@ export function createClose(ctx) {
   // An open syllable has nothing to close: a tile she reads and taps to dock it.
   function openUnit(parent, u, onDone) {
     const wrap = el('div', 'close-unit'), row = el('div', 'close-syl'), arc = el('div', 'close-arc wide');
-    const tile = el('button', 'close-tile base', u.text);
+    const tile = fill(el('button', 'close-tile base'), u.text);
     let done = false;
     const finish = () => { if (done) return; done = true; say(u.text); onDone(); };
     tile.onclick = finish;
@@ -157,8 +173,8 @@ export function createClose(ctx) {
     let i = 0, joined = false, ctl = null, wordRescued = false; // the rescue models ONE syllable of a word; the rest is hers
     const dock = (u) => {
       const chip = el('button', 'close-chip'); chip.setAttribute('aria-label', t('closeAnchor') + ': ' + u.text);
-      if (u.closed) chip.append(el('span', 'chip-base', u.base), el('span', 'chip-coda', u.coda)); // a built closed syllable stays in two parts, never one block of three letters
-      else chip.textContent = u.text;
+      if (u.closed) chip.append(fill(el('span', 'chip-base'), u.base), el('span', 'chip-coda', u.coda)); // a built closed syllable stays in two parts, never one block of three letters
+      else fill(chip, u.text);
       chip.onclick = () => (u.closed ? lumiPlay('~' + u.text, false) : say(u.text));
       anchors.appendChild(chip);
       i++; step();
@@ -168,7 +184,7 @@ export function createClose(ctx) {
       cur.innerHTML = ''; rescued = false;
       if (i >= units.length) {
         const j = el('button', 'btn primary', t('join')); j.id = 'closeJoin';
-        j.onclick = () => { if (joined) return; joined = true; sfx.join(); say(w.text); pic.textContent = w.emoji || ''; pic.hidden = !w.emoji; j.hidden = true; complete(); };
+        j.onclick = () => { if (joined) return; joined = true; sfx.join(); say(w.text); pic.textContent = w.emoji || ''; pic.hidden = !w.emoji; pic.classList.add('pop'); anchors.classList.add('joined'); j.hidden = true; complete(); };
         cur.appendChild(j); j.focus();
         rescueFn = () => { j.classList.add('rescue'); };
         arm();

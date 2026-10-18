@@ -5,10 +5,12 @@
   --bg:#FFF3FA; --panel:#FFFFFF; --ink:#2A1A5E; --muted:#7A5FA6; --line:#FFD1EC;
   --edge:rgba(42,26,94,.28); --ok:#00B368; --retry:#FF5A36;
   --c0:#00C2B8; --c1:#FFC53D; --c2:#8A3FFC; --c3:#FF4D6D; --c4:#2F9BFF;
+  --vowel:#C2255C; /* 5.7:1 on the panel; the dark one is 7.4:1 (3:1 on the rescue pulse: large bold text) */
   --t0:#fff; --t1:#2A1A5E; --t2:#fff; --t3:#fff; --t4:#fff;
 }
 :root[data-theme="dark"]{
   --bg:#15122B; --panel:#211D42; --ink:#F3F1FF; --muted:#A9A5CC; --line:#372F66;
+  --vowel:#FF8FB3;
   --edge:rgba(0,0,0,.45); --ok:#3DDC97; --retry:#FF9B62;
 }
 html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
@@ -273,13 +275,18 @@ html.close .session,html.close #goal,html.close #tiles,html.close #pic,html.clos
 .close-anchors{display:flex;gap:8px;min-height:48px}
 .close-current{display:flex;flex-direction:column;align-items:center;gap:10px}
 .close-pic{font-size:72px;line-height:1}
+.close-pic.pop{animation:closePop .45s ease-out}
+.close-anchors{transition:opacity .35s ease}.close-anchors.joined{opacity:.55}
+.close-tile,.close-coda,.close-card,.close-chip{letter-spacing:.15em;text-indent:.15em} /* the indent balances the gap the spacing leaves after the last letter */
+.close-tile .v,.close-chip .v{color:var(--vowel)}
 .close-tile:focus-visible,.close-coda:focus-visible,.close-card:focus-visible,.close-chip:focus-visible{outline:3px solid var(--c1);outline-offset:3px}
 .close-room.upper .close-tile,.close-room.upper .close-coda,.close-room.upper .close-card,.close-room.upper .close-chip{text-transform:uppercase}
 .close-done{font-size:1.3rem;font-weight:700;text-align:center}
+@keyframes closePop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
 @keyframes closeGlow{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c1) 0%,transparent)}50%{box-shadow:0 0 0 8px color-mix(in srgb,var(--c1) 55%,transparent)}}
 @media (prefers-reduced-motion: reduce){
   .find-tile.wobble{animation:none}
-  .close-coda.glow,.close-card,.close-coda.rescue,.close-card.rescue,.close-tile.rescue,#closeJoin.rescue{animation:none}.close-arc{transition:none}
+  .close-coda.glow,.close-card,.close-coda.rescue,.close-card.rescue,.close-tile.rescue,#closeJoin.rescue{animation:none}.close-arc{transition:none}.close-pic.pop{animation:none}.close-anchors{transition:none}
   .newletter,.newletter::after,.sticker.fresh{animation:none}
   .newletter::after{opacity:0}
   .path-row button,.mode{transition:none}

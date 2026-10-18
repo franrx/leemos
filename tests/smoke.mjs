@@ -1904,11 +1904,14 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   const st0 = cprogress(x), tts0 = (x.w.__tts || []).length;
   x.d.querySelector('.close-tile.base').click();
   check('close: tapping the base plays the base sound', (x.w.__tts || []).length > tts0 || played(x, 'c' + b0) > 0);
+  let buzz = 0; x.w.navigator.vibrate = (ms) => { buzz++; return true; };
+  check('close: the base tile marks its vowel (same text, vowel in its own span)', x.d.querySelector('.close-tile.base .v')?.textContent === b0[1] && base(x) === b0);
   action(x).click();
+  check('close: docking the coda gives one short haptic tick', buzz === 1);
   const syl0 = b0 + 'l';
   check('close: tapping the coda docks it, grows the arc and plays the STRETCHED clip (~syllable)', x.d.querySelector('.close-coda.docked')?.textContent === 'l' && x.d.querySelector('.close-arc').classList.contains('wide') && played(x, 'c~' + syl0) === 1, `plays=${played(x, 'c~' + syl0)} ${syl0}`);
   action(x)?.click(); action(x)?.click();
-  check('close: tapping the docked coda again does nothing (the stretched clip plays once)', played(x, 'c~' + syl0) === 1);
+  check('close: tapping the docked coda again does nothing (the stretched clip plays once)', played(x, 'c~' + syl0) === 1 && buzz === 1);
   await sleep(20);
   check('close: the next screen starts by itself with one dot filled', x.d.querySelectorAll('.close-dots i.on').length === 1 && !x.d.querySelector('.close-coda.docked'));
   check('close: nothing is recorded (stats, total, level, session) and there is no sticker yet', cprogress(x) === st0 && (csaved(x).stickers | 0) === 0);
@@ -1916,6 +1919,7 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   await finishScreen(x); await finishScreen(x);
   const card = x.d.querySelector('.close-card');
   check('close: from the 4th screen the coda is hidden behind a "?" card, and tapping it reveals the letter with the stretched clip', !!card && card.textContent === '?' && (() => { const bs = base(x); card.click(); return card.textContent === 'l' && played(x, 'c~' + bs + 'l') === 1; })());
+  check('close: revealing the peek card also ticks', buzz === 4, `buzz=${buzz}`);
   await sleep(20);
   await finishScreen(x); await finishScreen(x);
   check('close: after 6 screens a sticker is given once, the reward shows and the again button appears', csaved(x).stickers === 1 && !x.$('reward').hidden && !!x.$('closeAgain'), `stickers=${csaved(x).stickers}`);
@@ -1954,7 +1958,11 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     const picBefore = wx.d.querySelector('.close-pic');
     check('close: a word screen says its own instruction, not the one about closing a syllable', wx.$('hint').textContent === 'Lee cada sílaba y junta la palabra.');
     check('close: the picture is hidden until the word is read (the app rule)', !picBefore || picBefore.hidden || !picBefore.textContent);
-    act().click(); await sleep(20);
+    let wbuzz = 0; wx.w.navigator.vibrate = () => { wbuzz++; return true; };
+    const first = act();
+    first.click(); await sleep(20);
+    check('close: a closed syllable docks with a tick, an open one (a tile with no coda) does not', first.classList.contains('close-coda') ? wbuzz === 1 : wbuzz === 0, `buzz=${wbuzz}`);
+    check('close: the anchor chip marks the vowel of its syllable', !!wx.d.querySelector('.close-chip .v'));
     check('close: a finished syllable docks into the anchor chip', wx.d.querySelectorAll('.close-chip').length === 1);
     const chip = wx.d.querySelector('.close-chip');
     const before = wx.audioCalls.length + (wx.w.__tts || []).length;
@@ -1966,9 +1974,11 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('close: when every syllable is done a Juntar button appears (not before)', !!join && wx.d.querySelectorAll('.close-chip').length === 2);
     check('close: the closed syllable shows in the chip as its base and its coda, not one unsegmented block', wx.d.querySelectorAll('.close-chip .chip-coda').length === 1 && wx.d.querySelectorAll('.close-chip .chip-base').length === 1);
     check('close: the picture is still hidden before Juntar', !wx.d.querySelector('.close-pic') || wx.d.querySelector('.close-pic').hidden);
+    check('close: before Juntar the chips are not dimmed and the picture has no pop', !wx.d.querySelector('.close-anchors.joined') && !wx.d.querySelector('.close-pic.pop'));
     const pw0 = wx.audioCalls.length + (wx.w.__tts || []).length;
     join.click(); join.click(); // a double tap
     check('close: Juntar plays the word and only then shows the picture (a double tap counts once)', wx.d.querySelector('.close-pic') && !wx.d.querySelector('.close-pic').hidden && wx.d.querySelector('.close-pic').textContent.length > 0 && wx.audioCalls.length + (wx.w.__tts || []).length - pw0 === 1);
+    check('close: Juntar pops the picture in and dims the anchor chips', wx.d.querySelector('.close-pic').classList.contains('pop') && wx.d.querySelector('.close-anchors').classList.contains('joined'));
     await sleep(5);
     await sleep(20);
     check('close: the second word screen starts with an empty anchor row', wx.d.querySelectorAll('.close-chip').length === 0 && wx.d.querySelectorAll('.close-dots i.on').length === 5);
@@ -2067,6 +2077,7 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('close: a Leo profile with a saved Cierra mode does not get the Cierra room', !fx.d.documentElement.classList.contains('close') && croom(fx).hidden);
     // the pulse exists for every control the rescue marks, and a revealed card stops glowing
     const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
+    check('close: the tiles have wider letter spacing, the vowel has its own colour token in both themes, the pop is dropped under reduced motion', /\.close-tile,[^{]*\.close-chip\{[^}]*letter-spacing:\.15em/.test(css) && /--vowel:/.test(css) && /\[data-theme="dark"\]\{[^}]*--vowel:/.test(css) && /\.close-pic\.pop\{[^}]*animation:closePop/.test(css) && /reduce\)\{[\s\S]*\.close-pic\.pop\{animation:none/.test(css));
     check('close: the rescue pulse is styled on the card, the tile and Juntar, and a revealed card stops glowing', /\.close-card\.rescue,[^{]*\.close-tile\.rescue,[^{]*#closeJoin\.rescue\{animation:closeGlow/.test(css) && /\.close-card\.docked\{[^}]*animation:none/.test(css));
   }
 

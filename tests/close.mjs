@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CODAS, MIN_SYL, SCREENS, splitClosed, qualifies, wordsFrom, openSyllables, openWords, planSession } from '../src/close.js';
+import { CODAS, MIN_SYL, SCREENS, splitClosed, nucleus, qualifies, wordsFrom, openSyllables, openWords, planSession } from '../src/close.js';
 import { stepOf } from '../src/levelrule.js';
 import { buildClipList } from '../scripts/lib/clips.mjs';
 
@@ -84,12 +84,16 @@ for (const lang of ['es', 'ca']) {
   const rec = recordList({ lang }).filter((c) => c.kind === 'stretch');
   check(`[${lang}] record list: the stretch clips can be recorded, shown as the syllable`, rec.length === need.size && rec.every((c) => c.key === '~' + c.shown));
 }
+const nu = (s) => { const r = nucleus(s); return `${r.pre}|${r.v}|${r.post}`; };
+check('nucleus: the vowel run of a syllable, with its onset before and its coda after', nu('ma') === 'm|a|' && nu('pas') === 'p|a|s' && nu('tra') === 'tr|a|' && nu('bou') === 'b|ou|' && nu('a') === '|a|');
+check('nucleus: the u of qu/gu is part of the onset, not the nucleus', nu('qui') === 'qu|i|' && nu('gue') === 'gu|e|' && nu('quar') === 'qu|a|r' && nu('gus') === 'g|u|s');
+check('nucleus: a syllable with no vowel keeps its whole text and no nucleus', nu('ps') === 'ps||' && nu('') === '||');
 const es18 = readJSON('src/data/i18n.es.json'), ca18 = readJSON('src/data/i18n.ca.json');
 const CKEYS = ['mClose', 'closeLocked', 'closeIntro', 'closeGoal', 'closeAgain', 'closeDone', 'closeCover', 'closeAnchor', 'closeAdd', 'closeWordHint'];
 check('i18n: every closed-syllables key exists in both languages and is not empty', CKEYS.every((k) => typeof es18[k] === 'string' && es18[k] && typeof ca18[k] === 'string' && ca18[k]));
 check('i18n: the Catalan instruction and the done text use "síl·laba" with the punt volat', /síl·laba/.test(ca18.closeIntro) && /síl·labes/.test(ca18.closeDone));
 const swText = readFileSync(join(ROOT, 'sw.js'), 'utf8');
-check('service worker: close.js and its data are cached with the shell and the version was bumped', /'src\/close\.js'/.test(swText) && /'src\/data\/closed\.es\.json'/.test(swText) && /'src\/data\/closed\.ca\.json'/.test(swText) && /VERSION = 'leemos-v7'/.test(swText));
+check('service worker: close.js and its data are cached with the shell and the version was bumped', /'src\/close\.js'/.test(swText) && /'src\/data\/closed\.es\.json'/.test(swText) && /'src\/data\/closed\.ca\.json'/.test(swText) && /VERSION = 'leemos-v8'/.test(swText));
 
 console.log(failures ? `\n${failures} close test(s) FAILED` : '\nAll close tests passed');
 process.exit(failures ? 1 : 0);
