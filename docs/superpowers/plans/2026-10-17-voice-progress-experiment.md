@@ -70,3 +70,13 @@ Can recordings of Elsa reading, compared with the reference clip, tell us someth
 ## What would change the plan
 
 If positive control fails, we stop after Task 4. If Elsa produces fewer than 15 natural 🔁, we say the per-item test is underpowered and judge timing only. If the microphone or room is too noisy for the loudness detector (noise floor within 15 dB of her speech), fix the setup before collecting more.
+
+## Findings while building Tasks 1-3 (2026-10-18, before any child data)
+
+These come from synthetic signals and from macOS `say` voices, not from Elsa. They say what the tools can do, not whether the idea works.
+
+- **The pipeline works on real speech.** With the same macOS voice as reader and reference, the MFCC-DTW distance for the same syllable is about 2.1 to 2.6 and for a different syllable about 11 to 14. That is the easy, same-speaker case. Whisper runs through the CLI (`base` heard "Ma" and "Lo"; it wrote "¡P." and "Pi" for "pe"). Reported latency matched the silence added (390 ms for 400 ms).
+- **Pitch is a warning sign.** With clean synthetic vowels, changing the pitch moved the features more than changing the vowel (see the INFO line printed by `tests/labdsp.mjs`). Real voices may behave differently, but this is exactly the risk for a 6-year-old against an adult reference voice. The adult control compares Fran with the generated voice, which tests the cross-speaker case before Elsa is recorded. Do not read the same-voice numbers above as evidence for children.
+- **Fixed while testing on real clips:** generated references contain exact digital silence (the noise floor read -180 dB, so faint tails counted as speech and padding changed the distance). The noise floor now has a lower bound of -75 dB, log energies are floored 90 dB below the loudest filter, and clips are trimmed to the speech with no padding. The same audio inside different amounts of silence now gives a distance of 0.
+- **Still to do by hand:** a real-microphone check of `tools/lab.html` in a browser (the jsdom test uses a fake microphone), and the adult control (Task 4).
+
