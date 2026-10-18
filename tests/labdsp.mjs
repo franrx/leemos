@@ -1,5 +1,5 @@
 // Tests for the pure signal helpers of the voice-progress experiment (scripts/lib/labdsp.mjs), on synthetic signals only.
-import { frames, vad, mfcc, dtw, auc, bootstrapCI, spearman, pearson, editDistance, normText } from '../scripts/lib/labdsp.mjs';
+import { frames, vad, mfcc, dtw, auc, bootstrapCI, clusterBootstrapCI, centerBy, spearman, pearson, editDistance, normText } from '../scripts/lib/labdsp.mjs';
 
 let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
@@ -39,6 +39,10 @@ v = vad(cat(noise(300, 0.001), tone(300, 30, 0.3), noise(500, 0.001)), RATE);
 check('vad: a 30 ms click is not speech', v.onsetMs === null);
 v = vad(cat(noise(300, 0.001), tone(300, 200, 0.3), noise(300, 0.001), tone(500, 200, 0.3), noise(300, 0.001)), RATE);
 check('vad: with two bursts the onset is the first and the offset the end of the last', Math.abs(v.onsetMs - 300) <= 20 && Math.abs(v.offsetMs - 1000) <= 30, JSON.stringify(v));
+v = vad(cat(noise(300, 0.001), tone(300, 200, 0.3), noise(1500, 0.001), tone(500, 200, 0.3), noise(300, 0.001)), RATE);
+check('vad: a second burst more than 0.7 s later (praise or a correction after the reading) is not part of the speech', Math.abs(v.onsetMs - 300) <= 20 && Math.abs(v.offsetMs - 500) <= 30, JSON.stringify(v));
+v = vad(cat(noise(300, 0.001), tone(300, 200, 0.3), noise(600, 0.001), tone(500, 200, 0.3), noise(300, 0.001)), RATE);
+check('vad: but a pause of 0.6 s inside a slow word still belongs to it', Math.abs(v.offsetMs - 1300) <= 30, JSON.stringify(v));
 v = vad(cat(noise(1000, 0.001), tone(300, 100, 0.01)), RATE);
 check('vad: a quiet voice 20 dB above the floor is still found', v.onsetMs !== null && Math.abs(v.onsetMs - 1000) <= 20);
 
@@ -67,11 +71,18 @@ check('vad: digital silence around a sound does not make faint tails count as sp
 // ---------- auc, bootstrap, correlation ----------
 check('auc: perfectly separated is 1, inverted is 0, identical scores 0.5', auc([1, 2, 3, 4], [0, 0, 1, 1]) === 1 && auc([4, 3, 2, 1], [0, 0, 1, 1]) === 0 && auc([5, 5, 5, 5], [0, 1, 0, 1]) === 0.5);
 check('auc: a mixed case is the share of correctly ordered pairs', auc([1, 3, 2, 4], [0, 0, 1, 1]) === 0.75 && Math.abs(auc([1, 2, 2, 3], [0, 0, 1, 1]) - 0.875) < 1e-12);
+check('auc: infinite scores rank at the ends and do not break the ordering', auc([-Infinity, -Infinity, 1, 2], [0, 0, 1, 1]) === 1 && auc([-Infinity, 1, -Infinity, 2], [1, 0, 0, 1]) === 0.625 && auc([-Infinity, -Infinity, -Infinity, 5], [0, 1, 0, 1]) === 0.75);
 check('auc: one class missing is not a number', Number.isNaN(auc([1, 2], [1, 1])) && Number.isNaN(auc([], [])));
 const data = Array.from({ length: 100 }, (_, i) => i);
 const mean = (xs) => xs.reduce((s, x) => s + x, 0) / xs.length;
 const ci = bootstrapCI(mean, data, 1000);
 check('bootstrapCI: brackets the true mean with a sensible width and is repeatable', ci[0] < 49.5 && ci[1] > 49.5 && ci[1] - ci[0] > 3 && ci[1] - ci[0] < 14 && JSON.stringify(ci) === JSON.stringify(bootstrapCI(mean, data, 1000)), JSON.stringify(ci));
+// readings of the same item are not independent: the interval must come from resampling items
+const clustered = Array.from({ length: 60 }, (_, i) => ({ k: Math.floor(i / 6), v: Math.floor(i / 6) }));
+const wNaive = (() => { const c = bootstrapCI((d) => mean(d.map((x) => x.v)), clustered, 1000); return c[1] - c[0]; })();
+const cc = clusterBootstrapCI((d) => mean(d.map((x) => x.v)), clustered, (x) => x.k, 1000);
+check('clusterBootstrapCI: with 10 items of 6 identical readings the interval is much wider than treating all 60 as independent, and repeatable', cc[1] - cc[0] > 1.8 * wNaive && cc[0] < 4.5 && cc[1] > 4.5 && JSON.stringify(cc) === JSON.stringify(clusterBootstrapCI((d) => mean(d.map((x) => x.v)), clustered, (x) => x.k, 1000)), `${(cc[1] - cc[0]).toFixed(2)} vs ${wNaive.toFixed(2)}`);
+check('centerBy: subtracts each item\'s own mean, leaves a lone reading at 0 and passes infinities through', JSON.stringify(centerBy([10, 12, 30, 34], ['a', 'a', 'b', 'b'])) === JSON.stringify([-1, 1, -2, 2]) && JSON.stringify(centerBy([5], ['a'])) === '[0]' && centerBy([-Infinity, 5, 7], ['a', 'a', 'a']).join() === '-Infinity,-1,1');
 const perfect = Array.from({ length: 60 }, (_, i) => ({ s: i, l: i >= 30 ? 1 : 0 }));
 const ciA = bootstrapCI((d) => auc(d.map((x) => x.s), d.map((x) => x.l)), perfect, 500);
 check('bootstrapCI: a perfect AUC has an interval at 1', ciA[0] === 1 && ciA[1] === 1);

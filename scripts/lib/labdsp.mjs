@@ -16,8 +16,9 @@ export function frames(pcm, rate, ms = 10) {
 
 // Voice activity by loudness. The noise floor is the 5th-percentile frame level, so it needs some silence before or after the voice
 // (the recording page starts the microphone before the child answers, so there is). Speech = at least `minMs` of frames more than
-// `marginDb` above the floor. Returns nulls when nothing qualifies.
-export function vad(pcm, rate, { frameMs = 10, marginDb = 8, minMs = 60 } = {}) {
+// `marginDb` above the floor; bursts separated by no more than `maxGapMs` belong together, and anything later is not the reading
+// (an adult's "muy bien" after it). Returns nulls when nothing qualifies.
+export function vad(pcm, rate, { frameMs = 10, marginDb = 8, minMs = 60, maxGapMs = 700 } = {}) {
   const e = frames(pcm, rate, frameMs).map(dbOf);
   if (!e.length) return { onsetMs: null, offsetMs: null, peakDb: null, noiseDb: null, speechDb: null };
   const sorted = [...e].sort((a, b) => a - b);
@@ -34,7 +35,9 @@ export function vad(pcm, rate, { frameMs = 10, marginDb = 8, minMs = 60 } = {}) 
   }
   const peakDb = Math.max(...e);
   if (!runs.length) return { onsetMs: null, offsetMs: null, peakDb, noiseDb, speechDb: null };
-  const first = runs[0][0], last = runs[runs.length - 1][1];
+  const first = runs[0][0];
+  let last = runs[0][1];
+  for (const [a, b] of runs.slice(1)) { if ((a - last) * frameMs > maxGapMs) break; last = b; }
   const loud = e.slice(first, last).filter((x) => x > thr);
   return { onsetMs: first * frameMs, offsetMs: last * frameMs, peakDb, noiseDb, speechDb: loud.reduce((s, x) => s + x, 0) / loud.length };
 }
@@ -128,7 +131,7 @@ export function auc(scores, labels) {
   const n = scores.length;
   const pos = labels.filter(Boolean).length, neg = n - pos;
   if (!pos || !neg) return NaN;
-  const order = scores.map((s, i) => i).sort((x, y) => scores[x] - scores[y]);
+  const order = scores.map((s, i) => i).sort((x, y) => (scores[x] < scores[y] ? -1 : scores[x] > scores[y] ? 1 : 0)); // not x - y: -Infinity - -Infinity is NaN
   const rank = new Float64Array(n);
   for (let i = 0; i < n;) {
     let j = i;
@@ -156,6 +159,32 @@ export function bootstrapCI(fn, data, B = 2000, alpha = 0.05) {
   return [vals[Math.floor(alpha / 2 * vals.length)], vals[Math.min(vals.length - 1, Math.ceil((1 - alpha / 2) * vals.length) - 1)]];
 }
 
+// The same, but whole items are resampled (with all their readings): readings of one item are not independent, so resampling
+// single readings gives intervals that are too narrow.
+export function clusterBootstrapCI(fn, data, keyOf, B = 2000, alpha = 0.05) {
+  const groups = new Map();
+  for (const d of data) { const k = keyOf(d); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(d); }
+  const clusters = [...groups.values()];
+  const rng = mulberry32(12345), vals = [];
+  for (let b = 0; b < B; b++) {
+    const sample = [];
+    for (let i = 0; i < clusters.length; i++) sample.push(...clusters[Math.floor(rng() * clusters.length)]);
+    const v = fn(sample);
+    if (Number.isFinite(v)) vals.push(v);
+  }
+  if (!vals.length) return [NaN, NaN];
+  vals.sort((x, y) => x - y);
+  return [vals[Math.floor(alpha / 2 * vals.length)], vals[Math.min(vals.length - 1, Math.ceil((1 - alpha / 2) * vals.length) - 1)]];
+}
+
+// Removes each item's own typical value (its mean over finite readings) so that "this item is long / hard / has a different reference
+// clip" cannot pass for a signal. An item with a single finite reading becomes 0; infinities are left alone.
+export function centerBy(values, keys) {
+  const sum = new Map(), cnt = new Map();
+  values.forEach((v, i) => { if (Number.isFinite(v)) { sum.set(keys[i], (sum.get(keys[i]) || 0) + v); cnt.set(keys[i], (cnt.get(keys[i]) || 0) + 1); } });
+  return values.map((v, i) => (!Number.isFinite(v) ? v : cnt.get(keys[i]) < 2 ? 0 : v - sum.get(keys[i]) / cnt.get(keys[i])));
+}
+
 export function pearson(x, y) {
   const n = x.length;
   if (n < 2) return NaN;
@@ -165,7 +194,7 @@ export function pearson(x, y) {
   return sxx && syy ? sxy / Math.sqrt(sxx * syy) : NaN;
 }
 const ranks = (v) => {
-  const order = v.map((x, i) => i).sort((a, b) => v[a] - v[b]), r = new Array(v.length);
+  const order = v.map((x, i) => i).sort((a, b) => (v[a] < v[b] ? -1 : v[a] > v[b] ? 1 : 0)), r = new Array(v.length);
   for (let i = 0; i < v.length;) { let j = i; while (j + 1 < v.length && v[order[j + 1]] === v[order[i]]) j++; for (let k = i; k <= j; k++) r[order[k]] = (i + j) / 2 + 1; i = j + 1; }
   return r;
 };

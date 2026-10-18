@@ -16,8 +16,8 @@ Can recordings of Elsa reading, compared with the reference clip, tell us someth
 
 ## Decision rule (written before looking at any data)
 
-- **Per-item correctness** (could replace or back up the parent's tap): a signal qualifies only if AUC ≥ **0.85** with the lower end of its 95% bootstrap interval ≥ **0.75**, on **at least 15 natural 🔁 and 40 ✅ readings** of Elsa. If none does, we do **not** build automatic scoring.
-- **Progress trend** (the realistic win): timing qualifies if, for items read more than once, latency test-retest correlation is ≥ **0.6**, and mean latency is clearly lower for mastered items than for items she still fails (difference larger than its bootstrap interval). If yes, the next step is a small spec for storing two numbers per exercise (latency, duration), never audio.
+- **Per-item correctness** (could replace or back up the parent's tap): a signal qualifies only if AUC ≥ **0.85** with the lower end of its 95% bootstrap interval ≥ **0.75**, on **at least 15 natural 🔁 and 40 ✅ readings** of Elsa. If none does, we do **not** build automatic scoring. AUC is **item-adjusted** (each reading is compared only with readings of the same item, so item difficulty and the reference clip's scale cannot pass for a signal) and its interval resamples **whole items**. Nobody speaking counts as the worst answer; a retried reading has no timing.
+- **Progress trend** (the realistic win): timing qualifies if, for items read in two different sessions, the latency test-retest correlation (Spearman, first readings only) is ≥ **0.6**, and mean latency is clearly lower for mastered items than for items she still fails (difference larger than its bootstrap interval). If yes, the next step is a small spec for storing two numbers per exercise (latency, duration), never audio.
 - **Positive control first:** on **adult** readings (correct vs deliberately wrong) at least one similarity signal must reach AUC ≥ **0.90**. If it does not, the method itself is broken, and the Elsa sessions are not worth doing.
 - Possible outcomes: *drop it*, *timing only*, *timing + something else*. Say which in the report, with the numbers.
 
@@ -29,7 +29,7 @@ Can recordings of Elsa reading, compared with the reference clip, tell us someth
 
 ## Protocol
 
-1. **Adult control (Fran, about 10 min):** 30 syllables read correctly and 30 read wrong on purpose, same lists, Spanish. Run the analysis; check the positive control.
+1. **Adult control (Fran, about 10 min):** 30 syllables read correctly and 30 read wrong on purpose, same lists, Spanish. Run the analysis; check the positive control. **Whoever taps stays silent until pressing Listo** (praise or a correction before the tap would end up in the clip and differ by verdict).
 2. **Elsa, two sessions of about 5 min on different days:** about 40 readings each, mixed levels, **including items above her level** so natural errors appear. The parent taps ✅ / 🔁 as usual. At the end, a short "say it wrong on purpose" game gives about 20 labelled negatives. Repeat a few items across both sessions for the test-retest check.
 3. Analyze, write the report, decide.
 
@@ -79,4 +79,16 @@ These come from synthetic signals and from macOS `say` voices, not from Elsa. Th
 - **Pitch is a warning sign.** With clean synthetic vowels, changing the pitch moved the features more than changing the vowel (see the INFO line printed by `tests/labdsp.mjs`). Real voices may behave differently, but this is exactly the risk for a 6-year-old against an adult reference voice. The adult control compares Fran with the generated voice, which tests the cross-speaker case before Elsa is recorded. Do not read the same-voice numbers above as evidence for children.
 - **Fixed while testing on real clips:** generated references contain exact digital silence (the noise floor read -180 dB, so faint tails counted as speech and padding changed the distance). The noise floor now has a lower bound of -75 dB, log energies are floored 90 dB below the loudest filter, and clips are trimmed to the speech with no padding. The same audio inside different amounts of silence now gives a distance of 0.
 - **Still to do by hand:** a real-microphone check of `tools/lab.html` in a browser (the jsdom test uses a fake microphone), and the adult control (Task 4).
+
+## Review fixes before any recording (2026-10-18)
+
+A fresh review of Tasks 1-3 found, and these changes fix:
+
+- **Her recordings could be downloaded.** The static dev server served `lab/` (a child's voice and transcripts), which with `HOST=0.0.0.0` meant anyone on the network. It now answers 404 for `lab/`, with a test.
+- **Item difficulty could pass for a signal.** Long words fail more and last longer, so duration looked predictive. The decision lines now use the item-adjusted AUC and an interval that resamples whole items.
+- **The adult's voice could end up in the clip.** The page tells the adult to stay silent until Listo, and the speech detector ignores any burst more than 0.7 s after the reading.
+- **Silent failures vanished.** A reading nobody spoke in now counts as the worst answer; the report counts them per verdict.
+- **The page's microphone processing** (gain control, noise suppression, echo cancellation) is now off, because it changes the timing and levels being measured. The page also records tries, the recorder's start lag, uses a session id with seconds, and releases the microphone at the end or on wipe.
+- **The control picked the "best" signal before checking it had data.** It now considers only signals with at least 20 readings of each kind.
+- **Deliberate differences from the first draft of this plan:** the noise floor is the 5th percentile (not the 10th, and never below -75 dB), MFCCs remove the mean only (variance scaling magnified noise), DTW is divided by n + m, and the tolerant Whisper signal equals the exact one for syllables of up to three letters.
 

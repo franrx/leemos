@@ -15,10 +15,11 @@
   const total = Math.max(1, Math.min(200, parseInt(qs.get('n'), 10) || 40));
   const seed = parseInt(qs.get('seed'), 10) || 1;
   const upper = qs.get('upper') !== '0'; // the app shows capitals by default
-  const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 12);
+  const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14); // down to the second: a reload must not reuse the folder of the previous run
   const session = `${who}-${kind}-${stamp}`; // matches /^[a-z0-9-]{3,40}$/ on the server
 
   let items = [], idx = 0, stream = null, recorder = null, chunks = [], recStart = 0, shownAtIso = '', blobMs = 0;
+  let tries = 0, triesIdx = -1, startLagMs = null, closed = false;
   let peak = 1, ticks = 0, meterOn = false, raf = 0, audioCtx = null, source = null;
   const status = (t) => { $('status').textContent = t || ''; };
   const show = (ids) => { for (const id of ['start', 'done', 'retry', 'ok', 'fail', 'wipe']) $(id).hidden = !ids.includes(id); };
@@ -79,17 +80,21 @@
     const it = items[idx];
     $('big').textContent = upper ? it.text.toUpperCase() : it.text;
     $('big').className = it.k === 'w' ? 'big word' : 'big';
-    $('ctx').textContent = kind === 'wrong' ? 'Di OTRA sílaba, mal a propósito' : '';
+    $('ctx').textContent = kind === 'wrong' ? 'Di OTRA cosa, mal a propósito (otra sílaba u otra palabra)' : '';
     $('info').textContent = `${who} · ${kind} · nivel ${level} · ${idx + 1} de ${items.length}`;
     const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
     recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
     chunks = [];
     recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    if (triesIdx !== idx) { triesIdx = idx; tries = 0; }
+    tries++; // a retry means she has already seen (and probably read) the item: its timing is not a first reaction
+    startLagMs = null;
     shownAtIso = new Date().toISOString(); recStart = Date.now();
+    recorder.onstart = () => { startLagMs = Date.now() - recStart; }; // how long the recorder took to really start
     recorder.start(); // the recording starts at the same instant the item is shown
     startMeter();
     $('meter').hidden = false;
-    status('Grabando… pulsa «Listo» cuando termine.');
+    status('Grabando… no hables tú hasta pulsar «Listo» (tu voz quedaría en la grabación). Pulsa «Listo» cuando ella termine.');
     show(['done', 'wipe']);
   }
 
@@ -108,7 +113,13 @@
   }
   const query = () => `session=${encodeURIComponent(session)}&n=${idx}`;
 
+  function releaseMic() {
+    try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* already stopped */ }
+    stream = null;
+  }
+
   async function onDone() {
+    if (closed) return;
     show(['wipe']);
     const blob = await stopRecording();
     blobMs = Date.now() - recStart;
@@ -122,10 +133,11 @@
   }
 
   async function label(verdict) {
+    if (closed) return;
     const it = items[idx];
     show(['wipe']);
     try {
-      await post(`/__lab-label?${query()}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: it.key, text: it.text, lang, who, kind, verdict, level, seed, rep: it.rep, shownAtIso, recMs: blobMs }) });
+      await post(`/__lab-label?${query()}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: it.key, text: it.text, lang, who, kind, verdict, level, seed, rep: it.rep, shownAtIso, recMs: blobMs, tries, startLagMs }) });
     } catch (e) {
       status(`No se pudo guardar la etiqueta: ${e.message}. Vuelve a pulsar.`);
       show(kind === 'wrong' ? ['retry', 'wipe'] : ['ok', 'fail', 'wipe']);
@@ -133,11 +145,11 @@
     }
     idx++;
     if (idx < items.length) startRecording();
-    else { $('big').textContent = '✓'; $('big').className = 'big'; $('ctx').textContent = ''; $('info').textContent = `${who} · ${kind} · terminado: ${items.length} lecturas (sesión ${session})`; status('Terminado. Los archivos están en lab/' + session + '/'); show(['wipe']); }
+    else { releaseMic(); $('big').textContent = '✓'; $('big').className = 'big'; $('ctx').textContent = ''; $('info').textContent = `${who} · ${kind} · terminado: ${items.length} lecturas (sesión ${session})`; status('Terminado. Los archivos están en lab/' + session + '/'); show(['wipe']); }
   }
 
   async function begin() {
-    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { autoGainControl: false, noiseSuppression: false, echoCancellation: false } }); } // the browser's processing would change the timing and levels being measured
     catch (e) { status('No pude usar el micrófono. Revisa el permiso del navegador (el candado junto a la dirección).'); return; }
     try {
       const r = await fetch(`/src/data/levels.${lang}.json`);
@@ -150,7 +162,10 @@
 
   async function wipe() {
     if (!window.confirm || !window.confirm('¿Borrar todas las grabaciones de esta sesión?')) return;
-    try { await post(`/__lab?session=${encodeURIComponent(session)}`, { method: 'DELETE' }); status('Sesión borrada.'); }
+    closed = true; // nothing more is recorded or uploaded after wiping
+    try { if (recorder && recorder.state === 'recording') recorder.stop(); } catch (e) { /* not recording */ }
+    stopMeter(); $('meter').hidden = true; releaseMic(); show(['wipe']);
+    try { await post(`/__lab?session=${encodeURIComponent(session)}`, { method: 'DELETE' }); status('Sesión borrada. Recarga la página para empezar otra.'); }
     catch (e) { status(`No se pudo borrar: ${e.message}`); }
   }
 
