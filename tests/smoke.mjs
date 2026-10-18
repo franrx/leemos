@@ -1738,6 +1738,8 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
       check('game zoom: a change of content in main refits the zoom by itself', Math.abs(gz(g3) - 834 / air(650 + pad)) < 0.01 && g3.errors.length === 0, `${gz(g3)} ${g3.errors.join('|')}`);
     }
     const cssG = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
+    check('close letters: a long base (3+ letters + the coda) gets smaller tiles so it fits a phone', /\.close-unit\.long \.close-letter\{[^}]*font-size/.test(cssG) && /\.close-unit\.long \.close-coda/.test(cssG) && /classList\.toggle\('long'/.test(readFileSync(join(ROOT, 'src/close.js'), 'utf8')));
+        check('close letters: the upper-case switch also covers the letter tiles', /\.close-room\.upper \.close-letter/.test(cssG));
     check('game zoom: the page is not capped at 660px in game mode and takes the zoom', /html\.game main\{[^}]*max-width:none[^}]*zoom:var\(--gz/.test(cssG));
   }
   // the exit button has a name for screen readers, in both languages
@@ -2093,25 +2095,26 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('close: a syllable screen shows the CV base and a glowing coda tile (+l at step 3), never three letters at once', /^[a-z]{2}$/.test(b0) && a0.classList.contains('close-coda') && a0.textContent === '+l' && !!x.d.querySelector('.close-arc') && !x.d.querySelector('.close-arc').classList.contains('wide'));
   check('close: the first screen of the session says the instruction text and shows 6 dots', x.$('hint').textContent === 'Lee la sílaba en voz alta y toca para cerrarla.' && x.d.querySelectorAll('.close-dots i').length === 6);
   const st0 = cprogress(x), tts0 = (x.w.__tts || []).length;
-  x.d.querySelector('.close-tile.base').click();
-  check('close: tapping the base plays the base sound', (x.w.__tts || []).length > tts0 || played(x, 'c' + b0) > 0);
+  x.d.querySelector('.close-arc').click();
+  check('close: tapping the arc plays the base sound', (x.w.__tts || []).length > tts0 || played(x, 'c' + b0) > 0);
   let buzz = 0; x.w.navigator.vibrate = (ms) => { buzz++; return true; };
   check('close: the base tile marks its vowel (same text, vowel in its own span)', x.d.querySelector('.close-tile.base .v')?.textContent === b0[1] && base(x) === b0);
   action(x).click();
   check('close: docking the coda gives one short haptic tick', buzz === 1);
   const syl0 = b0 + 'l';
-  check('close: tapping the coda docks it, grows the arc and plays the STRETCHED clip (~syllable)', x.d.querySelector('.close-coda.docked')?.textContent === 'l' && x.d.querySelector('.close-arc').classList.contains('wide') && played(x, 'c~' + syl0) === 1, `plays=${played(x, 'c~' + syl0)} ${syl0}`);
-  action(x)?.click(); action(x)?.click();
-  check('close: tapping the docked coda again does nothing (the stretched clip plays once)', played(x, 'c~' + syl0) === 1 && buzz === 1);
-  await sleep(20);
+  check('close: tapping the coda docks it and grows the arc at once', x.d.querySelector('.close-coda.docked')?.textContent === 'l' && x.d.querySelector('.close-arc').classList.contains('wide'));
+  action(x)?.click(); action(x)?.click(); // the docked coda ignores taps
+  await sleep(20); // the coda says its own sound first, then the stretched syllable
+  check('close: and plays the STRETCHED clip (~syllable) once, whatever the extra taps', played(x, 'c~' + syl0) === 1 && buzz === 1, `plays=${played(x, 'c~' + syl0)} ${syl0}`);
   check('close: the next screen starts by itself with one dot filled', x.d.querySelectorAll('.close-dots i.on').length === 1 && !x.d.querySelector('.close-coda.docked'));
   check('close: nothing is recorded (stats, total, level, session) and there is no sticker yet', cprogress(x) === st0 && (csaved(x).stickers | 0) === 0);
   // the second half of the syllable screens peeks
   await finishScreen(x); await finishScreen(x);
   const card = x.d.querySelector('.close-card');
-  check('close: from the 4th screen the coda is hidden behind a "?" card, and tapping it reveals the letter with the stretched clip', !!card && card.textContent === '?' && (() => { const bs = base(x); card.click(); return card.textContent === 'l' && played(x, 'c~' + bs + 'l') === 1; })());
+  check('close: from the 4th screen the coda is hidden behind a "?" card, and tapping it reveals the letter with the stretched clip', !!card && card.textContent === '?' && (() => { const bs = base(x); card.click(); card.dataset.bs = bs; return card.textContent === 'l'; })());
   check('close: revealing the peek card also ticks', buzz === 4, `buzz=${buzz}`);
   await sleep(20);
+  check('close: and the stretched clip of the revealed syllable plays', played(x, 'c~' + card.dataset.bs + 'l') === 1);
   await finishScreen(x); await finishScreen(x);
   check('close: after 6 screens a sticker is given once, the reward shows and the again button appears', csaved(x).stickers === 1 && !x.$('reward').hidden && !!x.$('closeAgain'), `stickers=${csaved(x).stickers}`);
   check('close: the whole session left stats, total and the session counters untouched', cprogress(x) === st0);
@@ -2143,7 +2146,7 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   // word screens: Spanish at step 12 has 2+ qualifying words, so a session is 4 syllables + 2 words
   {
     const wx = await startC({ pathEs: 12 });
-    const act = () => wx.d.querySelector('.close-current .close-coda') || wx.d.querySelector('.close-current .close-tile.base'); // the coda to dock if there is one, else the open syllable
+    const act = () => { const c = wx.d.querySelector('.close-current .close-coda'); const ls = [...wx.d.querySelectorAll('.close-current .close-letter')]; return c || (ls.length ? { click: () => ls.forEach((b) => b.click()) } : null); }; // the coda to dock if there is one, else every letter of the open syllable
     for (let i = 0; i < 4; i++) { await finishScreen(wx); }
     check('close: after the 4 syllable screens the word screens come, with an empty anchor row and the first syllable', !!wx.d.querySelector('.close-anchors') && wx.d.querySelectorAll('.close-chip').length === 0 && !!wx.d.querySelector('.close-current'));
     const picBefore = wx.d.querySelector('.close-pic');
@@ -2302,6 +2305,55 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     const a0 = gx.audioCalls.length;
     gx.d.querySelector('.close-tile.base').click();
     check('close: tapping the base while the stretched sound is playing does not cut it', gx.audioCalls.length === a0);
+  }
+
+  // letters are tiles: each says its own sound (clip only); the coda says its sound and then the stretched syllable; the arc says the base
+  {
+    const { letters: lettersOf, soundKey: soundOf } = await import('../src/close.js');
+    const exact = (y, f) => y.audioCalls.filter((u) => u === 'audio/es/' + f).length;
+    const lx = await startC();
+    const tilesOf = () => [...lx.d.querySelectorAll('.close-unit .close-letter')];
+    const b = base(lx), ls = lettersOf(b);
+    check('close letters: the base is one tile per letter under one arc, and still reads as the base', tilesOf().length === ls.length && tilesOf().map((t) => t.textContent).join('') === b && lx.d.querySelectorAll('.close-unit .close-arc').length === 1, tilesOf().map((t) => t.textContent).join('|'));
+    check('close letters: every tile is named for screen readers', tilesOf().every((t) => t.getAttribute('aria-label') === t.textContent));
+    const tts0 = (lx.w.__tts || []).length, n0 = exact(lx, 'c' + soundOf(ls[0]) + '.mp3');
+    tilesOf()[0].click(); await sleep(10);
+    check('close letters: tapping a letter says its own sound (a clip), not the browser voice, and completes nothing', exact(lx, 'c' + soundOf(ls[0]) + '.mp3') === n0 + 1 && (lx.w.__tts || []).length === tts0 && !lx.d.querySelector('.close-coda.docked'), `${exact(lx, 'c' + soundOf(ls[0]) + '.mp3')} vs ${n0}`);
+    tilesOf().forEach((t) => { t.click(); t.click(); }); await sleep(10);
+    check('close letters: tapping them all, in any order and repeatedly, completes nothing and records nothing', !lx.d.querySelector('.close-coda.docked') && lx.d.querySelectorAll('.close-dots i.on').length === 0 && cprogress(lx) === cprogress(lx));
+    const arc = lx.d.querySelector('.close-arc'), baseN = exact(lx, 'c' + b + '.mp3');
+    arc.click(); await sleep(10);
+    check('close letters: the arc is a button that says the base syllable (what tapping the base tile used to do)', arc.tagName === 'BUTTON' && !!arc.getAttribute('aria-label') && exact(lx, 'c' + b + '.mp3') === baseN + 1);
+    const coda = action(lx), cl = coda.textContent.replace('+', ''), syl = b + cl, cN = exact(lx, 'c' + soundOf(cl) + '.mp3'), closedTiles = tilesOf();
+    coda.click(); await sleep(30);
+    const order = (f) => lx.audioCalls.lastIndexOf('audio/es/' + f);
+    check('close letters: the coda says its own sound and THEN the stretched syllable, once each', exact(lx, 'c' + soundOf(cl) + '.mp3') === cN + 1 && exact(lx, 'c~' + syl + '.mp3') === 1 && order('c' + soundOf(cl) + '.mp3') < order('c~' + syl + '.mp3'), lx.audioCalls.slice(-4).join(','));
+    const a1 = lx.audioCalls.length;
+    closedTiles.forEach((t) => t.click()); arc.click(); await sleep(10); // the tiles of the closed syllable (the next screen has already started)
+    check('close letters: once the syllable is closed the letters and the arc do not cut the stretched sound', lx.audioCalls.length === a1);
+    check('close letters: no errors', lx.errors.length === 0, lx.errors.join(' | '));
+    // a letter with no clip is silent (never the browser voice, which would say the letter name) but the screen keeps working
+    const nx = await startC({}, { manifest: { generated: 'test', clips: { es: new Proxy({}, { get: (_, k) => (typeof k === 'string' && k.length > 1 ? 'c' + k + '.mp3' : undefined) }), ca: {} } } });
+    const t1 = (nx.w.__tts || []).length, a2 = nx.audioCalls.length;
+    nx.d.querySelector('.close-unit .close-letter').click(); await sleep(10);
+    check('close letters: a letter with no clip says nothing at all', nx.audioCalls.length === a2 && (nx.w.__tts || []).length === t1 && nx.errors.length === 0, nx.errors.join(' | '));
+    action(nx).click(); const dockedNow = !!nx.d.querySelector('.close-coda.docked'); await sleep(30);
+    check('close letters: and the coda still docks and says the stretched syllable', dockedNow && nx.audioCalls.some((u) => /\/c~/.test(u)) && nx.errors.length === 0);
+    // word screens: an open syllable closes by itself when every one of its letters has been tapped
+    const wx2 = await startC({ pathEs: 12 });
+    for (let i = 0; i < 4; i++) { await finishScreen(wx2); await sleep(5); }
+    const cur = () => [...wx2.d.querySelectorAll('.close-current .close-letter')];
+    const openTiles = () => cur().length && !wx2.d.querySelector('.close-current .close-coda');
+    let guard = 0;
+    while (!openTiles() && guard++ < 4) { const c2 = wx2.d.querySelector('.close-current .close-coda'); if (c2) { c2.click(); await sleep(40); } }
+    if (openTiles() && cur().length > 1) {
+      const chips0 = wx2.d.querySelectorAll('.close-chip').length;
+      cur()[0].click(); await sleep(10);
+      check('close letters (word): one letter of an open syllable does not close it', wx2.d.querySelectorAll('.close-chip').length === chips0);
+      cur().forEach((t) => t.click()); await sleep(30);
+      check('close letters (word): every letter tapped closes it: it docks into the anchor chip', wx2.d.querySelectorAll('.close-chip').length === chips0 + 1);
+    }
+    check('close letters (word): no errors', wx2.errors.length === 0, wx2.errors.join(' | '));
   }
 
   // Leo never sees the mode

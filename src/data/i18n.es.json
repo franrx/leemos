@@ -65,6 +65,7 @@
   "closeAgain": "Otra vez",
   "closeDone": "¡Muy bien, {n}! Has cerrado todas las sílabas.",
   "closeCover": "Tapa: toca para ver la última letra",
+  "closeHearBase": "Escuchar la sílaba",
   "closeAnchor": "Escuchar otra vez",
   "closeAdd": "Añadir {c}",
   "closeWordHint": "Lee cada sílaba y junta la palabra.",

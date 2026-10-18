@@ -96,3 +96,15 @@ Audio-first picture choice (robot mode), comic minimal pairs (pata/pasta, cama/c
 - The Azure recipe for a clean stretch is unknown until tried. The fallback is recording the ones that fail; if most fail, recording all of them is a session of about 36 per language.
 - Spanish has few open qualifying words until step 11 (*pulpo* only before that), so most early Spanish sessions are all syllable screens.
 - Nothing stops her tapping the coda tile without reading; the adult is the check.
+
+
+## Letter tiles (2026-10-18, after the first tablet test)
+
+The base of every syllable is now one tile per letter instead of a single block, borrowing Leo's letter sounds:
+
+- Tapping a letter says its own sound: a recording or a generated clip of kind `sound`, never the browser voice (it would say the letter's *name*, "eme"). A letter with no clip is silent. `soundKey()` drops accents, maps `gu` to `g` and `rr` to `r`; `h` and `tx` have no sound.
+- Tapping the arc under the base says the base syllable (what tapping the old base tile did).
+- Tapping the coda (or revealing the "?" card) says the coda's own sound and then the stretched syllable.
+- An open syllable on a word screen is also letter tiles and closes by itself once every letter has been tapped; the 3 s rescue still docks it for her.
+- Letter taps are free (any order, repeatable), complete nothing and record nothing. Once a syllable is closed the letters and the arc do not cut the stretched sound.
+- `ch ll ny tx rr` are one tile; `qu`/`gu` only before a vowel. A base with three or more letters uses smaller tiles (`.long`) so base + coda fit a phone.

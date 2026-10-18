@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CODAS, MIN_SYL, SCREENS, splitClosed, nucleus, qualifies, wordsFrom, openSyllables, openWords, planSession } from '../src/close.js';
+import { CODAS, MIN_SYL, SCREENS, splitClosed, nucleus, letters, soundKey, qualifies, wordsFrom, openSyllables, openWords, planSession } from '../src/close.js';
 import { stepOf } from '../src/levelrule.js';
 import { buildClipList } from '../scripts/lib/clips.mjs';
 
@@ -84,6 +84,13 @@ for (const lang of ['es', 'ca']) {
   const rec = recordList({ lang }).filter((c) => c.kind === 'stretch');
   check(`[${lang}] record list: the stretch clips can be recorded, shown as the syllable`, rec.length === need.size && rec.every((c) => c.key === '~' + c.shown));
 }
+const lt = (s) => letters(s).join('|');
+check('letters: a syllable is split into one tile per letter', lt('ma') === 'm|a' && lt('pas') === 'p|a|s' && lt('tra') === 't|r|a' && lt('a') === 'a' && lt('pla') === 'p|l|a');
+check('letters: ch, ll, ny, tx and rr are one tile; qu and gu only before a vowel (their u is silent)', lt('cha') === 'ch|a' && lt('lla') === 'll|a' && lt('nya') === 'ny|a' && lt('txa') === 'tx|a' && lt('rro') === 'rr|o' && lt('qui') === 'qu|i' && lt('gue') === 'gu|e' && lt('gus') === 'g|u|s' && lt('qu') === 'q|u');
+check('letters: nothing is lost or reordered (the tiles read back as the syllable)', ['pas', 'tra', 'quar', 'bou', 'pia', 'ñam', 'à', 'nyu', 'xa'].every((x) => letters(x).join('') === x) && letters('').length === 0);
+const sk = (s) => String(soundKey(s));
+check('soundKey: a tile maps to the clip of its sound (accents dropped, gu -> g, rr -> r)', sk('p') === 'p' && sk('ch') === 'ch' && sk('ll') === 'll' && sk('qu') === 'qu' && sk('à') === 'a' && sk('é') === 'e' && sk('ï') === 'i' && sk('ü') === 'u' && sk('gu') === 'g' && sk('rr') === 'r');
+check('soundKey: letters with no sound of their own have none (h is silent, tx is not a letter sound)', soundKey('h') === null && soundKey('tx') === null);
 const nu = (s) => { const r = nucleus(s); return `${r.pre}|${r.v}|${r.post}`; };
 check('nucleus: the vowel run of a syllable, with its onset before and its coda after', nu('ma') === 'm|a|' && nu('pas') === 'p|a|s' && nu('tra') === 'tr|a|' && nu('bou') === 'b|ou|' && nu('a') === '|a|');
 check('nucleus: the u of qu/gu is part of the onset, not the nucleus', nu('qui') === 'qu|i|' && nu('gue') === 'gu|e|' && nu('quar') === 'qu|a|r' && nu('gus') === 'g|u|s');
@@ -93,7 +100,7 @@ const CKEYS = ['mClose', 'closeLocked', 'closeIntro', 'closeGoal', 'closeAgain',
 check('i18n: every closed-syllables key exists in both languages and is not empty', CKEYS.every((k) => typeof es18[k] === 'string' && es18[k] && typeof ca18[k] === 'string' && ca18[k]));
 check('i18n: the Catalan instruction and the done text use "síl·laba" with the punt volat', /síl·laba/.test(ca18.closeIntro) && /síl·labes/.test(ca18.closeDone));
 const swText = readFileSync(join(ROOT, 'sw.js'), 'utf8');
-check('service worker: close.js and its data are cached with the shell and the version was bumped', /'src\/close\.js'/.test(swText) && /'src\/data\/closed\.es\.json'/.test(swText) && /'src\/data\/closed\.ca\.json'/.test(swText) && /VERSION = 'leemos-v18'/.test(swText));
+check('service worker: close.js and its data are cached with the shell and the version was bumped', /'src\/close\.js'/.test(swText) && /'src\/data\/closed\.es\.json'/.test(swText) && /'src\/data\/closed\.ca\.json'/.test(swText) && /VERSION = 'leemos-v19'/.test(swText));
 
 console.log(failures ? `\n${failures} close test(s) FAILED` : '\nAll close tests passed');
 process.exit(failures ? 1 : 0);

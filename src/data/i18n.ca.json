@@ -65,6 +65,7 @@
   "closeAgain": "Una altra vegada",
   "closeDone": "Molt bé, {n}! Has tancat totes les síl·labes.",
   "closeCover": "Tapa: toca per veure l'última lletra",
+  "closeHearBase": "Escoltar la síl·laba",
   "closeAnchor": "Escoltar una altra vegada",
   "closeAdd": "Afegir {c}",
   "closeWordHint": "Llegeix cada síl·laba i ajunta la paraula.",
