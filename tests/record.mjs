@@ -63,8 +63,10 @@ check('page: starts at the first clip that is still missing', p.$('big').textCon
 p = await open({ peak: 0.2 });
 await startRec(p);
 check('page: the level bar follows the input while recording', !p.$('meter').hidden && p.$('meterFill').style.width === '60%', p.$('meterFill').style.width);
+check('page: a dot shows that the microphone is on', !p.$('recDot').hidden && p.$('recDot').getAttribute('aria-hidden') === 'true');
 await stopRec(p);
 check('page: the level bar hides when recording stops', p.$('meter').hidden);
+check('page: and the recording dot with it', p.$('recDot').hidden);
 check('page: a recording with sound can be played and saved', !p.$('save').hidden && !p.$('play').hidden);
 p.$('save').click(); await sleep(40);
 check('page: saving posts the audio to the dev server for that clip', p.posts.length === 1 && p.posts[0].url === '/__clip?lang=es&key=a' && p.posts[0].type === 'audio/webm' && p.posts[0].size > 0, JSON.stringify(p.posts));

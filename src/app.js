@@ -474,6 +474,7 @@ function burst(){
 }
 // A sticker goes to the set of the world being played; a complete set passes it to the first incomplete world (none when all are done).
 let rewardFrom=''; // '<icon> <name>' of the world the last sticker came from when it was not the one being played
+let freshSticker=null; // {w, i}: the sticker just earned, until the album has shown where it landed
 function earnSticker(){
   const playing=WORLDS[worldNow()];
   const room=w=>(Math.floor(Number(S.stk[w.id]))||0)<w.stk.length;
@@ -482,6 +483,7 @@ function earnSticker(){
   const n=Math.min(Math.max(0,Math.floor(Number(S.stk[w.id]))||0),w.stk.length)+1;
   S.stk[w.id]=n;S.stickers=stkTotal();
   rewardFrom=w===playing?'':w.icon+' '+wn(w);
+  freshSticker={w:w.id,i:n-1};
   return w.stk[n-1];
 }
 function record(ok){
@@ -819,7 +821,7 @@ function renderAlbum(){
     const row=document.createElement('div');row.className='sset';
     w.stk.forEach((e,i)=>{
       const d=document.createElement('div');
-      d.className='sticker'+(i<own?'':' locked');
+      d.className='sticker'+(i<own?'':' locked')+(freshSticker&&freshSticker.w===w.id&&freshSticker.i===i&&i<own?' fresh':'');
       d.textContent=e;
       d.setAttribute('aria-label',i<own?t('albumGot',{e:e}):t('albumLocked'));
       row.appendChild(d);
@@ -862,8 +864,15 @@ function showEnd(){
   if(pre)canLevelUp=pre.showEnd();
   else{
     const opened=advancePath();
-    $('endPath').hidden=!opened;
-    if(opened)$('endPath').textContent=opened>=12?t('endAllLetters'):t('endNewLetter',{l:LR.STEPS[opened-1].toUpperCase()});
+    const ep=$('endPath');ep.hidden=!opened;ep.textContent='';
+    if(opened){
+      // a tile like the syllable tiles lands after the flash has settled; the sentence next to it is what screen readers get
+      const tile=document.createElement('span');tile.className='newletter c'+((opened-1)%5);tile.setAttribute('aria-hidden','true');
+      tile.textContent=opened>=12?'⭐':LR.STEPS[opened-1].toUpperCase();
+      const label=document.createElement('span');label.textContent=opened>=12?t('endAllLetters'):t('endNewLetter',{l:LR.STEPS[opened-1].toUpperCase()});
+      ep.append(tile,label);
+      setTimeout(()=>{if(tile.isConnected&&!$('end').hidden)sparkleBurst(tile,10)},1250); // as the ring opens; sparkleBurst does nothing with reduced motion
+    }
     const all=[...itemsFor(S.level,'syl'),...itemsFor(S.level,'word')].filter(eligible);
     const pct=all.length?Math.round(100*all.filter(x=>mastered(x.key)).length/all.length):0;
     canLevelUp=pathPos()>=12&&pct>=90&&S.level<LEVELS.length-1; // the next level only when every letter is open
@@ -910,14 +919,15 @@ function setMode(m){
 // The parent's block and the automatic rule (spec: 2026-10-17-elsas-path-design.md). Both go through setPath, which saves (and so stamps) the preference.
 function renderPath(){
   $('path').hidden=!!LR.stub; // without the rule module the block would do nothing
-  const row=$('pathRow');row.innerHTML='';const pos=pathPos();
+  const row=$('pathRow'),pos=pathPos();
+  if(row.children.length!==LR.STEPS.length){ // built once: the buttons stay, so a change of state can transition instead of blinking
+    row.innerHTML='';
+    LR.STEPS.forEach((l,i)=>{const b=document.createElement('button');b.onclick=()=>setPath(i+1);row.appendChild(b)});
+  }
   LR.STEPS.forEach((l,i)=>{
-    const name=l==='*'?t('pathRest'):l.toUpperCase();
-    const b=document.createElement('button');
+    const name=l==='*'?t('pathRest'):l.toUpperCase(),b=row.children[i];
     b.textContent=name;b.className=i<pos?'':'closed';b.setAttribute('aria-pressed',i===pos-1);
     b.setAttribute('aria-label',name+', '+t(i<pos?'pathOpen':'pathClosed'));
-    b.onclick=()=>setPath(i+1);
-    row.appendChild(b);
   });
   $('pathAuto').checked=!!S.pathAuto;
 }
@@ -962,7 +972,11 @@ $('themeBtn').onclick=()=>{
 window.addEventListener('resize',()=>{if(cur){const merged=$('tiles').classList.contains('merged');const ph=phase;show();if(merged&&ph==='judge'){$('tiles').classList.add('merged');setPhase('judge');if(cur.emoji){$('pic').className='pic on';$('pic').textContent=cur.emoji}}}});
 
 renderMode();
-$('albumBtn').onclick=()=>{renderAlbum();$('album').hidden=false;$('albumClose').focus({preventScroll:true})}; // the long album must open at the top, not scrolled to the close button
+$('albumBtn').onclick=()=>{
+  renderAlbum();$('album').hidden=false;$('albumClose').focus({preventScroll:true}); // the long album opens at the top, not scrolled to the close button...
+  const f=$('stickerGrid').querySelector('.sticker.fresh');
+  if(f){freshSticker=null;if(f.scrollIntoView)f.scrollIntoView({block:'center',behavior:reducedMotion()?'auto':'smooth'})} // ...unless a sticker has just been earned: take her to it
+};
 $('albumClose').onclick=closeOverlays;
 $('worldBtn').onclick=()=>{renderWorlds();$('worlds').hidden=false;$('worldsClose').focus()};
 $('worldsClose').onclick=closeOverlays;
@@ -1058,7 +1072,7 @@ function renderRec(status){
   $('recText').textContent=item;
   $('recCount').textContent=t('recOf',{i:RS.i+1,n:RS.list.length})+(clipURL[ck(item)]?t('recDone'):'');
   $('recBtn').textContent=RS.on?t('recStop'):t('recStart');
-  $('recMeter').hidden=!RS.on;
+  $('recMeter').hidden=!RS.on;$('recDot').hidden=!RS.on;
   $('recPlay').hidden=!clipURL[ck(item)];
   $('recStatus').textContent=status||(RS.on?t('recRecording',{t:item}):'');
 }

@@ -430,9 +430,13 @@ check('minor: after a wrong tap focus moves to an enabled choice', !!a.d.activeE
 const recStart = async (micCfg) => { const x = await boot({ mic: micCfg }); x.$('recOpen').click(); x.$('recBtn').click(); await sleep(60); return x; };
 a = await recStart({ peak: 0.2 });
 check('recorder: the level bar shows and follows the input while recording', !a.$('recMeter').hidden && a.$('recMeterFill').style.width === '60%', a.$('recMeterFill').style.width);
+check('recorder: a dot beside the level bar shows that the microphone is on, even when the bar is flat (decorative for screen readers: the status says it)', !a.$('recDot').hidden && a.$('recDot').getAttribute('aria-hidden') === 'true' && /Grabando/.test(a.$('recStatus').textContent), a.$('recStatus').textContent);
 a.$('recBtn').click(); await sleep(30);
 check('recorder: a recording with sound is saved', a.$('recStatus').textContent === 'Guardada ✓' && /ya grabada/.test(a.$('recCount').textContent), a.$('recStatus').textContent);
 check('recorder: the level bar hides when recording stops', a.$('recMeter').hidden);
+check('recorder: and so does the dot', a.$('recDot').hidden);
+{ const c = await boot(); c.$('recOpen').click(); check('recorder: before recording the dot is not there', c.$('recDot').hidden); }
+check('recorder: the dot sits in the same row as the bar, and its pulse stops with reduced motion', /rec-row/.test(a.$('recMeter').parentElement.className) && /\.rec-dot\{animation:none\}|\.rec-dot,[^}]*animation:none/.test(readFileSync(join(ROOT, 'src/styles.css'), 'utf8').replace(/\s+/g, '')) , a.$('recMeter').parentElement.className);
 a = await recStart({ peak: 0 });
 a.$('recBtn').click(); await sleep(30);
 check('recorder: a silent recording is rejected with a hint about the microphone', /No se oyó nada/.test(a.$('recStatus').textContent) && !/ya grabada/.test(a.$('recCount').textContent) && a.$('recPlay').hidden, a.$('recStatus').textContent);
@@ -1649,6 +1653,54 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   // the whole-word tile is static: no animation or transition
   const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
   check('whole words: the plain tile is styled, and has no animation or transition', /\.tile\.whole\{/.test(css) && !/\.tile\.whole\{[^}]*(animation|transition)/.test(css));
+}
+// ---------- 38. motion: the new letter lands, the new sticker is found in the album, the Camino letters change in place ----------
+{
+  const { stepOf } = await import('../src/levelrule.js');
+  const LVES = readJSON('src/data/levels.es.json');
+  const m1 = Object.fromEntries([...LVES[0].syl.map((s) => ['s:' + s, s]), ...LVES[0].words.map((o) => ['w:' + o.w, o.w])].filter(([, h]) => stepOf(h) === 1).map(([k]) => [k, { ok: 3, fail: 0 }]));
+  const newLetterState = { name: 'Elsa', sessionLen: 5, world: 0, pathEs: 1, pathCa: 1, stats: m1 };
+  // sparkles are removed by a timer the harness runs at once, so count them as they are added
+  const watchSparks = (app) => { app.w.__sparks = 0; new app.w.MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.classList && n.classList.contains('spark')) app.w.__sparks++; }).observe(app.d.body, { childList: true, subtree: true }); };
+  let x = await boot({ storage: { 'leemos-v1': newLetterState } });
+  watchSparks(x);
+  const base = () => x.w.__sparks;
+  await playSession(x, 5);
+  const tile = x.d.querySelector('#endPath .newletter');
+  check('motion: the new letter is announced with a tile in the app\'s own tile colours, hidden from screen readers (the sentence says it)', !!tile && tile.textContent === 'P' && tile.getAttribute('aria-hidden') === 'true' && /^newletter c[0-4]$/.test(tile.className) && /P/.test(x.$('endPath').textContent.replace(/^P/, '')), tile && tile.className);
+  await sleep(30);
+  check('motion: and it ends with a sparkle burst over the tile', base() >= 10, String(base()));
+  x = await boot({ reduced: true, storage: { 'leemos-v1': newLetterState } });
+  watchSparks(x);
+  await playSession(x, 5);
+  await sleep(30);
+  check('motion: with reduced motion the tile is there but nothing sparkles', !!x.d.querySelector('#endPath .newletter') && x.w.__sparks === 0, String(x.w.__sparks));
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, world: 0, pathEs: 1, pathCa: 1 } } });
+  await playSession(x, 5);
+  check('motion: no tile when no letter opened', x.$('endPath').hidden && !x.d.querySelector('#endPath .newletter'));
+
+  // the sticker she just earned is found in the album
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, world: 3, pathEs: 12, pathCa: 12 } } });
+  await playSession(x, 5);
+  x.$('albumBtn').click();
+  const fresh = [...x.d.querySelectorAll('#stickerGrid .sticker.fresh')];
+  check('motion: opening the album after earning marks exactly the new sticker', fresh.length === 1 && fresh[0].textContent === x.$('rewardEmoji').textContent && !fresh[0].classList.contains('locked'), fresh.map((e) => e.textContent).join(','));
+  x.$('albumClose').click();
+  x.$('albumBtn').click();
+  check('motion: the second time the album opens nothing is marked (it arrives once)', x.d.querySelectorAll('#stickerGrid .sticker.fresh').length === 0);
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12, stk: { bosque: 2 }, stickers: 2 } } });
+  x.$('albumBtn').click();
+  check('motion: an album opened without a new sticker marks none', x.d.querySelectorAll('#stickerGrid .sticker.fresh').length === 0);
+
+  // the Camino letters keep their buttons, so their state can transition
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 3, pathCa: 12 } } });
+  const before = [...x.d.querySelectorAll('#pathRow button')];
+  before[5].click(); await sleep(5);
+  const after = [...x.d.querySelectorAll('#pathRow button')];
+  check('motion: tapping a letter updates the same 12 buttons in place (so the change can transition) and the states are right', after.length === 12 && after.every((b, i) => b === before[i]) && after.filter((b) => !b.classList.contains('closed')).length === 6 && after[5].getAttribute('aria-pressed') === 'true' && before[2].getAttribute('aria-pressed') === 'false');
+  check('motion: a button tapped again still works after the in-place update', (() => { after[1].click(); return true; })());
+  await sleep(5);
+  check('motion: and moves the position', JSON.parse(x.w.localStorage.getItem('leemos-v1')).pathEs === 2 && x.d.querySelectorAll('#pathRow button:not(.closed)').length === 2);
 }
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');

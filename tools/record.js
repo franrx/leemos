@@ -23,7 +23,7 @@
     $('shared').hidden = !c.shared;
     $('progress').textContent = `${doneCount()} de ${clips.length} grabadas${c.has ? ' · esta ya está grabada ✓' : ''}`;
     $('rec').textContent = recording ? '⏹ Parar' : (c.has ? '⏺ Grabar otra vez' : '⏺ Grabar');
-    $('meter').hidden = !recording;
+    $('meter').hidden = !recording; $('recDot').hidden = !recording;
     $('play').hidden = !pending;
     $('save').hidden = !pending;
   }

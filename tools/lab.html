@@ -22,7 +22,11 @@
   #status{min-height:3.2em;margin:8px 0}
   .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:10px 0}
   [hidden]{display:none!important}
-  @media (prefers-reduced-motion: reduce){.meter i{transition:none}}
+  .rec-row{display:flex;align-items:center;justify-content:center;gap:12px}
+  .rec-row .meter{flex:1;max-width:320px;margin:14px 0}
+  .rec-dot{flex:none;width:14px;height:14px;border-radius:50%;background:#E5384F;animation:recPulse 1.6s ease-in-out infinite}
+  @keyframes recPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.8)}}
+  @media (prefers-reduced-motion: reduce){.meter i{transition:none}.rec-dot{animation:none}}
 </style>
 </head>
 <body>
@@ -34,7 +38,7 @@
 <main>
   <div class="big" id="big" aria-live="polite"></div>
   <div id="ctx"></div>
-  <div class="meter" id="meter" role="meter" aria-label="Nivel del micrófono" hidden><i id="meterFill"></i></div>
+  <div class="rec-row"><span class="rec-dot" id="recDot" aria-hidden="true" hidden></span><div class="meter" id="meter" role="meter" aria-label="Nivel del micrófono" hidden><i id="meterFill"></i></div></div>
   <p id="status" aria-live="polite"></p>
   <div class="row">
     <button id="start" class="primary">🎙️ Empezar</button>
