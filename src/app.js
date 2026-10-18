@@ -133,7 +133,7 @@ const GAMEDEF={find:{file:'find.js',create:'createFind',ms:'__leemosFindTimeout'
 const G={},GP={}; // loaded modules and pending loads, by game name
 const CLOSED={}; // closed.<lang>.json, loaded with the close module
 const activeGame=()=>Object.values(G).find(g=>g&&g.active())||null;
-const isGame=m=>Object.prototype.hasOwnProperty.call(GAMEDEF,m);
+const isGame=m=>Object.prototype.hasOwnProperty.call(GAMEDEF,m)&&PROFILE.kind!=='pre'; // Leo never gets a reader play mode, whatever his saved state says
 let curWorld=Math.floor(Math.random()*WORLDS.length);
 
 const $=id=>document.getElementById(id);
@@ -952,6 +952,7 @@ async function openGame(name){
   if(pendingEnd)return; // the end of a reading session is on its way: it must not open over the game
   const g=await loadGame(name);
   if(!g||!g.canPlay()){$('hint').textContent=t(GAMEDEF[name].lock);return}
+  if(resting){resting=false;sDone=sOk=sStk=0;newWorld();renderSession()} // opening a game ends the rest screen, or a Camino change would be ignored while it lasts
   S.mode=name;save();renderMode();next();
 }
 $('mFind').onclick=()=>openGame('find');

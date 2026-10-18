@@ -2030,6 +2030,39 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('close: the "?" card has a label that says it covers the letter, and each new screen focuses the action', action(gx).classList.contains('close-card') && action(gx).getAttribute('aria-label').length > 3 && gx.d.activeElement === action(gx));
   }
 
+  // review fixes: the whole word is not built for her, the base plays by itself, resting, Leo, the rescue pulse on every control
+  {
+    // the rescue models ONE syllable of a word and leaves the rest to her
+    let fx = await boot({ storage: CR({ pathEs: 12 }), manifest: cman }); fx.w.__audioMode = 'auto'; fx.w.__leemosRescueMs = 9000;
+    fx.$('mClose').click(); await until(() => !croom(fx).hidden);
+    for (let i = 0; i < 4; i++) { action(fx).click(); await sleep(20); }
+    fx.w.__leemosRescueMs = 150;
+    fx.d.querySelector('.close-anchors').click(); await sleep(200);
+    check('close: idle on a word screen docks one syllable, then the rest is hers (no second auto-dock, no Juntar)', fx.d.querySelectorAll('.close-chip').length === 1 && !fx.$('closeJoin'), `chips=${fx.d.querySelectorAll('.close-chip').length}`);
+    check('close: the next syllable only pulses', !!fx.d.querySelector('.close-current .rescue'));
+    // the base sound plays by itself from the second screen on (not on the first, where the instruction plays)
+    fx = await boot({ storage: CR(), manifest: cman }); fx.w.__audioMode = 'auto'; fx.w.__leemosRescueMs = 9000;
+    fx.$('mClose').click(); await until(() => !croom(fx).hidden);
+    const first = base(fx);
+    check('close: on the first screen the base waits for her tap (the instruction plays instead)', played(fx, 'c' + first) === 0);
+    action(fx).click(); await sleep(20);
+    const second = base(fx);
+    check('close: from the second screen the base plays by itself', played(fx, 'c' + second) >= 1, `base=${second}`);
+    // opening Cierra from the rest screen ends the rest: a Camino change then acts on the game
+    fx = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, world: 0, pathEs: 12, pathCa: 12 } }, manifest: cman });
+    await playSession(fx, 5);
+    if (!fx.$('end').hidden) fx.$('endStop').click();
+    fx.$('mClose').click(); await until(() => !croom(fx).hidden);
+    fx.d.querySelectorAll('#pathRow button')[1].click(); await sleep(30);
+    check('close: after the rest screen, opening Cierra and closing the Camino to step 2 locks the mode and leaves the game', croom(fx).hidden && !fx.d.documentElement.classList.contains('close'));
+    // Leo never gets the room, even with a saved mode
+    fx = await boot({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', mode: 'close', pre: { es: 1, ca: 0 } } }, manifest: cman }); await sleep(40);
+    check('close: a Leo profile with a saved Cierra mode does not get the Cierra room', !fx.d.documentElement.classList.contains('close') && croom(fx).hidden);
+    // the pulse exists for every control the rescue marks, and a revealed card stops glowing
+    const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
+    check('close: the rescue pulse is styled on the card, the tile and Juntar, and a revealed card stops glowing', /\.close-card\.rescue,[^{]*\.close-tile\.rescue,[^{]*#closeJoin\.rescue\{animation:closeGlow/.test(css) && /\.close-card\.docked\{[^}]*animation:none/.test(css));
+  }
+
   // Leo never sees the mode
   x = await bootLeo();
   check('close: Leo is on his own screen where the modes row is hidden', x.d.documentElement.classList.contains('pre'));

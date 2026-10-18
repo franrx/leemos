@@ -85,8 +85,10 @@ for (const lang of ['es', 'ca']) {
   const manifest = JSON.parse(readFileSync(new URL('../audio/manifest.json', import.meta.url), 'utf8'));
   for (const lang of ['es', 'ca']) {
     const bank = JSON.parse(readFileSync(new URL(`../src/data/closed.${lang}.json`, import.meta.url), 'utf8')).syl;
-    const missing = bank.filter((s) => { const file = manifest.clips[lang]['~' + s]; return !file || !existsSync(new URL(`../audio/${lang}/${file}`, import.meta.url)); });
-    check(`clips: every closed syllable has its stretched audio in the ${lang} manifest and on disk`, missing.length === 0, missing.slice(0, 5).join(','));
+    const { wordsFrom } = await import('../src/close.js');
+    const need = [...new Set([...bank, ...wordsFrom(JSON.parse(readFileSync(new URL(`../src/data/levels.${lang}.json`, import.meta.url), 'utf8'))).map((w) => w.closed)])];
+    const missing = need.filter((s) => { const file = manifest.clips[lang]['~' + s]; return !file || !existsSync(new URL(`../audio/${lang}/${file}`, import.meta.url)); });
+    check(`clips: every closed syllable (bank and word screens) has its stretched audio in the ${lang} manifest and on disk`, missing.length === 0, missing.slice(0, 5).join(','));
   }
 }
 

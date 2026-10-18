@@ -30,7 +30,7 @@ Elsa reads open syllables (CV) but overloads her working memory when she blends 
 
 **Closed syllables** (`src/data/closed.es.json`, `closed.ca.json`): `{ "syl": ["mal", "pal", …] }`, a curated list of about 36 CVC syllables per language: onset (a consonant of the Camino) + vowel + coda s, r or l. Chosen so that every coda and every vowel appear, and so that there are **at least 6 syllables open at every step from 3 up** (step 3 has only the L coda: *mal mel mil mol mul pal pel pil pol pul*; step 6 adds S and the new onsets: *mas pas tos nas sal sol…*; step 10 adds R: *bar mar par tor…*). The two languages may differ in the list.
 
-**Words** are derived, not listed: from `levels.<lang>.json`, a word qualifies when it has **exactly 2 syllables, exactly one closed syllable, and that closed syllable is onset + vowel + s/r/l** (so *pul-po, car-pa, bar-co, mos-ca, cor-da, fus-ta, ho-tel* qualify; a qualifying word with no picture in the level data, like *fa-nal*, is left out; *tam-bor, can-tar, ár-bol, del-fín, dor-mir* do not: a closing n or m, no onset, or two closed syllables). Single-syllable words (*sol, mar, bus, dos*) are not used as word screens. Words use their picture from the level data, so no new pictures are needed.
+**Words** are derived, not listed: from `levels.<lang>.json`, a word qualifies when it has **exactly 2 syllables, exactly one closed syllable, and that closed syllable is onset + one vowel + s/r/l, and its coda is not the start of a trill or a geminate (*gor-ro, ser-ra, tas-sa* are out) and not part of a diphthong (*deus* is out)** (so *pul-po, car-pa, bar-co, mos-ca, cor-da, fus-ta, ho-tel* qualify; a qualifying word with no picture in the level data, like *fa-nal*, is left out; *tam-bor, can-tar, ár-bol, del-fín, dor-mir* do not: a closing n or m, no onset, or two closed syllables). Single-syllable words (*sol, mar, bus, dos*) are not used as word screens. Words use their picture from the level data, so no new pictures are needed.
 
 **Gating:** an item is open when `stepOf(item) <= pathPos()`. The mode is **locked** while fewer than 6 closed syllables are open (that is, at steps 1–2, where no coda letter is open) and the hint says it opens with the L.
 
@@ -41,7 +41,7 @@ Elsa reads open syllables (CV) but overloads her working memory when she blends 
 A session is **6 screens** (about 4 minutes, one objective each) and ends with a sticker. Syllables and words do not repeat within a session; the coda varies (the same coda is not used three screens in a row when others are open).
 
 **Syllable screen (2 + 1)**, for the first half of the syllable screens:
-1. The CV base (*PA*) appears large with a smooth arc under it. Lumi plays the base sound (the existing clip of `pa`).
+1. The CV base (*PA*) appears large with a smooth arc under it. The base sound (the existing clip of `pa`) plays by itself on every screen after the first (the first screen plays Lumi's instruction instead); tapping the base plays it again.
 2. She reads it aloud, then taps the glowing coda tile (*+S*).
 3. The tile slides into place, the arc grows over both letters, and the whole syllable plays **stretched** (*paaa-sss*) with the `stretch` clip. Three letters are never shown at once as an unsegmented block.
 
@@ -55,7 +55,7 @@ All screens: tiles ≥ 44 px, focus visible, colours as tokens with the dark var
 
 A timer starts when each step is shown and resets on every tap. If she does nothing for **3 seconds** (`window.__leemosRescueMs` overrides it in tests):
 - **Syllable screen:** Lumi plays the base sound, the coda tile (or the "?" card) starts pulsing, and her only task is to tap it.
-- **Word screen:** Lumi plays the syllable that is on screen (the closed one stretched, the open one normal) and docks it into the anchor chip for her; the remaining syllable is hers.
+- **Word screen:** Lumi plays the syllable that is on screen (the closed one stretched, the open one normal) and docks it into the anchor chip for her, **once per word**; the remaining syllables are hers (they only pulse).
 - The rescue fires **once per step** (no repeated nagging); after it, the pulse stays and there is no further timer.
 - Nothing is shown or played that signals an error: no buzzer, no cross, no "try again". The rescue is not recorded anywhere.
 
@@ -75,7 +75,7 @@ The rescue answers inactivity only. The app cannot tell that she is hesitating w
 ## 5. Audio
 
 - A new clip kind **`stretch`**: the syllable said with a long vowel and a continuous coda (*paaa-sss*). Its key is `~<syllable>` (for example `~pas`) so it never collides with the normal `pas` syllable clip; the app looks it up with `ck('~pas')`. The file name comes from `slug(key)` as for every clip.
-- `scripts/lib/clips.mjs` adds one `stretch` clip per syllable in `closed.<lang>.json`. `scripts/spoken.mjs` sends it as SSML to Azure: the vowel lengthened (a prosody/`emphasis` pattern or repeated vowel; the exact recipe is found by experiment, then written in `pronunciation.<lang>.json` per clip when it needs help). The base CV sound and the open syllables reuse the existing clips.
+- `scripts/lib/clips.mjs` adds one `stretch` clip per syllable in `closed.<lang>.json` **and one for the closed syllable of every word that can appear on a word screen** (a word screen whose closed syllable has no stretched clip would be silent). `scripts/spoken.mjs` sends it as SSML to Azure: the vowel lengthened (a prosody/`emphasis` pattern or repeated vowel; the exact recipe is found by experiment, then written in `pronunciation.<lang>.json` per clip when it needs help). The base CV sound and the open syllables reuse the existing clips.
 - The review page (`tools/review.html`) lists the `stretch` clips; the ones that sound wrong (a glottal stop before the coda, a letter-name reading, a question intonation) are re-recorded with "Grabar mi voz" (`tools/record.html`), which gets the same list.
 - Lumi's instruction `closeIntro` is a normal `phrase` clip in the explicit phrase list; it plays on the first screen of a session. With no clip it is silent.
 - Generating audio uses a plain run (`npm run audio -- --provider azure`), which generates only the missing clips. Never `--kind phrase --force`.

@@ -20,11 +20,15 @@ check('qualifies: exactly 2 syllables, exactly one closed, onset + vowel + s/r/l
 check('qualifies: not a closing n/m, not without onset, not two closed, not 1 or 3 syllables', !qualifies(['tam', 'bor']) && !qualifies(['ár', 'bol']) && !qualifies(['del', 'fín']) && !qualifies(['dor', 'mir']) && !qualifies(['pa', 'ta']) && !qualifies(['sol']) && !qualifies(['pas', 'te', 'la']));
 
 check('wordsFrom: the same word in two levels counts once; a word with no picture or that does not qualify is left out', wordsFrom([{ words: [{ w: 'pul-po', e: '🐙' }] }, { words: [{ w: 'pul-po', e: '🐙' }, { w: 'ta-pa', e: '🥫' }, { w: 'car-pa' }] }]).map((w) => w.text).join() === 'pulpo');
+check('qualifies: not when the coda is the start of a trill or a geminate (gor-ro, ser-ra, tas-sa): the stretch would teach a wrong sound', !qualifies(['gor', 'ro']) && !qualifies(['ser', 'ra']) && !qualifies(['tas', 'sa']) && !qualifies(['tor', 're']) && qualifies(['car', 'pa']));
+check('splitClosed: a diphthong is not a closed syllable (deus), and qu/gu work as an onset (quar, gus)', splitClosed('deus') === null && sp('quar') === 'qua+r' && sp('gus') === 'gu+s' && !qualifies(['fi', 'deus']));
 for (const lang of ['es', 'ca']) {
   const levels = readJSON(`src/data/levels.${lang}.json`);
   const words = wordsFrom(levels);
   const texts = words.map((w) => w.text);
   check(`[${lang}] wordsFrom: only qualifying words with a picture, once each, with their Camino step`, words.length > 0 && new Set(texts).size === texts.length && words.every((w) => w.emoji && qualifies(w.parts) && w.step === stepOf(w.parts.join('-'))));
+  check(`[${lang}] wordsFrom: no trill, geminate or diphthong word is taught`, ['gorro', 'tassa', 'serra', 'torre', 'gorra', 'sorra', 'fideus'].every((x) => !texts.includes(x)));
+  check(`[${lang}] wordsFrom: each word knows its closed syllable and its coda`, words.every((w) => w.parts.includes(w.closed) && w.coda === splitClosed(w.closed).coda));
   check(`[${lang}] wordsFrom: the examples of the spec are in and the excluded ones are out`, (lang === 'es' ? ['pulpo', 'carpa', 'barco'] : ['fusta', 'mosca', 'túnel']).every((x) => texts.includes(x)) && !texts.includes('tambor') && !texts.includes('cantar'));
 
   const bank = readJSON(`src/data/closed.${lang}.json`).syl;
@@ -54,7 +58,7 @@ for (const lang of ['es', 'ca']) {
       if (!plan.every((p, i) => (p.kind === 'syl') === (i < sylS.length))) problems.push(`pos ${pos}: order`);
       const half = sylS.length / 2;
       if (!sylS.every((p, i) => p.peek === (i >= half))) problems.push(`pos ${pos}: dock/peek split`);
-      const codas = sylS.map((p) => p.coda), kinds = new Set(sy.map((x) => x.coda));
+      const codas = plan.map((p) => (p.kind === 'syl' ? p.coda : p.w.coda)), kinds = new Set([...sy.map((x) => x.coda), ...wd.map((w) => w.coda)]);
       if (kinds.size > 1 && codas.some((c, i) => i >= 2 && c === codas[i - 1] && c === codas[i - 2])) problems.push(`pos ${pos}: three same codas in a row`);
       if (!sylS.every((p) => sy.some((x) => x.syl === p.syl))) problems.push(`pos ${pos}: a syllable that is not open`);
     }
@@ -70,12 +74,13 @@ for (const lang of ['es', 'ca']) {
   const bank = readJSON(`src/data/closed.${lang}.json`).syl;
   const clips = buildClipList({ langs: [lang] });
   const st = clips.filter((c) => c.kind === 'stretch');
-  check(`[${lang}] clips: one stretch clip per bank syllable, keyed "~syllable" so it never collides with the normal clip`, st.length === bank.length && st.every((c) => c.key === '~' + c.text && c.file.startsWith('_7e')) && bank.every((s) => st.some((c) => c.text === s)) && !clips.some((c) => c.kind !== 'stretch' && c.key.startsWith('~')));
+  const wordParts = wordsFrom(readJSON(`src/data/levels.${lang}.json`)).map((w) => w.closed), need = new Set([...bank, ...wordParts]);
+  check(`[${lang}] clips: a stretch clip for every bank syllable AND for the closed syllable of every word screen, keyed "~syllable" so it never collides with the normal clip`, st.length === need.size && st.every((c) => c.key === '~' + c.text && c.file.startsWith('_7e')) && [...need].every((s) => st.some((c) => c.text === s)) && !clips.some((c) => c.kind !== 'stretch' && c.key.startsWith('~')), `${st.length} vs ${need.size}`);
   check(`[${lang}] clips: the instruction closeIntro is in the phrase list`, clips.some((c) => c.kind === 'phrase' && c.text === readJSON(`src/data/i18n.${lang}.json`).closeIntro));
   const ssml = st.map((c) => spokenFor(c));
   check(`[${lang}] spoken: a stretch clip is SSML with a long vowel and a long coda, never the plain syllable`, ssml.every((s, i) => s.startsWith('<') && /<prosody/.test(s) && s !== st[i].text) && spokenFor(st.find((c) => c.text === 'pas')).includes('aa') && /s{2,}/.test(spokenFor(st.find((c) => c.text === 'pas'))));
   const rec = recordList({ lang }).filter((c) => c.kind === 'stretch');
-  check(`[${lang}] record list: the stretch clips can be recorded, shown as the syllable`, rec.length === bank.length && rec.every((c) => c.key === '~' + c.shown));
+  check(`[${lang}] record list: the stretch clips can be recorded, shown as the syllable`, rec.length === need.size && rec.every((c) => c.key === '~' + c.shown));
 }
 const es18 = readJSON('src/data/i18n.es.json'), ca18 = readJSON('src/data/i18n.ca.json');
 const CKEYS = ['mClose', 'closeLocked', 'closeIntro', 'closeGoal', 'closeAgain', 'closeDone', 'closeCover', 'closeAnchor', 'closeAdd'];

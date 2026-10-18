@@ -5,7 +5,7 @@ import { stepOf } from './levelrule.js';
 export const CODAS = ['s', 'r', 'l'];
 export const MIN_SYL = 6, SCREENS = 6;
 const V = 'aeiouáéíóúàèòïü';
-const CLOSED = new RegExp(`^([^${V}]+)([${V}]+)([srl])$`);
+const CLOSED = new RegExp(`^(qu|gu|[^${V}]+)([${V}])([srl])$`); // one vowel: a diphthong (deus) is not a CVC syllable; qu/gu are one onset
 const ENDS_IN_VOWEL = new RegExp(`[${V}]$`);
 
 // "pas" -> {onset: 'p', vowel: 'a', coda: 's', base: 'pa'}; anything else (open, no onset, another coda) -> null.
@@ -18,7 +18,11 @@ export function splitClosed(part) {
 export function qualifies(parts) {
   if (!Array.isArray(parts) || parts.length !== 2) return false;
   const closed = parts.filter((p) => !ENDS_IN_VOWEL.test(p));
-  return closed.length === 1 && !!splitClosed(closed[0]);
+  if (closed.length !== 1) return false;
+  const c = splitClosed(closed[0]);
+  if (!c) return false;
+  const next = parts[parts.indexOf(closed[0]) + 1];
+  return !(next && next[0] === c.coda); // gor-ro, ser-ra, tas-sa: the coda is the start of a trill or a geminate, not a sound to stretch
 }
 
 export function wordsFrom(levels) {
@@ -28,7 +32,8 @@ export function wordsFrom(levels) {
       const parts = o.w.toLowerCase().split('-'), text = parts.join('');
       if (!o.e || seen.has(text) || !qualifies(parts)) continue;
       seen.add(text);
-      out.push({ text, parts, emoji: o.e, step: stepOf(parts.join('-')) });
+      const closed = parts.find((p) => !ENDS_IN_VOWEL.test(p));
+      out.push({ text, parts, emoji: o.e, step: stepOf(parts.join('-')), closed, coda: splitClosed(closed).coda });
     }
   }
   return out;
@@ -57,12 +62,25 @@ function pickVaried(list, n, rng) {
 }
 
 // 6 screens: 4 syllables then 2 words (6 syllables when fewer than 2 words are open). In the syllable screens the first half docks, the second half peeks.
-export function planSession(syls, words, rng) {
+function buildPlan(syls, words, rng) {
   const nWords = words.length >= 2 ? 2 : 0, nSyl = SCREENS - nWords;
   const picked = pickVaried(syls, nSyl, rng);
   const screens = picked.map((s, i) => ({ kind: 'syl', syl: s.syl, base: s.base, coda: s.coda, peek: i >= picked.length / 2 }));
   shuffle(words, rng).slice(0, nWords).forEach((w) => screens.push({ kind: 'word', w }));
   return screens;
+}
+const codaOf = (p) => (p.kind === 'syl' ? p.coda : p.w.coda);
+const tripled = (plan) => plan.some((p, i) => i >= 2 && codaOf(p) === codaOf(plan[i - 1]) && codaOf(p) === codaOf(plan[i - 2]));
+// The same coda is not used three screens in a row (syllables and words together) while another coda is open: retry a few shuffles.
+export function planSession(syls, words, rng) {
+  const varied = new Set([...syls.map((s) => s.coda), ...words.map((w) => w.coda)]).size > 1;
+  let first = null;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const plan = buildPlan(syls, words, rng);
+    if (!varied || !tripled(plan)) return plan;
+    first = first || plan;
+  }
+  return first;
 }
 
 // The screen. ctx: { doc, $, S, t, fmt, rnd, nm, say, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, data, save, rng }
@@ -133,7 +151,7 @@ export function createClose(ctx) {
     const anchors = el('div', 'close-anchors'), cur = el('div', 'close-current'), pic = el('div', 'close-pic'); pic.hidden = true;
     stage.append(anchors, cur, pic);
     const g0 = gen;
-    let i = 0, joined = false, ctl = null;
+    let i = 0, joined = false, ctl = null, wordRescued = false; // the rescue models ONE syllable of a word; the rest is hers
     const dock = (u) => {
       const chip = el('button', 'close-chip', u.text); chip.setAttribute('aria-label', t('closeAnchor') + ': ' + u.text);
       chip.onclick = () => (u.closed ? lumiPlay('~' + u.text, false) : say(u.text));
@@ -155,7 +173,7 @@ export function createClose(ctx) {
       const after = () => { const g = gen; later(() => { if (g === gen) dock(u); }, u.closed ? 900 : 0); };
       ctl = u.closed ? unit(cur, { text: u.text, base: u.base, coda: u.coda, peek: false }, after) : openUnit(cur, u, after);
       ctl.coda.focus();
-      rescueFn = () => { if (ctl && !ctl.isDone()) ctl.finish(); }; // models the syllable on screen (stretched if closed) and docks it for her
+      rescueFn = () => { if (!ctl || ctl.isDone()) return; if (!wordRescued) { wordRescued = true; ctl.finish(); } else ctl.coda.classList.add('rescue'); }; // models the syllable on screen (stretched if closed) and docks it for her, once per word; later steps only pulse
       arm();
     };
     step();
@@ -184,6 +202,7 @@ export function createClose(ctx) {
       c.coda.focus();
       rescueFn = () => { say(p.base); c.coda.classList.add('rescue'); }; // the base is modelled, the coda tile pulses harder, and she still has the last tap
       arm();
+      if (!first) say(p.base); // the base sound starts each screen after the first (the first one plays the instruction instead)
     } else {
       wordFlow(stage, p.w);
     }

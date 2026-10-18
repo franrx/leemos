@@ -264,8 +264,8 @@ html.close .session,html.close #goal,html.close #tiles,html.close #pic,html.clos
 .close-chip{font-size:1.4rem;min-height:48px;min-width:56px;padding:4px 14px}
 .close-coda{border-style:dashed;color:var(--c2)}
 .close-coda.glow,.close-card{animation:closeGlow 1.6s ease-in-out infinite}
-.close-coda.rescue{animation-duration:.6s;background:color-mix(in srgb,var(--c1) 35%,var(--panel))}
-.close-coda.docked{border-style:solid;color:var(--ink);animation:none}
+.close-coda.rescue,.close-card.rescue,.close-tile.rescue,#closeJoin.rescue{animation:closeGlow .6s ease-in-out infinite;background:color-mix(in srgb,var(--c1) 35%,var(--panel))}
+.close-coda.docked,.close-card.docked{border-style:solid;color:var(--ink);animation:none}
 .close-card{background:color-mix(in srgb,var(--c2) 18%,var(--panel))}
 .close-arc{height:14px;border:5px solid var(--c2);border-top:none;border-radius:0 0 40px 40px;transform-origin:left;transform:scaleX(.5);transition:transform .35s ease}
 .close-arc.wide{transform:scaleX(1)}
@@ -278,7 +278,7 @@ html.close .session,html.close #goal,html.close #tiles,html.close #pic,html.clos
 @keyframes closeGlow{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c1) 0%,transparent)}50%{box-shadow:0 0 0 8px color-mix(in srgb,var(--c1) 55%,transparent)}}
 @media (prefers-reduced-motion: reduce){
   .find-tile.wobble{animation:none}
-  .close-coda.glow,.close-card,.close-coda.rescue{animation:none}.close-arc{transition:none}
+  .close-coda.glow,.close-card,.close-coda.rescue,.close-card.rescue,.close-tile.rescue,#closeJoin.rescue{animation:none}.close-arc{transition:none}
   .newletter,.newletter::after,.sticker.fresh{animation:none}
   .newletter::after{opacity:0}
   .path-row button,.mode{transition:none}

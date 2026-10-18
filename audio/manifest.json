@@ -560,7 +560,11 @@
    "~dor": "_7edor.mp3",
    "~car": "_7ecar.mp3",
    "~cor": "_7ecor.mp3",
-   "lee la sílaba en voz alta y toca para cerrarla.": "lee_20la_20s_edlaba_20en_20voz_20alta_20y_20toca_20para_20cerrarla_2e.mp3"
+   "lee la sílaba en voz alta y toca para cerrarla.": "lee_20la_20s_edlaba_20en_20voz_20alta_20y_20toca_20para_20cerrarla_2e.mp3",
+   "~cer": "_7ecer.mp3",
+   "~tel": "_7etel.mp3",
+   "~dis": "_7edis.mp3",
+   "~dul": "_7edul.mp3"
   },
   "ca": {
    "me": "me.mp3",
@@ -1172,10 +1176,17 @@
    "~dor": "_7edor.mp3",
    "~cor": "_7ecor.mp3",
    "~car": "_7ecar.mp3",
-   "llegeix la síl·laba en veu alta i toca per tancar-la.": "llegeix_20la_20s_edl_b7laba_20en_20veu_20alta_20i_20toca_20per_20tancar_2dla_2e.mp3"
+   "llegeix la síl·laba en veu alta i toca per tancar-la.": "llegeix_20la_20s_edl_b7laba_20en_20veu_20alta_20i_20toca_20per_20tancar_2dla_2e.mp3",
+   "~bus": "_7ebus.mp3",
+   "~vol": "_7evol.mp3",
+   "~fus": "_7efus.mp3",
+   "~mos": "_7emos.mp3",
+   "~nel": "_7enel.mp3",
+   "~pis": "_7epis.mp3",
+   "~tel": "_7etel.mp3"
   }
  },
- "generated": "2026-10-18T16:05:35.775Z",
+ "generated": "2026-10-18T16:54:53.223Z",
  "provider": "azure",
  "name": "Elsa",
  "rev": {
@@ -1335,7 +1346,11 @@
    "~dor": 1792339527574,
    "~car": 1792339527734,
    "~cor": 1792339527775,
-   "lee la sílaba en voz alta y toca para cerrarla.": 1792339528517
+   "lee la sílaba en voz alta y toca para cerrarla.": 1792339528517,
+   "~cer": 1792342491435,
+   "~tel": 1792342491474,
+   "~dis": 1792342491514,
+   "~dul": 1792342491864
   },
   "ca": {
    "niu": 1792227124940,
@@ -1559,7 +1574,14 @@
    "~dor": 1792339534724,
    "~cor": 1792339534948,
    "~car": 1792339534988,
-   "llegeix la síl·laba en veu alta i toca per tancar-la.": 1792339535775
+   "llegeix la síl·laba en veu alta i toca per tancar-la.": 1792339535775,
+   "~bus": 1792342491990,
+   "~vol": 1792342492128,
+   "~fus": 1792342492364,
+   "~mos": 1792342492668,
+   "~nel": 1792342492808,
+   "~pis": 1792342492972,
+   "~tel": 1792342493223
   }
  }
 }
