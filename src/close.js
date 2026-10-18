@@ -70,11 +70,22 @@ export function createClose(ctx) {
   const { doc, $, S, t, fmt, rnd, nm, say, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, data, save, rng = Math.random } = ctx;
   const room = $('closeRoom'), html = doc.documentElement;
   let plan = null, idx = 0, over = false, gen = 0, advancing = false;
+  let rescueT = 0, rescued = false, rescueFn = null;
+  const rescueMs = () => doc.defaultView.__leemosRescueMs || 3000;
+  const disarm = () => { clearTimeout(rescueT); rescueT = 0; };
+  // 3 seconds with no tap: model the hard part and leave the rest to her. Once per step; any tap pushes it back; nothing is shown or recorded as a failure.
+  const arm = () => {
+    disarm();
+    if (rescued || advancing || over || !plan || !rescueFn) return;
+    const g = gen;
+    rescueT = later(() => { if (g !== gen || rescued || advancing || over) return; rescued = true; rescueFn(); }, rescueMs());
+  };
+  room.addEventListener('click', () => { if (!rescued) arm(); }, true);
   const bank = () => ((data() || {}).syl) || [];
   const canPlay = () => openSyllables(bank(), pathPos()).length >= MIN_SYL;
   const el = (tag, cls, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
-  function leave() { gen++; plan = null; room.hidden = true; room.innerHTML = ''; html.classList.remove('close'); }
+  function leave() { gen++; disarm(); rescueFn = null; plan = null; room.hidden = true; room.innerHTML = ''; html.classList.remove('close'); }
 
   function begin() {
     gen++;
@@ -131,24 +142,28 @@ export function createClose(ctx) {
     };
     const step = () => {
       if (g0 !== gen) return;
-      cur.innerHTML = '';
+      cur.innerHTML = ''; rescued = false;
       if (i >= units.length) {
         const j = el('button', 'btn primary', t('join')); j.id = 'closeJoin';
         j.onclick = () => { if (joined) return; joined = true; sfx.join(); say(w.text); pic.textContent = w.emoji || ''; pic.hidden = !w.emoji; j.hidden = true; complete(); };
         cur.appendChild(j); j.focus();
+        rescueFn = () => { j.classList.add('rescue'); };
+        arm();
         return;
       }
       const u = units[i];
       const after = () => { const g = gen; later(() => { if (g === gen) dock(u); }, u.closed ? 900 : 0); };
       ctl = u.closed ? unit(cur, { text: u.text, base: u.base, coda: u.coda, peek: false }, after) : openUnit(cur, u, after);
       ctl.coda.focus();
+      rescueFn = () => { if (ctl && !ctl.isDone()) ctl.finish(); }; // models the syllable on screen (stretched if closed) and docks it for her
+      arm();
     };
     step();
   }
 
   function complete() {
     if (advancing) return;
-    advancing = true;
+    advancing = true; disarm();
     $('hint').textContent = fmt(rnd(t('oks')));
     poke('cheer', 900);
     const g = gen;
@@ -156,7 +171,7 @@ export function createClose(ctx) {
   }
 
   function screen(first) {
-    gen++; advancing = false;
+    gen++; advancing = false; disarm(); rescued = false; rescueFn = null;
     const p = plan[idx];
     room.innerHTML = '';
     const dots = el('div', 'close-dots'); dots.setAttribute('role', 'img'); dots.setAttribute('aria-label', t('closeGoal', { i: idx + 1, n: plan.length }));
@@ -167,6 +182,8 @@ export function createClose(ctx) {
     if (p.kind === 'syl') {
       const c = unit(stage, { text: p.syl, base: p.base, coda: p.coda, peek: p.peek }, complete);
       c.coda.focus();
+      rescueFn = () => { say(p.base); c.coda.classList.add('rescue'); }; // the base is modelled, the coda tile pulses harder, and she still has the last tap
+      arm();
     } else {
       wordFlow(stage, p.w);
     }
@@ -174,7 +191,7 @@ export function createClose(ctx) {
   }
 
   function finishSession() {
-    over = true;
+    over = true; disarm();
     const reward = earnSticker(); save(); refresh();
     const msg = t('closeDone', { n: nm() });
     room.innerHTML = '';

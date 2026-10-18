@@ -30,7 +30,7 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
       for (const [k, v] of Object.entries(storage)) w.localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(withPath(k, v)));
       if (openPath && !('leemos-profiles' in storage) && !('leemos-v1' in storage)) w.localStorage.setItem('leemos-v1', JSON.stringify({ pathEs: 12, pathCa: 12 }));
       w.__leemosImport = importFails ? () => Promise.reject(new Error('offline')) : (p) => (hangImport && p.endsWith(hangImport) ? new Promise(() => {}) : import(pathToFileURL(join(ROOT, 'src', p)).href));
-      if (hangImport) w.__leemosFindTimeout = 150; // a stalled import must give up; short here so the test does not wait
+      if (hangImport) { w.__leemosFindTimeout = 150; w.__leemosCloseTimeout = 150; } // a stalled import must give up; short here so the test does not wait
       w.matchMedia = (q) => ({ matches: reduced && /reduced-motion/.test(q), addEventListener() {}, removeListener() {} });
       w.speechSynthesis = { getVoices: () => [{ name: 'Joana Online (Natural)', lang: 'ca-ES', voiceURI: 'j' }, { name: 'Google español', lang: 'es-ES', voiceURI: 'g' }], cancel() {}, speak(u) { (w.__tts ||= []).push(u.text); } };
       w.SpeechSynthesisUtterance = function (t) { this.text = t; };
@@ -1968,6 +1968,66 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     for (let k = 0; k < 2; k++) { act()?.click(); await sleep(20); }
     const j2 = wx.$('closeJoin'); if (j2) { j2.click(); await sleep(30); }
     check('close: after the second word the session ends with one sticker, nothing else recorded', csaved(wx).stickers === 1 && !csaved(wx).total && !wx.$('reward').hidden && wx.errors.length === 0, `stickers=${csaved(wx).stickers} ${wx.errors.join('|')}`);
+  }
+
+  // the 3-second rescue: once per step, never an error signal, nothing recorded
+  {
+    const spoken = (rx, v) => played(rx, 'c' + v) + (rx.w.__tts || []).filter((q) => q === v).length;
+    let rx = await boot({ storage: CR(), manifest: cman }); rx.w.__audioMode = 'auto'; rx.w.__leemosRescueMs = 150;
+    rx.$('mClose').click(); await until(() => !croom(rx).hidden); await sleep(40);
+    const b1 = base(rx);
+    check('close: after 3 s without a tap Lumi plays the base and the coda tile pulses harder; the child still has the last tap', action(rx).classList.contains('rescue') && !action(rx).classList.contains('docked') && spoken(rx, b1) >= 1);
+    const n1 = spoken(rx, b1);
+    await sleep(60);
+    rx.d.querySelector('.close-dots').click(); await sleep(60); // a tap that does nothing re-arms a timer that must not fire a second rescue
+    check('close: the rescue fires once per step (no repeated nagging, even after another tap)', spoken(rx, b1) === n1);
+    check('close: the rescue shows or plays no error signal and records nothing', !rx.d.querySelector('.wobble, .error, .wrong') && (csaved(rx).stickers | 0) === 0 && !csaved(rx).total && JSON.stringify(csaved(rx).stats || {}) === '{}');
+    action(rx).click(); await sleep(60);
+    check('close: after the tap the next screen has its own fresh rescue (it does not carry over)', !!action(rx) && action(rx).classList.contains('rescue') && rx.errors.length === 0, rx.errors.join('|'));
+    // word screen: the syllable on screen is modelled and docked for her, the rest is hers
+    rx = await boot({ storage: CR({ pathEs: 12 }), manifest: cman }); rx.w.__audioMode = 'auto'; rx.w.__leemosRescueMs = 9000;
+    rx.$('mClose').click(); await until(() => !croom(rx).hidden);
+    for (let i = 0; i < 4; i++) { action(rx).click(); await sleep(20); }
+    rx.w.__leemosRescueMs = 150;
+    rx.d.querySelector('.close-anchors').click(); await sleep(60); // a tap in the room re-arms the rescue with the short time
+    check('close: on a word screen the rescue docks the syllable on screen into the anchor chip', rx.d.querySelectorAll('.close-chip').length >= 1 && rx.errors.length === 0, `chips=${rx.d.querySelectorAll('.close-chip').length} ${rx.errors.join('|')}`);
+    check('close: the rescue never finishes the whole word for her (no sticker, picture still hidden)', (csaved(rx).stickers | 0) === 0 && (!rx.d.querySelector('.close-pic') || rx.d.querySelector('.close-pic').hidden));
+    // leaving cancels the rescue
+    rx = await boot({ storage: CR(), manifest: cman }); rx.w.__audioMode = 'auto'; rx.w.__leemosRescueMs = 150;
+    rx.$('mClose').click(); await until(() => !croom(rx).hidden); rx.$('mSyl').click(); await sleep(60);
+    check('close: leaving the mode cancels a pending rescue (no error, no sound after leaving)', rx.errors.length === 0 && croom(rx).hidden, rx.errors.join('|'));
+  }
+
+  // stray next() calls and the other guards
+  {
+    let gx = await startC();
+    action(gx).click(); await sleep(20);
+    gx.$('wordStyleSel').value = 'whole'; gx.$('wordStyleSel').dispatchEvent(new gx.w.Event('change')); await sleep(30);
+    check('close: a change of word style mid-session keeps the screen she is on', gx.d.querySelectorAll('.close-dots i.on').length === 1);
+    gx.$('langBtn').click(); await sleep(30);
+    check('close: changing the language starts a new session in that language', gx.d.querySelectorAll('.close-dots i.on').length === 0 && gx.$('hint').textContent === 'Llegeix la síl·laba en veu alta i toca per tancar-la.');
+    gx = await startC();
+    action(gx).click(); await sleep(20);
+    gx.d.querySelectorAll('#pathRow button')[3].click(); await sleep(30);
+    check('close: a parent moving the Camino starts a new session', gx.d.querySelectorAll('.close-dots i.on').length === 0 && !!action(gx));
+    gx.$('mClose').click(); await sleep(20);
+    check('close: tapping Cierra again keeps the session', !!action(gx));
+    // the module cannot load or stalls
+    gx = await boot({ storage: CR({ mode: 'close' }), manifest: cman, importFails: true }); await sleep(30);
+    check('close: if the module cannot load the app shows a normal exercise and keeps the saved mode', croom(gx).hidden && gx.d.querySelectorAll('.tile').length > 0 && csaved(gx).mode === 'close');
+    gx = await boot({ storage: CR({ mode: 'close' }), manifest: cman, hangImport: 'close.js' }); await sleep(30);
+    check('close: a stalled import gives up and shows a normal exercise, keeping the saved mode', croom(gx).hidden && gx.d.querySelectorAll('.tile').length > 0 && csaved(gx).mode === 'close');
+    // the reading session's end must not open over the game
+    gx = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, world: 0, pathEs: 12, pathCa: 12 } }, manifest: cman });
+    await playSession(gx, 4);
+    gx.$('joinBtn').click(); gx.$('okBtn').click();
+    gx.$('mClose').click(); await sleep(30);
+    check('close: Cierra is ignored while the end of a reading session is on its way', croom(gx).hidden && csaved(gx).mode !== 'close' && !gx.$('reward').hidden);
+    // screen readers and keyboard
+    gx = await startC();
+    check('close: the coda tile has a label that names the letter, and focus starts on it', action(gx).getAttribute('aria-label').includes('l') && gx.d.activeElement === action(gx));
+    await finishScreen(gx); await finishScreen(gx); await finishScreen(gx);
+    check('close: the "?" card has a label that says it covers the letter, and each new screen focuses the action', action(gx).classList.contains('close-card') && action(gx).getAttribute('aria-label').length > 3 && gx.d.activeElement === action(gx));
   }
 
   // Leo never sees the mode
