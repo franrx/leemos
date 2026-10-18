@@ -1875,5 +1875,75 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('find: Leo is in his own screen where the modes row is hidden', x.d.documentElement.classList.contains('pre'));
 }
 
+// ---------- 44. Cierra / Tanca: closed syllables built as 2 + 1 ----------
+{
+  const CR = (extra = {}) => ({ 'leemos-v1': { name: 'Elsa', pathEs: 3, pathCa: 12, world: 0, ...extra } });
+  const cman = { generated: 'test', clips: { es: new Proxy({}, { get: (_, k) => (typeof k === 'string' ? 'c' + k + '.mp3' : undefined) }), ca: {} } };
+  const croom = (x) => x.$('closeRoom');
+  const csaved = (x) => JSON.parse(x.w.localStorage.getItem('leemos-v1'));
+  const cprogress = (x) => JSON.stringify({ s: csaved(x).stats, t: csaved(x).total, p: csaved(x).progress, lv: csaved(x).level, sess: csaved(x).session });
+  const base = (x) => x.d.querySelector('.close-tile.base')?.textContent;
+  const action = (x) => x.d.querySelector('.close-coda') || x.d.querySelector('.close-card');
+  const played = (x, f) => x.audioCalls.filter((u) => u.startsWith('audio/es/' + f)).length;
+  const startC = async (extra, opts = {}) => { const x = await boot({ storage: CR(extra), manifest: cman, ...opts }); x.w.__audioMode = 'auto'; x.w.__leemosRescueMs = 9000; x.$('mClose').click(); await until(() => !croom(x).hidden); return x; };
+  const finishScreen = async (x) => { action(x).click(); await sleep(20); };
+
+  // locked at steps 1-2, open at 3
+  let x = await boot({ storage: CR({ pathEs: 2 }), manifest: cman });
+  x.$('mClose').click(); await sleep(30);
+  check('close: with no coda letter open (Camino step 2) the button says so and the saved mode does not change', croom(x).hidden && x.$('hint').textContent === 'Cierra se abre con la letra L.' && (csaved(x).mode || 'syl') === 'syl');
+  x = await startC();
+  check('close: at step 3 the mode opens, the fourth button is pressed and the reading screen is replaced', !croom(x).hidden && x.d.documentElement.classList.contains('close') && x.$('mClose').getAttribute('aria-pressed') === 'true' && csaved(x).mode === 'close');
+  // the first syllable screen: base + glowing coda tile, an arc, the base sound
+  const b0 = base(x), a0 = action(x);
+  check('close: a syllable screen shows the CV base and a glowing coda tile (+l at step 3), never three letters at once', /^[a-z]{2}$/.test(b0) && a0.classList.contains('close-coda') && a0.textContent === '+l' && !!x.d.querySelector('.close-arc') && !x.d.querySelector('.close-arc').classList.contains('wide'));
+  check('close: the first screen of the session says the instruction text and shows 6 dots', x.$('hint').textContent === 'Lee la sílaba en voz alta y toca para cerrarla.' && x.d.querySelectorAll('.close-dots i').length === 6);
+  const st0 = cprogress(x), tts0 = (x.w.__tts || []).length;
+  x.d.querySelector('.close-tile.base').click();
+  check('close: tapping the base plays the base sound', (x.w.__tts || []).length > tts0 || played(x, 'c' + b0) > 0);
+  action(x).click();
+  const syl0 = b0 + 'l';
+  check('close: tapping the coda docks it, grows the arc and plays the STRETCHED clip (~syllable)', x.d.querySelector('.close-coda.docked')?.textContent === 'l' && x.d.querySelector('.close-arc').classList.contains('wide') && played(x, 'c~' + syl0) === 1, `plays=${played(x, 'c~' + syl0)} ${syl0}`);
+  action(x)?.click(); action(x)?.click();
+  check('close: tapping the docked coda again does nothing (the stretched clip plays once)', played(x, 'c~' + syl0) === 1);
+  await sleep(20);
+  check('close: the next screen starts by itself with one dot filled', x.d.querySelectorAll('.close-dots i.on').length === 1 && !x.d.querySelector('.close-coda.docked'));
+  check('close: nothing is recorded (stats, total, level, session) and there is no sticker yet', cprogress(x) === st0 && (csaved(x).stickers | 0) === 0);
+  // the second half of the syllable screens peeks
+  await finishScreen(x); await finishScreen(x);
+  const card = x.d.querySelector('.close-card');
+  check('close: from the 4th screen the coda is hidden behind a "?" card, and tapping it reveals the letter with the stretched clip', !!card && card.textContent === '?' && (() => { const bs = base(x); card.click(); return card.textContent === 'l' && played(x, 'c~' + bs + 'l') === 1; })());
+  await sleep(20);
+  await finishScreen(x); await finishScreen(x);
+  check('close: after 6 screens a sticker is given once, the reward shows and the again button appears', csaved(x).stickers === 1 && !x.$('reward').hidden && !!x.$('closeAgain'), `stickers=${csaved(x).stickers}`);
+  check('close: the whole session left stats, total and the session counters untouched', cprogress(x) === st0);
+  x.$('rewardOk').click(); x.$('closeAgain').click(); await sleep(10);
+  check('close: again starts a new session from screen 1', x.d.querySelectorAll('.close-dots i.on').length === 0 && !!action(x) && csaved(x).stickers === 1);
+  check('close: the whole run raised no errors', x.errors.length === 0, x.errors.join(' | '));
+
+  // leaving the mode closes it and cancels the pending screen
+  x = await startC();
+  action(x).click(); x.$('mSyl').click(); await sleep(30);
+  check('close: changing mode mid-session closes it, no sticker, and the pending screen does not reopen it', croom(x).hidden && !x.d.documentElement.classList.contains('close') && (csaved(x).stickers | 0) === 0 && csaved(x).mode === 'syl' && x.errors.length === 0, x.errors.join(' | '));
+  // Busca and Cierra never overlap
+  x = await startC();
+  x.$('mFind').click(); await until(() => !x.$('findRoom').hidden);
+  check('close: opening Busca closes Cierra (one play mode on screen at a time)', croom(x).hidden && !x.$('findRoom').hidden && !x.d.documentElement.classList.contains('close') && x.d.documentElement.classList.contains('find'));
+  x.$('mClose').click(); await until(() => !croom(x).hidden);
+  check('close: and back', x.$('findRoom').hidden && !croom(x).hidden && !x.d.documentElement.classList.contains('find'));
+  // a saved mode starts on load, in Catalan too
+  x = await boot({ storage: CR({ mode: 'close' }), manifest: cman }); await until(() => !croom(x).hidden);
+  check('close: a saved mode starts the session on load and highlights its button', !croom(x).hidden && x.$('mClose').getAttribute('aria-pressed') === 'true' && x.$('mSyl').getAttribute('aria-pressed') === 'false');
+  x = await boot({ storage: CR({ lang: 'ca', pathCa: 3 }), manifest: cman }); x.$('mClose').click(); await until(() => !croom(x).hidden);
+  check('close (ca): works in Catalan', !croom(x).hidden && x.$('hint').textContent === 'Llegeix la síl·laba en veu alta i toca per tancar-la.');
+  // Aa changes the case of the screen on screen
+  x = await startC();
+  x.$('caseBtn').click();
+  check('close: the Aa button changes the case of the screen on screen', !croom(x).classList.contains('upper') && csaved(x).upper === false);
+  // Leo never sees the mode
+  x = await bootLeo();
+  check('close: Leo is on his own screen where the modes row is hidden', x.d.documentElement.classList.contains('pre'));
+}
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

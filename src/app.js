@@ -129,8 +129,9 @@ LEVELS=LV[S.lang]||LV_ES;
 if(!(S.level>=0&&S.level<LEVELS.length)){S.level=0;lastFp=fpOf()} // a correction, not a progress change: no modAt stamp // a saved level that does not exist (newer app version, bad data) falls back to the first
 let cur=null,last=null,phase='read',resetArmed=false;
 let pre=null;
-const GAMEDEF={find:{file:'find.js',create:'createFind',ms:'__leemosFindTimeout',lock:'findLocked'}}; // play modes loaded the first time they are used
+const GAMEDEF={find:{file:'find.js',create:'createFind',ms:'__leemosFindTimeout',lock:'findLocked'},close:{file:'close.js',create:'createClose',ms:'__leemosCloseTimeout',lock:'closeLocked',data:'closed'}}; // play modes loaded the first time they are used
 const G={},GP={}; // loaded modules and pending loads, by game name
+const CLOSED={}; // closed.<lang>.json, loaded with the close module
 const activeGame=()=>Object.values(G).find(g=>g&&g.active())||null;
 const isGame=m=>Object.prototype.hasOwnProperty.call(GAMEDEF,m);
 let curWorld=Math.floor(Math.random()*WORLDS.length);
@@ -938,9 +939,10 @@ function loadGame(name){
   return GP[name]||(GP[name]=(async()=>{
     try{
       const imp=window.__leemosImport||(p=>import(p));
-      const mod=await Promise.race([imp('./'+def.file),new Promise((_,no)=>setTimeout(()=>no(new Error('timeout')),window[def.ms]||5000))]); // a stalled network must not hold the first screen
+      const load=Promise.all([imp('./'+def.file),def.data?Promise.all(['es','ca'].map(l=>loadJSON('src/data/'+def.data+'.'+l+'.json').then(d=>{CLOSED[l]=d}))):null]).then(r=>r[0]);
+      const mod=await Promise.race([load,new Promise((_,no)=>setTimeout(()=>no(new Error('timeout')),window[def.ms]||5000))]); // a stalled network must not hold the first screen
       G[name]=mod[def.create]({doc:document,$,S,t,fmt,rnd,nm,say,lumiPlay,sayLumi,sfx,poke,sparkle:sparkleBurst,later:(f,ms)=>setTimeout(f,ms),
-        earnSticker,showReward,refresh:()=>{renderLevels();renderHard();renderAlbum()},pathPos,levels:()=>LEVELS,save});
+        earnSticker,showReward,refresh:()=>{renderLevels();renderHard();renderAlbum()},pathPos,levels:()=>LEVELS,data:()=>CLOSED[S.lang],save});
       return G[name];
     }catch(e){GP[name]=null;return null}
   })());
@@ -953,6 +955,7 @@ async function openGame(name){
   S.mode=name;save();renderMode();next();
 }
 $('mFind').onclick=()=>openGame('find');
+$('mClose').onclick=()=>openGame('close');
 function setMode(m){
   if(m==='word'&&openItems('word').length<MIN_WORDS){$('hint').textContent=t('wordsLocked');return} // dimmed: not enough words are open yet, and say so
   S.mode=m;save();
@@ -998,6 +1001,7 @@ function applyCase(){
   document.body.classList.toggle('upper',S.upper);
   $('tiles').classList.toggle('upper',S.upper);
   $('findRoom').classList.toggle('upper',S.upper);
+  $('closeRoom').classList.toggle('upper',S.upper);
 }
 $('rate').value=S.rate;
 $('rate').oninput=e=>{S.rate=parseFloat(e.target.value);save()};

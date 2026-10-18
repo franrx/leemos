@@ -34,7 +34,8 @@ h1{margin:0;font-size:1.5rem;letter-spacing:.01em}
 .level .bar i{display:block;height:100%;background:var(--ok);width:0;transition:width .4s}
 .level[aria-pressed="true"]{border-color:var(--c2);box-shadow:0 0 0 3px color-mix(in srgb,var(--c2) 30%,transparent)}
 
-.modes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:6px 0 14px}
+.modes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:6px 0 14px}
+@media (max-width:480px){.modes{grid-template-columns:1fr 1fr}}
 .mode{border:2px solid var(--line);background:var(--panel);border-radius:14px;padding:12px;font-weight:700;min-height:48px;transition:opacity .2s ease-out}
 .mode[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 
@@ -249,8 +250,35 @@ html.find .session,html.find #goal,html.find #tiles,html.find #pic,html.find #st
 .find-room.upper .find-tile,.find-room.upper .find-target{text-transform:uppercase}
 .find-done{font-size:1.3rem;font-weight:700;text-align:center}
 @keyframes findWobble{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+/* Cierra / Tanca */
+html.close .session,html.close #goal,html.close #tiles,html.close #pic,html.close #stage .actions{display:none!important}
+.close-room{display:flex;flex-direction:column;align-items:center;gap:18px;width:100%}
+.close-dots{display:flex;gap:7px}
+.close-dots i{width:16px;height:16px;border-radius:50%;background:color-mix(in srgb,var(--ink) 14%,transparent)}
+.close-dots i.on{background:var(--c1)}
+.close-stage{display:flex;flex-direction:column;align-items:center;gap:14px;width:100%;min-height:220px}
+.close-unit{display:flex;flex-direction:column;align-items:stretch;gap:6px}
+.close-syl{display:flex;gap:10px;justify-content:center}
+.close-tile,.close-coda,.close-card,.close-chip{font:inherit;font-weight:700;color:var(--ink);background:var(--panel);border:3px solid var(--c2);border-radius:18px;cursor:pointer;touch-action:manipulation}
+.close-tile,.close-coda,.close-card{font-size:clamp(48px,14vw,88px);min-width:72px;min-height:88px;padding:4px 18px}
+.close-chip{font-size:1.4rem;min-height:48px;min-width:56px;padding:4px 14px}
+.close-coda{border-style:dashed;color:var(--c2)}
+.close-coda.glow,.close-card{animation:closeGlow 1.6s ease-in-out infinite}
+.close-coda.rescue{animation-duration:.6s;background:color-mix(in srgb,var(--c1) 35%,var(--panel))}
+.close-coda.docked{border-style:solid;color:var(--ink);animation:none}
+.close-card{background:color-mix(in srgb,var(--c2) 18%,var(--panel))}
+.close-arc{height:14px;border:5px solid var(--c2);border-top:none;border-radius:0 0 40px 40px;transform-origin:left;transform:scaleX(.5);transition:transform .35s ease}
+.close-arc.wide{transform:scaleX(1)}
+.close-anchors{display:flex;gap:8px;min-height:48px}
+.close-current{display:flex;flex-direction:column;align-items:center;gap:10px}
+.close-pic{font-size:72px;line-height:1}
+.close-tile:focus-visible,.close-coda:focus-visible,.close-card:focus-visible,.close-chip:focus-visible{outline:3px solid var(--c1);outline-offset:3px}
+.close-room.upper .close-tile,.close-room.upper .close-coda,.close-room.upper .close-card,.close-room.upper .close-chip{text-transform:uppercase}
+.close-done{font-size:1.3rem;font-weight:700;text-align:center}
+@keyframes closeGlow{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c1) 0%,transparent)}50%{box-shadow:0 0 0 8px color-mix(in srgb,var(--c1) 55%,transparent)}}
 @media (prefers-reduced-motion: reduce){
   .find-tile.wobble{animation:none}
+  .close-coda.glow,.close-card,.close-coda.rescue{animation:none}.close-arc{transition:none}
   .newletter,.newletter::after,.sticker.fresh{animation:none}
   .newletter::after{opacity:0}
   .path-row button,.mode{transition:none}
