@@ -79,6 +79,7 @@ Sílabas inversas de 2 letras (ab, ic, um…): Azure las deletrea («a be»). Re
 ## Convenciones de UI
 - Colores como tokens en `:root` con variante oscura; objetivos táctiles ≥ 44 px; foco visible; `prefers-reduced-motion` desactiva animaciones (confeti, mascota, transiciones).
 - Tipografía Andika (pensada para lectores iniciales). Tiene que haber fallback.
+- Movimiento: una sola escena de autor por pantalla y solo transform/opacity. La letra nueva del Camino aparece como una ficha (los mismos colores que las fichas de sílaba) al terminar la sesión, con un anillo y un estallido de chispas; la pegatina recién ganada se encuentra en el álbum (se abre desplazado a su hueco, que aparece una vez: `freshSticker`); las letras del bloque Camino se actualizan en su sitio (no se reconstruyen) para poder transicionar. Todo con `prefers-reduced-motion`: estático y visible. No se puede probar la animación en jsdom: solo las clases y las chispas (`.spark`, que el arnés borra al instante, se cuentan con un MutationObserver).
 - Al añadir texto de interfaz: clave en `i18n.es.json` **y** `i18n.ca.json`, y `data-i="clave"` en el HTML (o `t('clave')` en JS). Atributos traducibles con `data-ia="atributo:clave;otro:clave"`.
 - La mascota es **Lumi**, un búho original. **No usar personajes con derechos de autor** (Frozen, etc.) aunque el nombre de la niña invite a ello.
 
