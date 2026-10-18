@@ -238,3 +238,6 @@ html.pre #path{display:none!important}
 /* Leo: the answers wait for the sound (dimmed, and the browser blocks the taps), and when the browser refused to play it by itself the speaker is the one thing to press. */
 .pre-choices.waiting .pre-choice{opacity:.4}
 .pre-hear.needed{outline:4px solid var(--c2);outline-offset:4px}
+/* Fast repeated taps (the speaker, the answers) must not zoom the page or select text on phones and tablets: double-tap zoom is off, pinch zoom stays. */
+html,body,button,.btn,.icon-btn,.tile,.pre-choice,.pre-letter,.pre-word,.level,.wbtn,.mode,summary,label{touch-action:manipulation}
+button,.btn,.icon-btn,.tile,.pre-choice,.pre-letter,.pre-word,.level,.wbtn,.mode,#stage{-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}

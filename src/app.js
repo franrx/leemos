@@ -840,6 +840,7 @@ function renderSession(){
   $('sfill').style.width=Math.round(100*d/n)+'%';
   $('slabel').textContent=t('recOf',{i:d,n:n});
   const b=$('sbar');b.setAttribute('aria-valuemax',n);b.setAttribute('aria-valuenow',d);
+  renderGoal(); // the dots follow the same counters: a session that was reset or resized must not keep the previous row
   save(); // persists the session counters wherever they are reset or advanced
 }
 function showEnd(){

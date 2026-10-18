@@ -1496,5 +1496,38 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('the whole run raised no errors', x.errors.length === 0, x.errors.join(' | '));
 }
 
+// ---------- 40. a new session starts with an empty row of dots, and fast taps do not zoom ----------
+{
+  const dotsOn = (x) => x.d.querySelectorAll('#goal i.on').length;
+  const dots = (x) => x.d.querySelectorAll('#goal i').length;
+  // reader: finish a session, press "Otra sesión": the dots must be empty before the first answer
+  let x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, world: 0, pathEs: 12, pathCa: 12 } } });
+  await playSession(x, 5);
+  check('dots: the end of a session shows every dot filled', dotsOn(x) === 5 && dots(x) === 5, String(dotsOn(x)));
+  x.$('endMore').click();
+  check('dots: pressing Otra sesión empties them straight away, before the first answer', dots(x) === 5 && dotsOn(x) === 0, String(dotsOn(x)));
+  // Leo
+  x = await bootLeo();
+  x.$('prePlay').click(); await playPre(x, 5); await sleep(10);
+  check('dots (Leo): the end of a session shows every dot filled', dotsOn(x) === 5, String(dotsOn(x)));
+  x.$('endMore').click(); await sleep(10);
+  check('dots (Leo): and the next session starts with none filled', dotsOn(x) === 0 && dots(x) === 5, String(dotsOn(x)));
+  // the "enough for today" rest and starting again
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, world: 0, pathEs: 12, pathCa: 12 } } });
+  await playSession(x, 5);
+  x.$('endStop').click(); await sleep(5);
+  x.$('mWord').click(); await sleep(5); // a parent changing the mode ends the rest and starts a new session
+  check('dots: resting and coming back starts with none filled', dotsOn(x) === 0 && /0 de 5/.test(x.$('slabel').textContent), `${dotsOn(x)} ${x.$('slabel').textContent}`);
+  // a longer session length from the parent panel: the row is redrawn with the new length
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, world: 0, pathEs: 12, pathCa: 12 } } });
+  x.$('sessionSel').value = '10'; x.$('sessionSel').dispatchEvent(new x.w.Event('change')); await sleep(5);
+  check('dots: changing the session length redraws the row with that many dots, none filled', dots(x) === 10 && dotsOn(x) === 0, `${dots(x)} ${dotsOn(x)}`);
+
+  // fast repeated taps must not zoom the page or select text (double-tap zoom off, pinch zoom stays)
+  const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
+  check('zoom: double-tap zoom is turned off for the whole page with touch-action: manipulation (pinch zoom is kept)', /html[^{]*\{[^}]*touch-action:\s*manipulation/.test(css) && !/user-scalable\s*=\s*no|maximum-scale/.test(readFileSync(join(ROOT, 'index.html'), 'utf8')));
+  check('zoom: the buttons, tiles and answers also carry it, and the game area cannot be selected or long-pressed into a menu', /\.pre-choice[^{]*\{[^}]*touch-action:\s*manipulation/.test(css) && /#stage[^{]*\{[^}]*user-select:\s*none/.test(css) && /-webkit-touch-callout:\s*none/.test(css));
+}
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
