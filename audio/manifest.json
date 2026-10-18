@@ -521,7 +521,8 @@
    "techo": "techo.mp3",
    "¡escucha! ahora papá o mamá me dicen cómo te salió.": "_a1escucha_21_20ahora_20pap_e1_20o_20mam_e1_20me_20dicen_20c_f3mo_20te_20sali_f3_2e.mp3",
    "elsa, lee cada sílaba y únelas. toca una para oírla.": "elsa_2c_20lee_20cada_20s_edlaba_20y_20_fanelas_2e_20toca_20una_20para_20o_edrla_2e.mp3",
-   "elsa, lee la sílaba en voz alta. luego pulsa «juntar».": "elsa_2c_20lee_20la_20s_edlaba_20en_20voz_20alta_2e_20luego_20pulsa_20_abjuntar_bb_2e.mp3"
+   "elsa, lee la sílaba en voz alta. luego pulsa «juntar».": "elsa_2c_20lee_20la_20s_edlaba_20en_20voz_20alta_2e_20luego_20pulsa_20_abjuntar_bb_2e.mp3",
+   "elsa, lee la palabra en voz alta, tú sola.": "elsa_2c_20lee_20la_20palabra_20en_20voz_20alta_2c_20t_fa_20sola_2e.mp3"
   },
   "ca": {
    "me": "me.mp3",
@@ -1094,10 +1095,11 @@
    "deus": "deus.mp3",
    "elsa, llegeix cada síl·laba i uneix-les. toca'n una per sentir-la.": "elsa_2c_20llegeix_20cada_20s_edl_b7laba_20i_20uneix_2dles_2e_20toca_27n_20una_20per_20sentir_2dla_2e.mp3",
    "elsa, llegeix la síl·laba en veu alta. després prem «ajuntar».": "elsa_2c_20llegeix_20la_20s_edl_b7laba_20en_20veu_20alta_2e_20despr_e9s_20prem_20_abajuntar_bb_2e.mp3",
-   "escolta! ara el pare o la mare em diuen com t'ha sortit.": "escolta_21_20ara_20el_20pare_20o_20la_20mare_20em_20diuen_20com_20t_27ha_20sortit_2e.mp3"
+   "escolta! ara el pare o la mare em diuen com t'ha sortit.": "escolta_21_20ara_20el_20pare_20o_20la_20mare_20em_20diuen_20com_20t_27ha_20sortit_2e.mp3",
+   "elsa, llegeix la paraula en veu alta, tu sola.": "elsa_2c_20llegeix_20la_20paraula_20en_20veu_20alta_2c_20tu_20sola_2e.mp3"
   }
  },
- "generated": "2026-10-17T09:51:30.092Z",
+ "generated": "2026-10-18T14:09:31.372Z",
  "provider": "azure",
  "name": "Elsa",
  "rev": {
@@ -1218,7 +1220,8 @@
    "¡tú puedes, elsa! vamos otra vez.": 1792230540236,
    "¡escucha! ahora papá o mamá me dicen cómo te salió.": 1792230687578,
    "elsa, lee cada sílaba y únelas. toca una para oírla.": 1792230688253,
-   "elsa, lee la sílaba en voz alta. luego pulsa «juntar».": 1792230688308
+   "elsa, lee la sílaba en voz alta. luego pulsa «juntar».": 1792230688308,
+   "elsa, lee la palabra en voz alta, tú sola.": 1792332571324
   },
   "ca": {
    "niu": 1792227124940,
@@ -1403,7 +1406,8 @@
    "sessió completada, elsa!": 1792230544651,
    "elsa, llegeix cada síl·laba i uneix-les. toca'n una per sentir-la.": 1792230689421,
    "elsa, llegeix la síl·laba en veu alta. després prem «ajuntar».": 1792230689592,
-   "escolta! ara el pare o la mare em diuen com t'ha sortit.": 1792230690092
+   "escolta! ara el pare o la mare em diuen com t'ha sortit.": 1792230690092,
+   "elsa, llegeix la paraula en veu alta, tu sola.": 1792332571372
   }
  }
 }

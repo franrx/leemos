@@ -1,5 +1,7 @@
 // Tests for the Azure provider with a fake fetch: request shape, SSML wrapping, errors, and the voice-list check.
 import { synthesize, listVoices } from '../scripts/providers/azure.mjs';
+import { buildClipList } from '../scripts/lib/clips.mjs';
+import { readFileSync } from 'node:fs';
 
 let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
@@ -54,6 +56,28 @@ reply = () => ({ ok: false, status: 403, statusText: 'Forbidden', text: async ()
 msg = '';
 try { await listVoices({ env }); } catch (e) { msg = e.message; }
 check('voices: an HTTP error is reported with its body', /HTTP 403/.test(msg) && /wrong region/.test(msg), msg);
+
+// Lumi's instruction phrases are an explicit list in scripts/lib/clips.mjs: a phrase the app speaks (hintFor in app.js) has to be in it, or no audio is ever generated for it.
+for (const lang of ['es', 'ca']) {
+  const i18n = JSON.parse(readFileSync(new URL(`../src/data/i18n.${lang}.json`, import.meta.url), 'utf8'));
+  const phrases = buildClipList({ name: 'Elsa', langs: [lang] }).filter((c) => c.kind === 'phrase').map((c) => c.text);
+  const filled = (k) => i18n[k].replace('{n}', 'Elsa');
+  check(`clips: the ${lang} phrase list has the three instructions Lumi says for words and syllables, and the whole-word one`, ['hintSyl', 'hintWord', 'hintWhole', 'hintJudge'].every((k) => phrases.includes(filled(k))), ['hintSyl', 'hintWord', 'hintWhole', 'hintJudge'].filter((k) => !phrases.includes(filled(k))).join(','));
+}
+
+// ...and its audio has to exist: a phrase in the list whose clip is missing from the manifest or from disk would leave Lumi silent for it.
+{
+  const { existsSync } = await import('node:fs');
+  const manifest = JSON.parse(readFileSync(new URL('../audio/manifest.json', import.meta.url), 'utf8'));
+  for (const lang of ['es', 'ca']) {
+    const i18n = JSON.parse(readFileSync(new URL(`../src/data/i18n.${lang}.json`, import.meta.url), 'utf8'));
+    const missing = ['hintSyl', 'hintWord', 'hintWhole', 'hintJudge'].filter((k) => {
+      const file = manifest.clips[lang][i18n[k].replace('{n}', 'Elsa').toLowerCase()];
+      return !file || !existsSync(new URL(`../audio/${lang}/${file}`, import.meta.url));
+    });
+    check(`clips: Lumi's ${lang} instructions (syllables, words, whole words, judging) all have their audio in the manifest and on disk`, missing.length === 0, missing.join(','));
+  }
+}
 
 console.log(failures ? `\n${failures} azure test(s) FAILED` : '\nAll azure tests passed');
 process.exit(failures ? 1 : 0);
