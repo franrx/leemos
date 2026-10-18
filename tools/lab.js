@@ -15,6 +15,7 @@
   const total = Math.max(1, Math.min(200, parseInt(qs.get('n'), 10) || 40));
   const seed = parseInt(qs.get('seed'), 10) || 1;
   const upper = qs.get('upper') !== '0'; // the app shows capitals by default
+  const pauseMs = qs.has('pause') ? Math.max(0, Math.min(3000, parseInt(qs.get('pause'), 10) || 0)) : 600; // after a tap, before the next item: the click of the tap must not be in the next recording
   const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14); // down to the second: a reload must not reuse the folder of the previous run
   const session = `${who}-${kind}-${stamp}`; // matches /^[a-z0-9-]{3,40}$/ on the server
 
@@ -22,6 +23,15 @@
   let tries = 0, triesIdx = -1, startLagMs = null, closed = false;
   let peak = 1, ticks = 0, meterOn = false, raf = 0, audioCtx = null, source = null;
   const status = (t) => { $('status').textContent = t || ''; };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Shown between a tap and the next item: nothing is recorded, so neither the click of the tap nor the movement after it is in the clip.
+  async function pause() {
+    if (!pauseMs) return;
+    $('big').textContent = '…'; $('big').className = 'big'; $('ctx').textContent = '';
+    status('Siguiente…');
+    show(['wipe']);
+    await sleep(pauseMs);
+  }
   const show = (ids) => { for (const id of ['start', 'done', 'retry', 'ok', 'fail', 'wipe']) $(id).hidden = !ids.includes(id); };
 
   const mulberry32 = (a) => () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -76,13 +86,25 @@
     source = null; $('meterFill').style.width = '0%';
   }
 
+  const pickMime = () => ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
+
+  // The first MediaRecorder of a page took 1.3 s to really start in a real test (the next ones about 60 ms), which would hide the first
+  // reading's reaction time. Start and stop one before the first item so that the cost is paid here.
+  async function warmUp() {
+    try {
+      const w = new MediaRecorder(stream, pickMime() ? { mimeType: pickMime() } : undefined);
+      await new Promise((res) => { w.onstart = res; setTimeout(res, 3000); w.start(); });
+      await new Promise((res) => { w.onstop = res; setTimeout(res, 1000); w.stop(); });
+    } catch (e) { /* the real recording will say if the microphone cannot record */ }
+  }
+
   function startRecording() {
     const it = items[idx];
     $('big').textContent = upper ? it.text.toUpperCase() : it.text;
     $('big').className = it.k === 'w' ? 'big word' : 'big';
     $('ctx').textContent = kind === 'wrong' ? 'Di OTRA cosa, mal a propósito (otra sílaba u otra palabra)' : '';
     $('info').textContent = `${who} · ${kind} · nivel ${level} · ${idx + 1} de ${items.length}`;
-    const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
+    const mime = pickMime();
     recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
     chunks = [];
     recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
@@ -144,7 +166,7 @@
       return;
     }
     idx++;
-    if (idx < items.length) startRecording();
+    if (idx < items.length) { await pause(); if (closed) return; startRecording(); }
     else { releaseMic(); $('big').textContent = '✓'; $('big').className = 'big'; $('ctx').textContent = ''; $('info').textContent = `${who} · ${kind} · terminado: ${items.length} lecturas (sesión ${session})`; status('Terminado. Los archivos están en lab/' + session + '/'); show(['wipe']); }
   }
 
@@ -157,6 +179,11 @@
       items = buildItems(await r.json());
     } catch (e) { status('No encuentro el servidor local. Ejecuta «npm run dev» y abre http://localhost:5173/tools/lab.html'); return; }
     idx = 0;
+    status('Preparando el micrófono…');
+    show(['wipe']);
+    await warmUp();
+    await pause();
+    if (closed) return;
     startRecording();
   }
 
@@ -171,7 +198,7 @@
 
   $('start').onclick = begin;
   $('done').onclick = onDone;
-  $('retry').onclick = () => { show(['wipe']); startRecording(); };
+  $('retry').onclick = async () => { show(['wipe']); await pause(); if (closed) return; startRecording(); };
   $('ok').onclick = () => label('ok');
   $('fail').onclick = () => label('fail');
   $('wipe').onclick = wipe;

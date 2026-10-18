@@ -11,6 +11,7 @@ import { ROOT } from './lib/clips.mjs';
 import { vad, mfcc, dtw, auc, clusterBootstrapCI, centerBy, pearson, spearman, normText, editDistance } from './lib/labdsp.mjs';
 
 const RATE = 16000;
+const LATE_START_MS = 400; // a recorder that took longer than this to start may have missed the beginning of the answer
 const PAD_MS = 0; // silence around the sound would shift the clip's feature mean: compare the sounds only
 
 function decode(file) {
@@ -84,10 +85,10 @@ const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
 const f2 = (x) => (Number.isFinite(x) ? x.toFixed(2) : 'n/a');
 
 // Signals are oriented so that a higher value means "more likely correct". Nobody speaking is the worst answer (latency and duration
-// as long as the whole clip, distance infinite), and a retried reading has no timing: she had already seen the item.
+// as long as the whole clip, distance infinite), and a retried reading or one whose recorder started late has no timing.
 const SIGNALS = [
-  ['latency (faster = better)', (r) => (r.tries > 1 ? null : r.noSpeech ? -r.clipMs : -r.latencyMs), false],
-  ['duration (shorter = better)', (r) => (r.tries > 1 ? null : r.noSpeech ? -r.clipMs : -r.durMs), false],
+  ['latency (faster = better)', (r) => (r.tries > 1 || r.lateStart ? null : r.noSpeech ? -r.clipMs : -r.latencyMs), false],
+  ['duration (shorter = better)', (r) => (r.tries > 1 || r.lateStart ? null : r.noSpeech ? -r.clipMs : -r.durMs), false],
   ['MFCC-DTW distance to the reference (closer = better)', (r) => (r.noSpeech ? -Infinity : r.dtwDist === null ? null : -r.dtwDist), true],
   ['Whisper heard exactly the target', (r) => (r.asrText === undefined ? null : r.asrExact ? 1 : 0), true],
   ['Whisper heard the target within 1 edit (words only; for syllables it is the exact one)', (r) => (r.asrText === undefined ? null : r.asrTol ? 1 : 0), true],
@@ -116,7 +117,9 @@ export function analyze({ labDir, audioDir, sessions, asr = 'none', outDir, reco
   for (const r of loaded) {
     const m = measure(r, audioDir, manifest, refCache);
     if (!m) { warnings.push(`session ${r.session} #${r.n}: the audio could not be decoded, skipped`); continue; }
-    readings.push({ ...r, ...m, ok: r.verdict === 'ok', tries: Number(r.tries) || 1 });
+    // the item was shown when the recorder was asked to start, so its own start lag is part of the reaction time
+    const lag = r.startLagMs === null || r.startLagMs === undefined ? NaN : Number(r.startLagMs), hasLag = Number.isFinite(lag) && lag >= 0;
+    readings.push({ ...r, ...m, latencyMs: m.latencyMs === null ? null : m.latencyMs + (hasLag ? lag : 0), lateStart: hasLag && lag > LATE_START_MS, ok: r.verdict === 'ok', tries: Number(r.tries) || 1 });
   }
   if (asr !== 'none') {
     if (!recogniser && spawnSync('whisper', ['--help']).error) warnings.push('the whisper CLI is not installed: the recogniser was not run');
@@ -130,7 +133,7 @@ export function analyze({ labDir, audioDir, sessions, asr = 'none', outDir, reco
   mkdirSync(outDir, { recursive: true });
 
   // ---- CSV
-  const cols = ['session', 'n', 'who', 'kind', 'key', 'verdict', 'rep', 'tries', 'noSpeech', 'latencyMs', 'durMs', 'snrDb', 'peakDb', 'dtwDist', 'asrText', 'asrExact', 'asrTol'];
+  const cols = ['session', 'n', 'who', 'kind', 'key', 'verdict', 'rep', 'tries', 'startLagMs', 'lateStart', 'noSpeech', 'latencyMs', 'durMs', 'snrDb', 'peakDb', 'dtwDist', 'asrText', 'asrExact', 'asrTol'];
   const cell = (v) => (v === undefined || v === null ? '' : typeof v === 'number' ? String(Math.round(v * 1000) / 1000) : `"${String(v).replace(/"/g, '""')}"`);
   writeFileSync(join(outDir, 'readings.csv'), [cols.join(','), ...readings.map((r) => cols.map((c) => cell(r[c])).join(','))].join('\n') + '\n');
 
@@ -162,6 +165,9 @@ export function analyze({ labDir, audioDir, sessions, asr = 'none', outDir, reco
     const g = readings.filter((r) => r.who === who && r.kind === kind);
     if (g.length) L(`- ${who} / ${kind}: nobody spoke in ✅ ${g.filter((r) => r.noSpeech && r.ok).length} and 🔁 ${g.filter((r) => r.noSpeech && !r.ok).length} of ${g.length} readings (they count as the worst answer for timing and distance).`);
   }
+  const late = readings.filter((r) => r.lateStart).length;
+  L();
+  L(`Recorder started late (more than ${LATE_START_MS / 1000} s after the item appeared) in ${late} of ${readings.length} readings: their timing is excluded. The first reading of a page used to be the usual one (the recorder warms up); the page now does that before the first item.`);
   const lowSnr = readings.filter((r) => r.snrDb !== null && r.snrDb < 15).length;
   L();
   L(`Setup check: ${lowSnr} of ${readings.filter((r) => r.snrDb !== null).length} readings have speech less than 15 dB above the noise floor. The plan says to fix the microphone or the room before collecting more if this is common.`);
@@ -205,7 +211,7 @@ export function analyze({ labDir, audioDir, sessions, asr = 'none', outDir, reco
     L(`  - ${name}: ${row.adj >= 0.85 && row.lo >= 0.75 ? 'PASS' : 'FAIL'} (item-adjusted AUC ${f2(row.adj)}, ${f2(row.lo)} to ${f2(row.hi)}; raw ${f2(row.auc)})`);
   }
   // progress trend: test-retest of the latency for items read in different sessions, and latency of ✅ against 🔁
-  const elsa = readings.filter((r) => r.who === 'elsa' && r.kind === 'read' && !r.noSpeech && r.tries <= 1 && r.latencyMs !== null);
+  const elsa = readings.filter((r) => r.who === 'elsa' && r.kind === 'read' && !r.noSpeech && r.tries <= 1 && !r.lateStart && r.latencyMs !== null);
   const firstSeen = new Map();
   for (const r of elsa) { const t = String(r.shownAtIso || ''); if (!firstSeen.has(r.session) || t < firstSeen.get(r.session)) firstSeen.set(r.session, t); }
   const order = [...firstSeen.entries()].sort((a, b) => a[1].localeCompare(b[1])).map((x) => x[0]);

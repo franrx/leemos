@@ -92,3 +92,11 @@ A fresh review of Tasks 1-3 found, and these changes fix:
 - **The control picked the "best" signal before checking it had data.** It now considers only signals with at least 20 readings of each kind.
 - **Deliberate differences from the first draft of this plan:** the noise floor is the 5th percentile (not the 10th, and never below -75 dB), MFCCs remove the mean only (variance scaling magnified noise), DTW is divided by n + m, and the tolerant Whisper signal equals the exact one for syllables of up to three letters.
 
+## What the first real recordings showed (2026-10-18, six test readings by Fran, not Elsa)
+
+- **The first reading's reaction time was lost.** The recorder took 1259 ms to really start on item 0 (about 60 ms on the others). The page now starts and stops a recorder before the first item, the analysis adds each reading's `startLagMs` to its latency, and a start later than 0.4 s flags the reading and excludes its timing.
+- **The tap on the previous answer ended up at the start of the next clip** (a short noise 16 to 30 dB below the voice). The speech detector used to take the first sound as the onset and then threw the real speech away (0.7 s later). It now anchors on the loudest burst, and the page pauses 0.6 s after each tap before showing and recording the next item (`?pause=0` removes it). **Recordings made before this fix are not usable for timing.**
+- **To listen:** `node scripts/lab-play.mjs` lists the sessions, `<session>` lists the readings, `--play [n]` plays them (macOS) and `--export` writes `.wav` files next to them for Finder. The recordings are not served over HTTP on purpose.
+- **Cross-speaker distance is large.** Fran's voice against the generated reference voice gave distances of 15 to 25 (the same voice had given 2 to 2.6), and the one reading marked wrong was not the farthest. Six readings prove nothing, but it matches the pitch/speaker warning above: this is what the adult control has to settle.
+- **The room is noisy for a quiet voice** (speech 10 to 26 dB above the floor with the browser's processing off). The report counts readings under 15 dB; if that is common, fix the setup before recording Elsa.
+

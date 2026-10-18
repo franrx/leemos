@@ -16,9 +16,10 @@ export function frames(pcm, rate, ms = 10) {
 
 // Voice activity by loudness. The noise floor is the 5th-percentile frame level, so it needs some silence before or after the voice
 // (the recording page starts the microphone before the child answers, so there is). Speech = at least `minMs` of frames more than
-// `marginDb` above the floor; bursts separated by no more than `maxGapMs` belong together, and anything later is not the reading
-// (an adult's "muy bien" after it). Returns nulls when nothing qualifies.
-export function vad(pcm, rate, { frameMs = 10, marginDb = 8, minMs = 60, maxGapMs = 700 } = {}) {
+// `marginDb` above the floor. The reading is anchored on the LOUDEST burst (a tap on a button is far quieter than a voice and used to
+// be taken as the onset); neighbouring bursts belong to it only if they are at most `maxGapMs` away and within `nearDb` of its peak
+// (the second syllable of a word does, a click or a later "muy bien" from the adult does not). Returns nulls when nothing qualifies.
+export function vad(pcm, rate, { frameMs = 10, marginDb = 8, minMs = 60, maxGapMs = 700, nearDb = 25 } = {}) {
   const e = frames(pcm, rate, frameMs).map(dbOf);
   if (!e.length) return { onsetMs: null, offsetMs: null, peakDb: null, noiseDb: null, speechDb: null };
   const sorted = [...e].sort((a, b) => a - b);
@@ -30,14 +31,18 @@ export function vad(pcm, rate, { frameMs = 10, marginDb = 8, minMs = 60, maxGapM
     if (e[i] <= thr) { i++; continue; }
     let j = i;
     while (j < e.length && e[j] > thr) j++;
-    if (j - i >= minFrames) runs.push([i, j]);
+    if (j - i >= minFrames) runs.push({ a: i, b: j, peak: Math.max(...e.slice(i, j)) });
     i = j;
   }
   const peakDb = Math.max(...e);
   if (!runs.length) return { onsetMs: null, offsetMs: null, peakDb, noiseDb, speechDb: null };
-  const first = runs[0][0];
-  let last = runs[0][1];
-  for (const [a, b] of runs.slice(1)) { if ((a - last) * frameMs > maxGapMs) break; last = b; }
+  const top = Math.max(...runs.map((r) => r.peak));
+  const main = runs.findIndex((r) => r.peak >= top - 1); // the first burst that is as loud as the loudest (within 1 dB): the reading comes before any later "muy bien"
+  const near = (r) => r.peak >= runs[main].peak - nearDb;
+  let lo = main, hi = main;
+  while (lo > 0 && (runs[lo].a - runs[lo - 1].b) * frameMs <= maxGapMs && near(runs[lo - 1])) lo--;
+  while (hi < runs.length - 1 && (runs[hi + 1].a - runs[hi].b) * frameMs <= maxGapMs && near(runs[hi + 1])) hi++;
+  const first = runs[lo].a, last = runs[hi].b;
   const loud = e.slice(first, last).filter((x) => x > thr);
   return { onsetMs: first * frameMs, offsetMs: last * frameMs, peakDb, noiseDb, speechDb: loud.reduce((s, x) => s + x, 0) / loud.length };
 }

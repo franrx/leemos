@@ -48,7 +48,7 @@ function writeSession(labDir, session, readings, { extra = false, day = 18 } = {
     const na = r.noiseAmp || 0.001;
     writeFileSync(join(dir, `${n}.webm`), wav(cat(noise(r.latency, na), sound(heard, r.dur || 450), noise(400, na))));
     expected.set(`${session}#${n}`, r.latency);
-    lines.push(JSON.stringify({ session, n, key: 's:' + r.text, text: r.text, lang: 'es', who: r.who, kind: r.kind, verdict: r.ok ? 'ok' : 'fail', rep: !!r.rep, tries: r.tries || 1, shownAtIso: new Date(Date.UTC(2026, 9, day, 10, 0, n)).toISOString() }));
+    lines.push(JSON.stringify({ session, n, key: 's:' + r.text, text: r.text, lang: 'es', who: r.who, kind: r.kind, verdict: r.ok ? 'ok' : 'fail', rep: !!r.rep, tries: r.tries || 1, startLagMs: r.startLag, shownAtIso: new Date(Date.UTC(2026, 9, day, 10, 0, n)).toISOString() }));
   });
   if (extra) {
     const n0 = readings.length;
@@ -150,6 +150,20 @@ const snrDir = join(root, 'lab-snr');
 writeSession(snrDir, 'elsa-read-8', Array.from({ length: 6 }, (_, i) => ({ who: 'elsa', kind: 'read', text: texts[i], latency: 400, ok: true, noiseAmp: 0.1 })));
 const res6 = run(snrDir);
 check('analyze: readings with speech less than 15 dB above the noise are counted in a setup warning', /less than 15 dB/.test(res6.report) && res6.readings.filter((r) => r.snrDb < 15).length >= 5, line(res6.report, /15 dB/));
+
+// the recorder's own start lag is part of the reaction time, and a recorder that started late may have missed the beginning
+const lagDir = join(root, 'lab-lag');
+writeSession(lagDir, 'elsa-read-9', [
+  { who: 'elsa', kind: 'read', text: 'ma', latency: 300, ok: true, startLag: 60 },
+  { who: 'elsa', kind: 'read', text: 'pe', latency: 300, ok: true, startLag: 1259 },
+  { who: 'elsa', kind: 'read', text: 'mo', latency: 300, ok: true },
+  { who: 'elsa', kind: 'read', text: 'pi', latency: 350, ok: false, wrongSound: true, startLag: 80 },
+]);
+const res10 = run(lagDir);
+const byN = new Map(res10.readings.map((r) => [r.n, r]));
+check('analyze: the latency is the onset inside the clip plus the time the recorder took to start', Math.abs(byN.get(0).latencyMs - 360) <= 20 && Math.abs(byN.get(1).latencyMs - 1559) <= 20 && Math.abs(byN.get(2).latencyMs - 300) <= 20, [0, 1, 2].map((n) => byN.get(n).latencyMs).join(' '));
+check('analyze: a recorder that started more than 0.4 s late is flagged and left out of the timing signals but not of the similarity one', byN.get(1).lateStart === true && byN.get(0).lateStart === false && res10.table.get(`elsa|natural|${LAT}`).pos === 2 && res10.table.get(`elsa|natural|${A_ROW}`).pos === 3, `${res10.table.get(`elsa|natural|${LAT}`).pos} ${res10.table.get(`elsa|natural|${A_ROW}`).pos}`);
+check('analyze: the report counts the late starts and says the first reading of a page is the usual one', /Recorder started late.*1 of 4/.test(res10.report.replace(/\n/g, ' ')) , res10.report.split('\n').find((l) => /late/.test(l)));
 
 // the positive control must be able to fail: "wrong" adult readings that sound exactly like the correct ones
 const ctlFail = join(root, 'lab-control-fail');

@@ -43,6 +43,12 @@ v = vad(cat(noise(300, 0.001), tone(300, 200, 0.3), noise(1500, 0.001), tone(500
 check('vad: a second burst more than 0.7 s later (praise or a correction after the reading) is not part of the speech', Math.abs(v.onsetMs - 300) <= 20 && Math.abs(v.offsetMs - 500) <= 30, JSON.stringify(v));
 v = vad(cat(noise(300, 0.001), tone(300, 200, 0.3), noise(600, 0.001), tone(500, 200, 0.3), noise(300, 0.001)), RATE);
 check('vad: but a pause of 0.6 s inside a slow word still belongs to it', Math.abs(v.offsetMs - 1300) <= 30, JSON.stringify(v));
+v = vad(cat(noise(100, 0.001), tone(1000, 100, 0.01), noise(400, 0.001), tone(300, 300, 0.3), noise(300, 0.001)), RATE);
+check('vad: a quiet click before the speech (the tap on the previous answer) is not the onset', Math.abs(v.onsetMs - 600) <= 20 && Math.abs(v.offsetMs - 900) <= 30, JSON.stringify(v));
+v = vad(cat(noise(100, 0.001), tone(1000, 100, 0.01), noise(900, 0.001), tone(300, 300, 0.3), noise(300, 0.001)), RATE);
+check('vad: nor when the click is more than 0.7 s before it (the real case: the speech used to be thrown away)', Math.abs(v.onsetMs - 1100) <= 20, JSON.stringify(v));
+v = vad(cat(noise(300, 0.001), tone(300, 300, 0.3), noise(300, 0.001), tone(1000, 100, 0.01), noise(300, 0.001)), RATE);
+check('vad: a quiet click just after the speech (the tap on Listo) is not part of it', Math.abs(v.onsetMs - 300) <= 20 && Math.abs(v.offsetMs - 600) <= 30, JSON.stringify(v));
 v = vad(cat(noise(1000, 0.001), tone(300, 100, 0.01)), RATE);
 check('vad: a quiet voice 20 dB above the floor is still found', v.onsetMs !== null && Math.abs(v.onsetMs - 1000) <= 20);
 
