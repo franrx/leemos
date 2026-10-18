@@ -98,13 +98,6 @@ Audio-first picture choice (robot mode), comic minimal pairs (pata/pasta, cama/c
 - Nothing stops her tapping the coda tile without reading; the adult is the check.
 
 
-## Letter tiles (2026-10-18, after the first tablet test)
+## The coda has its own sound (2026-10-18, after the first tablet test)
 
-The base of every syllable is now one tile per letter instead of a single block, borrowing Leo's letter sounds:
-
-- Tapping a letter says its own sound: a recording or a generated clip of kind `sound`, never the browser voice (it would say the letter's *name*, "eme"). A letter with no clip is silent. `soundKey()` drops accents, maps `gu` to `g` and `rr` to `r`; `h` and `tx` have no sound.
-- Tapping the arc under the base says the base syllable (what tapping the old base tile did).
-- Tapping the coda (or revealing the "?" card) says the coda's own sound and then the stretched syllable.
-- An open syllable on a word screen is also letter tiles and closes by itself once every letter has been tapped; the 3 s rescue still docks it for her.
-- Letter taps are free (any order, repeatable), complete nothing and record nothing. Once a syllable is closed the letters and the arc do not cut the stretched sound.
-- `ch ll ny tx rr` are one tile; `qu`/`gu` only before a vowel. A base with three or more letters uses smaller tiles (`.long`) so base + coda fit a phone.
+Tapping the coda (or revealing the "?" card) first says the coda's own sound, `/s/` `/r/` `/l/` (Leo's letter clips, a clip only: the browser voice would say the letter's name, and with no clip it is silent), and then the stretched syllable. The base stays ONE block read as a syllable (tapping it says the syllable, as before); a version with one tile per letter was tried and dropped. The unit is a grid so the arc sits exactly under the base and spans both pieces once docked.

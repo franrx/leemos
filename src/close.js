@@ -21,24 +21,6 @@ export function nucleus(text) {
   return m ? { pre: m[1], v: m[2], post: m[3] } : { pre: str, v: '', post: '' };
 }
 
-// "pas" -> ['p','a','s']: one tile per letter. ch, ll, ny, tx and rr are one tile (one sound); qu and gu only before a vowel (their u is silent).
-export function letters(text) {
-  const str = String(text || ''), out = [];
-  for (let i = 0; i < str.length;) {
-    const two = str.slice(i, i + 2), next = str[i + 2];
-    if (['ch', 'll', 'ny', 'tx', 'rr'].includes(two) || ((two === 'qu' || two === 'gu') && next && V.includes(next))) { out.push(two); i += 2; }
-    else { out.push(str[i]); i++; }
-  }
-  return out;
-}
-
-// The clip a tile's sound lives in (src/data/sounds.*.json): accents dropped (à -> a), gu says /g/, rr says /r/; h is silent and tx is not a letter sound: null.
-const SOUND_OF = { gu: 'g', rr: 'r', h: null, tx: null };
-export function soundKey(tile) {
-  if (Object.prototype.hasOwnProperty.call(SOUND_OF, tile)) return SOUND_OF[tile];
-  return String(tile).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
-
 // A word for a word screen: 2 syllables, exactly one of them closed, and that one is onset + vowel + s/r/l.
 export function qualifies(parts) {
   if (!Array.isArray(parts) || parts.length !== 2) return false;
@@ -153,58 +135,35 @@ export function createClose(ctx) {
     return true;
   }
 
-  // A letter tile: it says its own sound when tapped (a clip only: the browser voice would say the letter's NAME). The vowel keeps its colour.
-  const speak = (g) => { const k = soundKey(g); return k ? letter(k) : Promise.resolve(false); };
-  const isVowel = (g) => g.length === 1 && V.includes(g);
-  function letterTile(g, onTap) {
-    const b = el('button', 'close-letter');
-    if (isVowel(g)) b.appendChild(el('span', 'v', g)); else b.textContent = g;
-    b.setAttribute('aria-label', g); b.onclick = () => onTap(b);
-    return b;
-  }
-
-  // One 2+1 unit: the base as one tile per letter under an arc (tap a letter: its sound; tap the arc: the base), then the coda (a glowing tile to dock, or a "?" card to turn over).
-  // The coda says its own sound and then the stretched syllable. onDone runs once, after the stretched sound starts.
+  // One 2+1 unit: the CV base, then the coda (a glowing tile to dock, or a "?" card to turn over). The coda says its own sound (Leo's letter clips: /s/, never the letter's
+  // name; silent with no clip) and then the stretched syllable. onDone runs once, after the stretched sound starts.
   function unit(parent, u, onDone) {
-    const wrap = el('div', 'close-unit'), row = el('div', 'close-syl'), arc = el('button', 'close-arc');
-    arc.setAttribute('aria-label', t('closeHearBase'));
-    let done = false; // once the syllable is closed its stretched sound plays: the letters and the arc must not cut it
-    const base = el('div', 'close-tile base'), ls = letters(u.base);
-    wrap.classList.toggle('long', ls.length >= 3); // three or more letters plus the coda need smaller tiles on a phone
-    ls.forEach((g) => base.appendChild(letterTile(g, () => { if (!done) speak(g); })));
-    arc.onclick = () => { if (!done) say(u.base); };
+    const wrap = el('div', 'close-unit'), row = el('div', 'close-syl'), arc = el('div', 'close-arc');
+    const base = fill(el('button', 'close-tile base'), u.base); base.onclick = () => { if (!done) say(u.base); }; // once the syllable is closed its stretched sound plays: the base must not cut it
     const coda = u.peek ? el('button', 'close-card', '?') : el('button', 'close-coda glow', '+' + u.coda);
     coda.setAttribute('aria-label', u.peek ? t('closeCover') : t('closeAdd', { c: u.coda }));
+    let done = false;
     const finish = () => {
       if (done) return; done = true;
       coda.classList.remove('glow', 'rescue'); coda.classList.add('docked'); coda.textContent = u.coda; coda.setAttribute('aria-label', u.coda);
       arc.classList.add('wide'); buzz(); sfx.ok();
       const g0 = gen;
-      speak(u.coda).then(() => { if (g0 !== gen) return; lumiPlay('~' + u.text, false); onDone(); }); // only a clip: without one it is silent
+      letter(u.coda).then(() => { if (g0 !== gen) return; lumiPlay('~' + u.text, false); onDone(); }); // only clips: without one it is silent
     };
     coda.onclick = finish;
     row.append(base, coda); wrap.append(row, arc); parent.appendChild(wrap);
     return { finish, coda, base, isDone: () => done };
   }
 
-  // An open syllable has nothing to close: its letters are tiles, and when every one has been tapped the syllable closes by itself and is said.
+  // An open syllable has nothing to close: a tile she reads and taps to dock it.
   function openUnit(parent, u, onDone) {
-    const wrap = el('div', 'close-unit'), row = el('div', 'close-syl'), arc = el('button', 'close-arc wide');
-    arc.setAttribute('aria-label', t('closeHearBase'));
-    const base = el('div', 'close-tile base'), ls = letters(u.text), tapped = new Set();
-    wrap.classList.toggle('long', ls.length >= 4);
+    const wrap = el('div', 'close-unit'), row = el('div', 'close-syl'), arc = el('div', 'close-arc wide');
+    const tile = fill(el('button', 'close-tile base'), u.text);
     let done = false;
     const finish = () => { if (done) return; done = true; say(u.text); onDone(); };
-    const tiles = ls.map((g, i) => letterTile(g, (b) => {
-      if (done) return;
-      b.classList.add('heard'); tapped.add(i);
-      const all = tapped.size === ls.length, g0 = gen;
-      speak(g).then(() => { if (all && !done && g0 === gen) finish(); });
-    }));
-    tiles.forEach((b) => base.appendChild(b));
-    arc.onclick = () => { if (!done) say(u.text); };
-    row.appendChild(base); wrap.append(row, arc); parent.appendChild(wrap);
-    return { finish, coda: tiles[0], base, isDone: () => done };
+    tile.onclick = finish;
+    row.appendChild(tile); wrap.append(row, arc); parent.appendChild(wrap);
+    return { finish, coda: tile, base: tile, isDone: () => done };
   }
 
   // A word: its syllables one at a time; a closed one is built 2+1; each finished syllable docks into an anchor chip she can tap to hear it again.
