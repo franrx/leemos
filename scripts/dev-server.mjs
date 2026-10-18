@@ -5,6 +5,7 @@
 import { createServer } from 'node:http';
 import { ROOT } from './lib/clips.mjs';
 import { handleClipApi } from './lib/clipapi.mjs';
+import { handleLabApi } from './lib/labapi.mjs';
 import { handleStatic } from './lib/staticserver.mjs';
 
 const port = Number(process.env.PORT || 5173);
@@ -14,6 +15,7 @@ const loopback = ['127.0.0.1', 'localhost', '::1'].includes(host);
 createServer(async (req, res) => {
   try {
     if (await handleClipApi(req, res)) return; // recording export for tools/record.html (loopback only, even with HOST set)
+    if (await handleLabApi(req, res)) return; // the voice-progress experiment (tools/lab.html): readings go to the gitignored lab/ folder
     handleStatic(req, res, { root: ROOT, localHostsOnly: loopback });
   } catch (e) {
     if (!res.headersSent) { res.writeHead(500); res.end('Server error'); } else res.destroy();
