@@ -322,7 +322,13 @@ const jawSet=v=>jawEls.forEach(e=>e.style.setProperty('--jaw',v));
 // The beak follows the real loudness of the clip (Web Audio analyser): closed in silence, wide on loud syllables.
 // The audio element is rerouted through the context, so only use it when the context is running (otherwise the clip would be mute).
 // The context is created only on a real tap (`tapped`): one made at page load, with no gesture, stays suspended.
+// iOS/iPadOS (also iPad Safari posing as a Mac): the rerouted clip can come out SILENT there even when the context says "running", and nobody can hear the difference
+// from the beak, so there the clip plays directly and the beak uses the timer rhythm.
+const IOS=/iPad|iPhone|iPod/.test(navigator.userAgent||'')||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+// "playback": the page's sound is not muted by the mute setting (the session would otherwise be ambient once Web Audio, like the chimes, has played)
+try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}
 function levelMeter(au,tapped){
+  if(IOS)return null;
   try{
     const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;
     if(!talkCtx){if(!tapped)return null;talkCtx=new AC()}
@@ -420,7 +426,9 @@ function lumiPlay(x,big){
   const au=hintAudio(x);if(!au)return false;
   try{
     if(curAudio)curAudio.pause();curAudio=au;
-    talkStart(big,x,levelMeter(au,big));
+    const mtr=levelMeter(au,big);
+    dbg('lumi route='+(mtr?'web-audio':'direct')+' ctx='+(talkCtx?talkCtx.state:'none')+' session='+(navigator.audioSession?navigator.audioSession.type:'n/a'));
+    talkStart(big,x,mtr);
     const done=()=>{if(curAudio===au)talkStop()};
     au.onended=au.onerror=done;
     au.play().catch(done);

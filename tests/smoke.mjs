@@ -1558,6 +1558,26 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('debug: the page is still usable and raised no errors', y.errors.length === 0, y.errors.join(' | '));
   }
 
+  // iOS/iPadOS: Lumi's clip must not be rerouted through Web Audio (that route can be silent there) and the page asks for the "playback" audio session
+  {
+    const MA4 = { ok: 3, fail: 0 }, seen2 = Object.fromEntries(readJSON('src/data/sounds.es.json').groups[0].letters.map((l) => ['snd:' + l.l, MA4]));
+    const ipad = (w) => { Object.defineProperty(w.navigator, 'platform', { value: 'MacIntel' }); Object.defineProperty(w.navigator, 'maxTouchPoints', { value: 5 }); Object.defineProperty(w.navigator, 'audioSession', { value: { type: 'auto' }, configurable: true }); };
+    const round = async (onDom) => {
+      const y = await boot({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', stats: seen2 }, 'leemos-debug': '1' }, manifest: LEO_CLIPS, voice: { state: 'running', sample: 128 }, onDom });
+      y.w.__audioMode = 'auto'; await until(() => y.$('prePlay'));
+      y.$('prePlay').click(); await sleep(10);
+      const a0 = y.w.__audios.length;
+      choices(y).find((b) => b.dataset.l === y.$('preChoices').dataset.answer).click(); await sleep(30);
+      return { y, praised: y.w.__audios.length - a0 };
+    };
+    const ip = await round(ipad);
+    check('iPad: Lumi\'s praise plays and no Web Audio context is made for his beak', ip.praised === 1 && (ip.y.w.__acs || []).length === 1 && ip.y.errors.length === 0, `praised=${ip.praised} acs=${(ip.y.w.__acs || []).length} ${ip.y.errors.join('|')}`); // the one context left is the chime's, not Lumi's
+    check('iPad: the page asks for the "playback" audio session (sound even with the mute setting on)', ip.y.w.navigator.audioSession.type === 'playback');
+    check('iPad: the debug panel says which route Lumi used', /lumi route=direct/.test(ip.y.$('dbg').textContent), ip.y.$('dbg').textContent);
+    const other = await round(null);
+    check('other browsers keep the beak following the real loudness (a Web Audio context is made)', other.praised === 1 && (other.y.w.__acs || []).length === 2 && /lumi route=/.test(other.y.$('dbg').textContent), `acs=${(other.y.w.__acs || []).length}`);
+  }
+
   // Lumi in Leo's screen: a tap on him or the bubble says the sentence on screen (a clip only, never the robot voice), but never over the letter sound
   {
     const G1 = 'escucha el sonido y toca su letra.';
