@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="src/styles.css">
-<script>try{var p=JSON.parse(localStorage.getItem('leemos-profiles')),a=p&&p.list.find(function(x){return x&&x.id===p.active});if(a&&a.kind==='pre')document.documentElement.classList.add('pre')}catch(e){}</script>
+<script>try{if(localStorage.getItem('leemos-game'))document.documentElement.classList.add('game')}catch(e){}try{var p=JSON.parse(localStorage.getItem('leemos-profiles')),a=p&&p.list.find(function(x){return x&&x.id===p.active});if(a&&a.kind==='pre')document.documentElement.classList.add('pre')}catch(e){}</script>
 </head>
 <body>
 <main>
@@ -116,7 +116,9 @@
     </div>
     <div class="row">
       <button class="icon-btn" id="profileOpen" data-i="aProfile">Cambiar de niño o niña</button>
+      <button class="icon-btn" id="gameOn" data-i="gameOn">🎮 Modo juego (pantalla completa)</button>
     </div>
+    <p class="small" data-i="gameOnHelp">Solo el juego, sin botones ni opciones. Para salir, la ✕ de la esquina.</p>
     <div class="path" id="path">
       <div class="row"><strong data-i="pathTitle">Camino de letras</strong></div>
       <p class="small" data-i="pathHelp">Las letras abiertas son las que practica. Toca una letra para abrir hasta ella y cerrar las siguientes, según el libro del cole.</p>
@@ -251,6 +253,7 @@
   </div>
 </div>
 
+<button class="game-off" id="gameOff" data-ia="aria-label:gameOffLbl;title:gameOffLbl" aria-label="Salir del modo juego" title="Salir del modo juego" hidden>✕</button>
 <script type="module" src="src/app.js"></script>
 </body>
 </html>

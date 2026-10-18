@@ -1102,6 +1102,22 @@ $('hint').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();sayH
 $('mascot').onclick=()=>sayHint(true);
 $('lumiBig').onclick=()=>{if(curAudio)curAudio.pause();talkStop()};
 $('sessionSel').onchange=e=>{S.sessionLen=parseInt(e.target.value,10);save();renderSession()};
+// Game mode: only the game on screen (no header buttons, levels, modes or parents' panel), and full screen where the browser allows it. It is a setting of
+// this device (not synced) and is left with the small X in the corner. The page may already carry the class (the inline script in <head> sets it before painting).
+const GAME_KEY='leemos-game';
+const applyGame=on=>{document.documentElement.classList.toggle('game',on);$('gameOff').hidden=!on};
+function setGame(on){
+  applyGame(on);
+  try{on?localStorage.setItem(GAME_KEY,'1'):localStorage.removeItem(GAME_KEY)}catch(e){}
+  const d=document,el=d.documentElement;
+  try{ // phones without the API (iPhone Safari) just keep the hidden extras; a refused request is not an error
+    if(on){const f=el.requestFullscreen||el.webkitRequestFullscreen;if(f&&!d.fullscreenElement&&!d.webkitFullscreenElement){const p=f.call(el);if(p&&p.catch)p.catch(()=>{})}}
+    else{const x=d.exitFullscreen||d.webkitExitFullscreen;if(x&&(d.fullscreenElement||d.webkitFullscreenElement)){const p=x.call(d);if(p&&p.catch)p.catch(()=>{})}}
+  }catch(e){}
+}
+$('gameOn').onclick=()=>{$('parents').open=false;setGame(true)};
+$('gameOff').onclick=()=>setGame(false);
+try{applyGame(!!localStorage.getItem(GAME_KEY))}catch(e){applyGame(false)}
 $('endMore').onclick=()=>{$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();pre?pre.begin():next()};
 $('endLevelUpBtn').onclick=()=>{if(pre)pre.unlockNext();else{S.level++;save();renderLevels()}$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();pre?pre.begin():next()};
 $('endStop').onclick=()=>{$('end').hidden=true;restState()};

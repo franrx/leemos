@@ -79,6 +79,8 @@ Sílabas inversas de 2 letras (ab, ic, um…): Azure las deletrea («a be»). Re
 ## Convenciones de UI
 - Colores como tokens en `:root` con variante oscura; objetivos táctiles ≥ 44 px; foco visible; `prefers-reduced-motion` desactiva animaciones (confeti, mascota, transiciones).
 - Tipografía Andika (pensada para lectores iniciales). Tiene que haber fallback.
+- **Modo juego** (ajuste de este dispositivo, no se sincroniza; `localStorage['leemos-game']`): un botón en el panel de padres lo activa; `html.game` oculta cabecera, niveles, modos y el panel de padres y deja a Lumi, la sesión y el juego centrados a pantalla completa; pide pantalla completa donde el navegador lo permite (Android, iPad; en iPhone solo se ocultan los extras y la instalación en inicio da la pantalla completa). Se sale con la ✕ pequeña de la esquina (`#gameOff`, decisión de Fran: visible, no un gesto escondido). Un script en `<head>` pone la clase antes de pintar. `touch-action: manipulation` quita el zoom por doble toque (el pellizco sigue).
+- Leo: las respuestas están bloqueadas hasta que el sonido ha terminado (`hear()` en app.js avisa de `played`, `blocked` —el navegador rechazó el autoplay— o `none` —sin clip—); si el navegador bloquea el sonido, el altavoz se marca y es lo único que se puede pulsar; tras un fallo se repite el sonido y se vuelve a bloquear.
 - Al añadir texto de interfaz: clave en `i18n.es.json` **y** `i18n.ca.json`, y `data-i="clave"` en el HTML (o `t('clave')` en JS). Atributos traducibles con `data-ia="atributo:clave;otro:clave"`.
 - La mascota es **Lumi**, un búho original. **No usar personajes con derechos de autor** (Frozen, etc.) aunque el nombre de la niña invite a ello.
 

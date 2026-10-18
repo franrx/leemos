@@ -1529,5 +1529,54 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('zoom: the buttons, tiles and answers also carry it, and the game area cannot be selected or long-pressed into a menu', /\.pre-choice[^{]*\{[^}]*touch-action:\s*manipulation/.test(css) && /#stage[^{]*\{[^}]*user-select:\s*none/.test(css) && /-webkit-touch-callout:\s*none/.test(css));
 }
 
+// ---------- 41. game mode: only the game on screen, full screen where the browser allows, a small X to leave ----------
+{
+  const root = (x) => x.d.documentElement;
+  let x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 } } });
+  check('game mode: the parents\' panel offers it, and it is off at first (the exit button is not there)', !!x.d.querySelector('#parents #gameOn') && !root(x).classList.contains('game') && x.$('gameOff').hidden);
+  let asked = 0;
+  root(x).requestFullscreen = () => { asked++; return Promise.resolve(); };
+  x.$('parents').open = true;
+  x.$('gameOn').click(); await sleep(5);
+  check('game mode: turning it on marks the page, shows the exit button, closes the panel, remembers it on this device and asks for full screen', root(x).classList.contains('game') && !x.$('gameOff').hidden && x.$('parents').open === false && x.w.localStorage.getItem('leemos-game') === '1' && asked === 1, `asked ${asked}`);
+  let left = 0;
+  root(x).constructor; Object.defineProperty(x.d, 'fullscreenElement', { value: root(x), configurable: true });
+  x.d.exitFullscreen = () => { left++; return Promise.resolve(); };
+  x.$('gameOff').click(); await sleep(5);
+  check('game mode: the X turns it off, forgets it and leaves full screen', !root(x).classList.contains('game') && x.$('gameOff').hidden && x.w.localStorage.getItem('leemos-game') === null && left === 1 && x.errors.length === 0, `left ${left}`);
+  // a phone whose browser has no full screen API: the extras are hidden anyway and nothing throws
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 } } });
+  x.$('gameOn').click(); await sleep(5);
+  check('game mode: without a full screen API it still works and raises no error', root(x).classList.contains('game') && x.errors.length === 0, x.errors.join(' | '));
+  // a refused full screen request is swallowed
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 } } });
+  root(x).requestFullscreen = () => Promise.reject(new Error('denied'));
+  x.$('gameOn').click(); await sleep(10);
+  check('game mode: a refused full screen request does not break it', root(x).classList.contains('game') && x.errors.length === 0, x.errors.join(' | '));
+  // coming back to the page keeps it on, without asking for full screen (that needs a tap)
+  x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 }, 'leemos-game': '1' } });
+  let again = 0;
+  check('game mode: reloading keeps it on and shows the exit button', root(x).classList.contains('game') && !x.$('gameOff').hidden && again === 0);
+  x.$('gameOff').click(); await sleep(5);
+  check('game mode: and the exit button works after a reload', !root(x).classList.contains('game') && x.w.localStorage.getItem('leemos-game') === null);
+  // the exit button has a name for screen readers, in both languages
+  check('game mode: the exit button is named for screen readers', x.$('gameOff').getAttribute('aria-label') === 'Salir del modo juego', x.$('gameOff').getAttribute('aria-label'));
+  x = await boot({ lang: 'ca-ES', storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 } } });
+  check('game mode: and in Catalan', x.$('gameOff').getAttribute('aria-label') === 'Sortir del mode joc' && /Mode joc/.test(x.$('gameOn').textContent), x.$('gameOn').textContent);
+  // Leo can use it too
+  x = await bootLeo();
+  x.$('gameOn').click(); await sleep(5);
+  x.$('prePlay').click(); await sleep(10);
+  check('game mode: it works for Leo, who keeps playing', root(x).classList.contains('game') && !!(x.$('preNext') || x.$('preHear')) && x.errors.length === 0, x.errors.join(' | '));
+
+  // what the CSS hides, and where the exit button sits
+  const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8').replace(/\s+/g, ' ');
+  const hides = (sel) => new RegExp(`html\\.game[^{]*${sel.replace(/[.#]/g, '\\$&')}[^{]*\\{[^}]*display:\\s*none`).test(css);
+  check('game mode: the header, the level chips, the mode switch and the parents\' panel are hidden', ['header', '#levels', '.modes', '#parents'].every(hides), ['header', '#levels', '.modes', '#parents'].filter((s) => !hides(s)).join(','));
+  check('game mode: the game is centred on a screen of its own (full height, safe-area padding)', /html\.game main\{[^}]*min-height:\s*100dvh[^}]*justify-content:\s*center[^}]*safe-area-inset-top/.test(css) && /html\.game main\{[^}]*safe-area-inset-bottom/.test(css));
+  check('game mode: the game itself (Lumi, the dots, the tiles, the answers, the buttons of the exercise) is not hidden', !hides('#stage') && !hides('.coach') && !hides('#goal') && !hides('#tiles') && !hides('.actions') && !hides('#pre'));
+  check('game mode: the exit button is small, in a corner, inside the safe area, and at least 44 px to tap', /\.game-off\{[^}]*position:\s*fixed[^}]*env\(safe-area-inset-top\)/.test(css) && /\.game-off\{[^}]*min-width:\s*44px[^}]*min-height:\s*44px|\.game-off\{[^}]*width:\s*44px[^}]*height:\s*44px/.test(css));
+}
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

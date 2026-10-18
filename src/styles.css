@@ -241,3 +241,9 @@ html.pre #path{display:none!important}
 /* Fast repeated taps (the speaker, the answers) must not zoom the page or select text on phones and tablets: double-tap zoom is off, pinch zoom stays. */
 html,body,button,.btn,.icon-btn,.tile,.pre-choice,.pre-letter,.pre-word,.level,.wbtn,.mode,summary,label{touch-action:manipulation}
 button,.btn,.icon-btn,.tile,.pre-choice,.pre-letter,.pre-word,.level,.wbtn,.mode,#stage{-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+/* Game mode (a device setting, set from the parents' panel): only the game stays on screen. The exit is a small corner button inside the safe area. */
+html.game header,html.game #levels,html.game .modes,html.game #parents{display:none}
+html.game main{min-height:100dvh;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;padding-top:max(16px,env(safe-area-inset-top));padding-bottom:max(24px,env(safe-area-inset-bottom))} /* the game alone fills the screen, centred */
+.game-off{position:fixed;top:max(8px,env(safe-area-inset-top));right:max(8px,env(safe-area-inset-right));z-index:40;width:44px;height:44px;min-width:44px;min-height:44px;padding:0;
+  border:2px solid var(--line);border-radius:50%;background:color-mix(in srgb,var(--panel) 85%,transparent);color:var(--muted);font:700 20px/1 system-ui,sans-serif;cursor:pointer}
+html:not(.game) .game-off{display:none}
