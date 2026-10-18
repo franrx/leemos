@@ -1606,6 +1606,27 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('game mode: reloading keeps it on and shows the exit button', root(x).classList.contains('game') && !x.$('gameOff').hidden && again === 0);
   x.$('gameOff').click(); await sleep(5);
   check('game mode: and the exit button works after a reload', !root(x).classList.contains('game') && x.w.localStorage.getItem('leemos-game') === null);
+  // a big screen is used: the game is zoomed to fit the viewport (never below 1, so phones are unchanged), and the zoom goes away with the mode
+  {
+    const gz = (y) => Number(y.d.documentElement.style.getPropertyValue('--gz') || 0);
+    const view = (y, w, h) => { Object.defineProperty(y.w, 'innerWidth', { value: w, configurable: true }); Object.defineProperty(y.w, 'innerHeight', { value: h, configurable: true }); y.w.dispatchEvent(new y.w.Event('resize')); };
+    const g = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 }, 'leemos-game': '1' } });
+    view(g, 1000, 650);
+    check('game zoom: a tablet viewport (1000x650) zooms by the tighter side, about 1.35', Math.abs(gz(g) - 650 / 480) < 0.01, String(gz(g)));
+    view(g, 834, 1194);
+    check('game zoom: portrait follows the width (834 / 560)', Math.abs(gz(g) - 834 / 560) < 0.01, String(gz(g)));
+    view(g, 390, 844);
+    check('game zoom: a phone is never shrunk (stays at 1)', gz(g) === 1, String(gz(g)));
+    view(g, 3000, 2000);
+    check('game zoom: a huge screen stops at 2.4', gz(g) === 2.4, String(gz(g)));
+    g.$('gameOff').click(); await sleep(5); view(g, 1000, 650);
+    check('game zoom: leaving the mode removes the zoom and a resize does not bring it back', g.d.documentElement.style.getPropertyValue('--gz') === '', g.d.documentElement.style.getPropertyValue('--gz'));
+    const g2 = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 } } });
+    view(g2, 1000, 650); g2.d.querySelector('#parents').open = true; g2.$('gameOn').click(); await sleep(5);
+    check('game zoom: turning the mode on applies the zoom for the current viewport', Math.abs(gz(g2) - 650 / 480) < 0.01 && g2.errors.length === 0, String(gz(g2)));
+    const cssG = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
+    check('game zoom: the page is not capped at 660px in game mode and takes the zoom', /html\.game main\{[^}]*max-width:none[^}]*zoom:var\(--gz/.test(cssG));
+  }
   // the exit button has a name for screen readers, in both languages
   check('game mode: the exit button is named for screen readers', x.$('gameOff').getAttribute('aria-label') === 'Salir del modo juego', x.$('gameOff').getAttribute('aria-label'));
   x = await boot({ lang: 'ca-ES', storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 } } });
@@ -1620,7 +1641,7 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8').replace(/\s+/g, ' ');
   const hides = (sel) => new RegExp(`html\\.game[^{]*${sel.replace(/[.#]/g, '\\$&')}[^{]*\\{[^}]*display:\\s*none`).test(css);
   check('game mode: the header, the level chips, the mode switch and the parents\' panel are hidden', ['header', '#levels', '.modes', '#parents'].every(hides), ['header', '#levels', '.modes', '#parents'].filter((s) => !hides(s)).join(','));
-  check('game mode: the game is centred on a screen of its own (full height, safe-area padding)', /html\.game main\{[^}]*min-height:\s*100dvh[^}]*justify-content:\s*center[^}]*safe-area-inset-top/.test(css) && /html\.game main\{[^}]*safe-area-inset-bottom/.test(css));
+  check('game mode: the game is centred on a screen of its own (full height, which the zoom divides out, and safe-area padding)', /html\.game main\{[^}]*min-height:\s*calc\(100dvh \/ var\(--gz,1\)\)[^}]*justify-content:\s*center[^}]*safe-area-inset-top/.test(css) && /html\.game main\{[^}]*safe-area-inset-bottom/.test(css));
   check('game mode: the game itself (Lumi, the dots, the tiles, the answers, the buttons of the exercise) is not hidden', !hides('#stage') && !hides('.coach') && !hides('#goal') && !hides('#tiles') && !hides('.actions') && !hides('#pre'));
   check('game mode: the exit button is small, in a corner, inside the safe area, and at least 44 px to tap', /\.game-off\{[^}]*position:\s*fixed[^}]*env\(safe-area-inset-top\)/.test(css) && /\.game-off\{[^}]*min-width:\s*44px[^}]*min-height:\s*44px|\.game-off\{[^}]*width:\s*44px[^}]*height:\s*44px/.test(css));
 }

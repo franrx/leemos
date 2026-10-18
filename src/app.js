@@ -1192,7 +1192,14 @@ $('wordStyleSel').onchange=e=>{S.wordStyle=e.target.value;save();if(!resting&&!p
 // Game mode: only the game on screen (no header buttons, levels, modes or parents' panel), and full screen where the browser allows it. It is a setting of
 // this device (not synced) and is left with the small X in the corner. The page may already carry the class (the inline script in <head> sets it before painting).
 const GAME_KEY='leemos-game';
-const applyGame=on=>{document.documentElement.classList.toggle('game',on);$('gameOff').hidden=!on};
+// A big screen is used: the game is zoomed to fit the viewport (CSS `zoom` on main keeps layout and taps right), never below 1 so phones stay as they were.
+const fitGame=()=>{
+  const el=document.documentElement,on=el.classList.contains('game');
+  if(!on){el.style.removeProperty('--gz');return}
+  el.style.setProperty('--gz',String(Math.min(2.4,Math.max(1,Math.min(innerWidth/560,innerHeight/480)))));
+};
+window.addEventListener('resize',fitGame);window.addEventListener('orientationchange',fitGame);
+const applyGame=on=>{document.documentElement.classList.toggle('game',on);$('gameOff').hidden=!on;fitGame()};
 function setGame(on){
   applyGame(on);
   try{on?localStorage.setItem(GAME_KEY,'1'):localStorage.removeItem(GAME_KEY)}catch(e){}
