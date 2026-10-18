@@ -125,5 +125,5 @@ export function createFind(ctx) {
     else { again.focus(); sfx.win(); if (S.sound) sayLumi(msg); }
   }
 
-  return { canPlay, begin, leave, active: () => !!game };
+  return { canPlay, begin, leave, active: () => !!game, intro: 'findIntro' };
 }

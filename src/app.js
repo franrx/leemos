@@ -129,7 +129,10 @@ LEVELS=LV[S.lang]||LV_ES;
 if(!(S.level>=0&&S.level<LEVELS.length)){S.level=0;lastFp=fpOf()} // a correction, not a progress change: no modAt stamp // a saved level that does not exist (newer app version, bad data) falls back to the first
 let cur=null,last=null,phase='read',resetArmed=false;
 let pre=null;
-let find=null,findP=null; // Busca la paraula (src/find.js), loaded the first time it is needed
+const GAMEDEF={find:{file:'find.js',create:'createFind',ms:'__leemosFindTimeout',lock:'findLocked'}}; // play modes loaded the first time they are used
+const G={},GP={}; // loaded modules and pending loads, by game name
+const activeGame=()=>Object.values(G).find(g=>g&&g.active())||null;
+const isGame=m=>Object.prototype.hasOwnProperty.call(GAMEDEF,m);
 let curWorld=Math.floor(Math.random()*WORLDS.length);
 
 const $=id=>document.getElementById(id);
@@ -393,7 +396,8 @@ function lumiPlay(x,big){
   }catch(e){talkStop();return false}
 }
 function sayHint(big){
-  if(find&&find.active())return lumiPlay(t('findIntro'),big); // in Busca la paraula the phase left over from a reading exercise must not pick the sentence
+  const ag=activeGame();
+  if(ag)return lumiPlay(t(ag.intro),big); // in a play mode the phase left over from a reading exercise must not pick the sentence
   return phase!=='read'&&phase!=='judge'?false:lumiPlay(hintFor(phase),big)
 }
 // His praise (after an answer, a sticker, the end of a session): he comes big; with no clip it falls back to the browser voice, as before.
@@ -402,7 +406,7 @@ function sayLumi(x){
   if(!lumiPlay(x,true))ttsSpeak(x);
 }
 // Only counts as said once a clip really played (the manifest may still be loading when the first exercise appears).
-function introHint(){if(S.mode==='find'&&(find?find.canPlay():!!findP))return;if(sDone===0&&!hintIntro&&phase==='read'&&sayHint(false))hintIntro=true}
+function introHint(){if(isGame(S.mode)&&(G[S.mode]?G[S.mode].canPlay():!!GP[S.mode]))return;if(sDone===0&&!hintIntro&&phase==='read'&&sayHint(false))hintIntro=true}
 function setPhase(p){
   phase=p;
   $('joinBtn').hidden=p!=='read';
@@ -455,11 +459,16 @@ function applyWorld(){
 // fresh: the caller changed what a game is made of (language, Camino letter), so a game on screen is replaced; any other next() (a stale
 // timer, a word-style change, a reset) leaves the page she is on, and a game that is finishing keeps its sticker.
 function next(fresh){
-  if(S.mode==='find'){
-    if(find&&find.canPlay()){if(find.active()&&!fresh)return;find.begin();renderMode();return}
-    if(!find&&!findP)loadFind().then(f=>{if(f&&S.mode==='find')next()}); // a synced "find" on a device that has not loaded it yet
+  if(isGame(S.mode)){
+    const g=G[S.mode];
+    if(g&&g.canPlay()){
+      if(g.active()&&!fresh)return;
+      Object.entries(G).forEach(([k,o])=>{if(o&&k!==S.mode)o.leave()});
+      g.begin();renderMode();return;
+    }
+    if(!g&&!GP[S.mode]){const m=S.mode;loadGame(m).then(f=>{if(f&&S.mode===m)next()})} // a synced game mode on a device that has not loaded it yet
   }
-  if(find)find.leave();
+  Object.values(G).forEach(g=>g&&g.leave());
   if(resting){resting=false;sDone=sOk=sStk=0;newWorld();renderSession()}
   applyWorld();
   cur=pick();last=cur.key;show();
@@ -587,7 +596,7 @@ function applyMerged(m,adoptSession){
   if(S.lang!==before.lang)applyLang();else renderSession();
   renderGoal();
   if(S.world!==before.world)renderWorlds(); // not on every pull: it would replace the buttons (and the focus) of an open worlds overlay
-  if(S.lang!==before.lang||((S.mode!==before.mode||S.wordStyle!==before.wordStyle||(pathPos()!==before.pos&&(S.mode==='find'||(cur&&!eligible(cur)))))&&!resting))pre?pre.refresh():next(S.lang!==before.lang||pathPos()!==before.pos); // while resting, next() would start (and stamp) a new session // a different context needs a new exercise; otherwise the card on screen stays
+  if(S.lang!==before.lang||((S.mode!==before.mode||S.wordStyle!==before.wordStyle||(pathPos()!==before.pos&&(isGame(S.mode)||(cur&&!eligible(cur)))))&&!resting))pre?pre.refresh():next(S.lang!==before.lang||pathPos()!==before.pos); // while resting, next() would start (and stamp) a new session // a different context needs a new exercise; otherwise the card on screen stays
 }
 // Returns the merged data. The child may have answered while the request was in flight, so the server's data is merged
 // into the CURRENT local state (never copied over it): a sync can only add progress, never take it away.
@@ -917,30 +926,33 @@ $('noBtn').onclick=()=>record(false);
 $('mSyl').onclick=()=>setMode('syl');
 $('mWord').onclick=()=>setMode('word');
 function renderMode(){
-  const m=effMode(),ok=openItems('word').length>=MIN_WORDS,fo=!!(find&&S.mode==='find'&&find.canPlay());
-  $('mSyl').setAttribute('aria-pressed',!fo&&m==='syl');$('mWord').setAttribute('aria-pressed',!fo&&m==='word');$('mFind').setAttribute('aria-pressed',fo);
+  const m=effMode(),ok=openItems('word').length>=MIN_WORDS,fo=!!(isGame(S.mode)&&G[S.mode]&&G[S.mode].canPlay());
+  $('mSyl').setAttribute('aria-pressed',!fo&&m==='syl');$('mWord').setAttribute('aria-pressed',!fo&&m==='word');
+  Object.keys(GAMEDEF).forEach(n=>$('m'+n[0].toUpperCase()+n.slice(1)).setAttribute('aria-pressed',fo&&S.mode===n));
   $('mWord').setAttribute('aria-disabled',!ok);$('mWord').classList.toggle('dim',!ok);$('mWord').title=ok?'':t('wordsLocked');
 }
-// Loads src/find.js on first use; a failure leaves find null (the mode then says "locked" and the saved preference is kept).
-function loadFind(){
-  if(find)return Promise.resolve(find);
-  return findP||(findP=(async()=>{
+// Loads a play mode's module on first use; a failure leaves it unloaded (the mode then says "locked" and the saved preference is kept).
+function loadGame(name){
+  if(G[name])return Promise.resolve(G[name]);
+  const def=GAMEDEF[name];
+  return GP[name]||(GP[name]=(async()=>{
     try{
       const imp=window.__leemosImport||(p=>import(p));
-      const mod=await Promise.race([imp('./find.js'),new Promise((_,no)=>setTimeout(()=>no(new Error('timeout')),window.__leemosFindTimeout||5000))]); // a stalled network must not hold the first screen
-      find=mod.createFind({doc:document,$,S,t,fmt,rnd,nm,say,lumiPlay,sayLumi,sfx,poke,sparkle:sparkleBurst,later:(f,ms)=>setTimeout(f,ms),
+      const mod=await Promise.race([imp('./'+def.file),new Promise((_,no)=>setTimeout(()=>no(new Error('timeout')),window[def.ms]||5000))]); // a stalled network must not hold the first screen
+      G[name]=mod[def.create]({doc:document,$,S,t,fmt,rnd,nm,say,lumiPlay,sayLumi,sfx,poke,sparkle:sparkleBurst,later:(f,ms)=>setTimeout(f,ms),
         earnSticker,showReward,refresh:()=>{renderLevels();renderHard();renderAlbum()},pathPos,levels:()=>LEVELS,save});
-      return find;
-    }catch(e){findP=null;return null}
+      return G[name];
+    }catch(e){GP[name]=null;return null}
   })());
 }
-$('mFind').onclick=async()=>{
-  if(S.mode==='find'&&find&&find.active())return; // already playing: do not throw the page away
+async function openGame(name){
+  if(S.mode===name&&G[name]&&G[name].active())return; // already playing: do not throw the page away
   if(pendingEnd)return; // the end of a reading session is on its way: it must not open over the game
-  const f=await loadFind();
-  if(!f||!f.canPlay()){$('hint').textContent=t('findLocked');return}
-  S.mode='find';save();renderMode();next();
-};
+  const g=await loadGame(name);
+  if(!g||!g.canPlay()){$('hint').textContent=t(GAMEDEF[name].lock);return}
+  S.mode=name;save();renderMode();next();
+}
+$('mFind').onclick=()=>openGame('find');
 function setMode(m){
   if(m==='word'&&openItems('word').length<MIN_WORDS){$('hint').textContent=t('wordsLocked');return} // dimmed: not enough words are open yet, and say so
   S.mode=m;save();
@@ -966,7 +978,7 @@ function setPath(n,quiet){
   n=Math.max(1,Math.min(12,n|0));
   if(S.lang==='ca')S.pathCa=n;else S.pathEs=n;
   save();renderPath();renderMode();renderLevels();
-  if(!quiet&&!pre&&!resting&&S.mode==='find'&&find&&find.active())next(true); // the Camino letter is the game's letter: a new game
+  if(!quiet&&!pre&&!resting&&activeGame())next(true); // the Camino letter is the game's letter: a new game
   else if(!quiet&&!pre&&cur&&!resting&&!eligible(cur))next(); // a parent closed letters: an exercise that is no longer allowed is swapped (opening more keeps it)
 }
 $('pathAuto').onchange=()=>{S.pathAuto=$('pathAuto').checked;save()};
@@ -1203,7 +1215,7 @@ $('langBtn').onclick=()=>setLang(S.lang==='es'?'ca':'es');
 
 applyTheme();applyCase();applySound();applyLang();loadClips();updateProfileChip();
 loadManifest().then(()=>{introHint();setTimeout(warmAudio,3000)});
-if(S.mode==='find')await loadFind();
+if(isGame(S.mode))await loadGame(S.mode);
 renderGoal();next();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 

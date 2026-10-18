@@ -1866,6 +1866,10 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('find: and the session end screen then shows on the normal screen', !x.$('end').hidden && room(x).hidden);
   }
 
+  // the game wiring is generic: a saved game mode with the module unavailable keeps the mode and shows a normal exercise
+  x = await boot({ storage: R({ mode: 'find' }), importFails: true });
+  await sleep(30);
+  check('find: (generic wiring) an unloadable game keeps the saved mode, the normal screen is shown, and no game class is on', saved(x).mode === 'find' && !x.d.documentElement.classList.contains('find') && x.d.querySelectorAll('.tile').length > 0);
   // Leo never sees the mode
   x = await bootLeo();
   check('find: Leo is in his own screen where the modes row is hidden', x.d.documentElement.classList.contains('pre'));
