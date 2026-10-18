@@ -38,7 +38,9 @@ export function spokenFor(clip) {
       // The CV base with a long vowel, then the coda held on (continuous, no stop): "pas" -> paaasss. The first recipe to listen to; per-clip fixes go in pronunciation.<lang>.json.
       const m = /^([^aeiouáéíóúàèòïü]+)([aeiouáéíóúàèòïü]+)([srl])$/.exec(clip.text);
       if (!m) return clip.text;
-      return `<prosody rate="-35%">${m[1]}${m[2].repeat(3)}${m[3].repeat(3)}</prosody>`;
+      // -l: a single l after a shorter vowel (a repeated l reads as "ll" and runs long); -s and -r are held on.
+      const l = m[3] === 'l';
+      return `<prosody rate="-35%">${m[1]}${m[2].repeat(l ? 2 : 3)}${l ? 'l' : m[3].repeat(3)}</prosody>`;
     }
     default:
       return clip.text; // phrases

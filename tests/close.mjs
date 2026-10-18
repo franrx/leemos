@@ -79,6 +79,8 @@ for (const lang of ['es', 'ca']) {
   check(`[${lang}] clips: the instruction closeIntro is in the phrase list`, clips.some((c) => c.kind === 'phrase' && c.text === readJSON(`src/data/i18n.${lang}.json`).closeIntro));
   const ssml = st.map((c) => spokenFor(c));
   check(`[${lang}] spoken: a stretch clip is SSML with a long vowel and a long coda, never the plain syllable`, ssml.every((s, i) => s.startsWith('<') && /<prosody/.test(s) && s !== st[i].text) && spokenFor(st.find((c) => c.text === 'pas')).includes('aa') && /s{2,}/.test(spokenFor(st.find((c) => c.text === 'pas'))));
+  const sal = spokenFor(st.find((c) => c.text === 'sal')), pas = spokenFor(st.find((c) => c.text === 'pas')), mar = spokenFor(st.find((c) => c.text === 'mar'));
+  check(`[${lang}] spoken: an -l syllable has a single l after a shorter vowel (a doubled l sounds like "ll" and runs long); -s and -r keep the long hold`, !/l{2}/.test(sal) && /a{2}l</.test(sal) && !/a{3}/.test(sal) && /a{3}s{3}</.test(pas) && /a{3}r{3}</.test(mar), `${sal} | ${pas}`);
   const rec = recordList({ lang }).filter((c) => c.kind === 'stretch');
   check(`[${lang}] record list: the stretch clips can be recorded, shown as the syllable`, rec.length === need.size && rec.every((c) => c.key === '~' + c.shown));
 }
