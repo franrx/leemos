@@ -10,7 +10,7 @@ A play mode that mirrors the "BUSCA LA PARAULA: X (3)" page of the school book: 
 
 | Question | Decision |
 |---|---|
-| Role | **Separate play mode.** No effect on word/syllable stats, mastery, the Camino or `modAt`. It may give a sticker at the end of a game. |
+| Role | **Separate play mode.** No effect on word/syllable stats, `total`, mastery, the Camino or the session. It gives a sticker at the end of a game, which changes `modAt` like any sticker. |
 | Words | **Every word that starts with the current Camino letter** (the letter she is on), like the book page: not filtered by the other letters' being open, because finding a copy is visual matching, not decoding. |
 | Feedback | The right copy lights up and is **read aloud**; a wrong tap is a **soft wobble, silent**. No punishment sound, no counter of mistakes. |
 | Round | 5 pages per game; each page: the target big at the top, a grid of 12 plain whole-word tiles (3 copies + 9 look-alikes), shuffled. No emoji on the tiles. |
@@ -50,8 +50,8 @@ New module `src/find.js`, no DOM in the pure part:
 ## 3. Mode and preference
 
 - `S.mode` gains the value `find`; a third button `#mFind` next to `#mSyl` and `#mWord`.
-- `effMode()` keeps returning `syl|word` for the readers' exercises. The game checks `S.mode==='find'` and the pool size itself: if the pool is too small (guard only) the button is dimmed with a new hint (`findLocked`) and the stored preference is not changed (same rule as Palabras). If `levelrule.js` did not load (stub), the Camino position is unknown, so the game is locked the same way.
-- Validation in `app.js` (`S.mode`) and `PREF_OK.mode` in `merge.js` accept `find`. `PREF_KEYS` does not change (`mode` is already there).
+- `effMode()` keeps returning `syl|word` for the readers' exercises. The game checks `S.mode==='find'` and the pool size itself: if the pool is too small (guard only) or the module cannot load, tapping the button shows a hint (`findLocked`) and the stored preference is not changed (it cannot be dimmed beforehand: the module is only loaded on first use). If `levelrule.js` did not load (stub), the Camino position is unknown, so the game is locked the same way.
+- `PREF_OK.mode` in `merge.js` accepts `find`. `app.js` has no validation of `S.mode` (an unknown value already behaves as syllables). `PREF_KEYS` does not change (`mode` is already there).
 - Leo never sees the button (reader profiles only).
 
 ## 4. Audio
