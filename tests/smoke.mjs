@@ -1645,10 +1645,11 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   // a big screen is used: the game is zoomed to fit the viewport (never below 1, so phones are unchanged), and the zoom goes away with the mode
   {
     const gz = (y) => Number(y.d.documentElement.style.getPropertyValue('--gz') || 0);
+    const air = (h) => h * 1.03 + 2; // the card + padding plus a little air so rounding never makes it scroll
     const view = (y, w, h) => { Object.defineProperty(y.w, 'innerWidth', { value: w, configurable: true }); Object.defineProperty(y.w, 'innerHeight', { value: h, configurable: true }); y.w.dispatchEvent(new y.w.Event('resize')); };
     const g = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 }, 'leemos-game': '1' } });
     view(g, 1000, 650);
-    check('game zoom: a tablet viewport (1000x650) zooms by the tighter side, about 1.35', Math.abs(gz(g) - 650 / 480) < 0.01, String(gz(g)));
+    check('game zoom: a tablet viewport (1000x650) zooms by the tighter side (the height, with a little air)', Math.abs(gz(g) - 650 / air(480)) < 0.01, String(gz(g)));
     view(g, 834, 1194);
     check('game zoom: portrait follows the width (834 / 560)', Math.abs(gz(g) - 834 / 560) < 0.01, String(gz(g)));
     view(g, 390, 844);
@@ -1659,22 +1660,27 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('game zoom: leaving the mode removes the zoom and a resize does not bring it back', g.d.documentElement.style.getPropertyValue('--gz') === '', g.d.documentElement.style.getPropertyValue('--gz'));
     const g2 = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 } } });
     view(g2, 1000, 650); g2.d.querySelector('#parents').open = true; g2.$('gameOn').click(); await sleep(5);
-    check('game zoom: turning the mode on applies the zoom for the current viewport', Math.abs(gz(g2) - 650 / 480) < 0.01 && g2.errors.length === 0, String(gz(g2)));
+    check('game zoom: turning the mode on applies the zoom for the current viewport', Math.abs(gz(g2) - 650 / air(480)) < 0.01 && g2.errors.length === 0, String(gz(g2)));
     // content that is taller than the default (Busca's 12 tiles, a word with its picture) lowers the zoom so the card still fits the height: no scroll in game mode
     {
       const g3 = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 }, 'leemos-game': '1' } });
-      const natural = { h: 430 }; // the card's height at zoom 1; the fake reports it zoomed, as a browser does
-      g3.w.Element.prototype.getBoundingClientRect = function () { const z = Number(g3.d.documentElement.style.getPropertyValue('--gz')) || 1; return { width: 0, height: this.classList && this.classList.contains('stage') ? natural.h * z : 0, top: 0, left: 0, right: 0, bottom: 0 }; };
+      const natural = { h: 430 }; // the card's height at zoom 1
+      let reportZoomed = true; // engines differ on whether a rect under CSS zoom is zoomed: the fit must give the same answer either way
+      g3.w.Element.prototype.getBoundingClientRect = function () { const z = reportZoomed ? Number(g3.d.documentElement.style.getPropertyValue('--gz')) || 1 : 1; return { width: 0, height: this.classList && this.classList.contains('stage') ? natural.h * z : 0, top: 0, left: 0, right: 0, bottom: 0 }; };
       const pad = (() => { const cs = g3.w.getComputedStyle(g3.d.querySelector('main')); return (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0); })();
       view(g3, 1194, 834);
-      check('game zoom: a card of the default height gets the same zoom as before (height / (card + padding))', Math.abs(gz(g3) - Math.min(1194 / 560, 834 / (430 + pad))) < 0.01, String(gz(g3)));
+      check('game zoom: a card of the default height gets the same zoom as before (height / (card + padding))', Math.abs(gz(g3) - Math.min(1194 / 560, 834 / air(430 + pad))) < 0.01, String(gz(g3)));
       natural.h = 700; view(g3, 1194, 834);
-      check('game zoom: a taller card (700) lowers the zoom so card + padding fit the viewport height', Math.abs(gz(g3) - 834 / (700 + pad)) < 0.01 && gz(g3) * (700 + pad) <= 834 + 1, String(gz(g3)));
+      check('game zoom: a taller card (700) lowers the zoom so card + padding fit the viewport height', Math.abs(gz(g3) - 834 / air(700 + pad)) < 0.01 && gz(g3) * (700 + pad) <= 834, String(gz(g3)));
       natural.h = 900; view(g3, 1194, 834);
       check('game zoom: and it never goes below 1', gz(g3) === 1, String(gz(g3)));
+      natural.h = 430; view(g3, 1194, 834); // a zoom above 1 is in force first
+      reportZoomed = false; natural.h = 700; view(g3, 1194, 834);
+      check('game zoom: the same answer when the engine reports unzoomed sizes (Safari may), because the card is measured at zoom 1', Math.abs(gz(g3) - 834 / air(700 + pad)) < 0.01, String(gz(g3)));
+      reportZoomed = true;
       natural.h = 430; view(g3, 1194, 834);
       g3.d.querySelector('main').appendChild(g3.d.createElement('div')); natural.h = 650; await sleep(60);
-      check('game zoom: a change of content in main refits the zoom by itself', Math.abs(gz(g3) - 834 / (650 + pad)) < 0.02 && g3.errors.length === 0, `${gz(g3)} ${g3.errors.join('|')}`);
+      check('game zoom: a change of content in main refits the zoom by itself', Math.abs(gz(g3) - 834 / air(650 + pad)) < 0.01 && g3.errors.length === 0, `${gz(g3)} ${g3.errors.join('|')}`);
     }
     const cssG = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
     check('game zoom: the page is not capped at 660px in game mode and takes the zoom', /html\.game main\{[^}]*max-width:none[^}]*zoom:var\(--gz/.test(cssG));

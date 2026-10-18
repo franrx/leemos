@@ -1198,16 +1198,24 @@ const GAME_KEY='leemos-game';
 const fitGame=()=>{
   const el=document.documentElement;
   if(!el.classList.contains('game')){el.style.removeProperty('--gz');return}
-  const cur=Number(el.style.getPropertyValue('--gz'))||1;
+  const had=el.style.getPropertyValue('--gz'),cur=Number(had)||1;
   let hBase=480; // no card to measure (yet): the default
   const st=document.querySelector('main .stage'),mn=document.querySelector('main');
-  if(st&&mn){const h=st.getBoundingClientRect().height/cur;if(h>0){const cs=getComputedStyle(mn);hBase=h+(parseFloat(cs.paddingTop)||0)+(parseFloat(cs.paddingBottom)||0)}}
-  const gz=Math.min(2.4,Math.max(1,Math.min(innerWidth/560,innerHeight/(hBase+2))));
-  if(!el.style.getPropertyValue('--gz')||Math.abs(gz-cur)>.005)el.style.setProperty('--gz',String(gz));
+  if(st&&mn){
+    // The card is measured at zoom 1 (set and restored in this same task, so nothing is painted): engines disagree on whether a rect under CSS zoom is zoomed.
+    el.style.setProperty('--gz','1');
+    const h=st.getBoundingClientRect().height,cs=getComputedStyle(mn);
+    if(h>0)hBase=h+(parseFloat(cs.paddingTop)||0)+(parseFloat(cs.paddingBottom)||0);
+    if(had)el.style.setProperty('--gz',had);else el.style.removeProperty('--gz');
+  }
+  const gz=Math.min(2.4,Math.max(1,Math.min(innerWidth/560,innerHeight/(hBase*1.03+2)))); // a little air so rounding never makes it scroll
+  if(!had||Math.abs(gz-cur)>.005)el.style.setProperty('--gz',String(gz));
 };
 let fitQ=0;
 const fitSoon=()=>{if(fitQ)return;fitQ=1;(window.requestAnimationFrame||setTimeout)(()=>{fitQ=0;fitGame()})};
 window.addEventListener('resize',fitGame);window.addEventListener('orientationchange',fitGame);
+try{const st0=document.querySelector('main .stage');if(st0&&window.ResizeObserver)new ResizeObserver(fitSoon).observe(st0)}catch(e){} // fonts and images that arrive late change the card's size without touching the DOM
+try{(document.fonts&&document.fonts.ready||Promise.resolve()).then(fitSoon)}catch(e){}
 try{new MutationObserver(fitSoon).observe(document.querySelector('main'),{childList:true,subtree:true,attributes:true,attributeFilter:['hidden','class']})}catch(e){}
 const applyGame=on=>{document.documentElement.classList.toggle('game',on);$('gameOff').hidden=!on;fitGame()};
 function setGame(on){
