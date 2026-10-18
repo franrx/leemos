@@ -1193,12 +1193,21 @@ $('wordStyleSel').onchange=e=>{S.wordStyle=e.target.value;save();if(!resting&&!p
 // this device (not synced) and is left with the small X in the corner. The page may already carry the class (the inline script in <head> sets it before painting).
 const GAME_KEY='leemos-game';
 // A big screen is used: the game is zoomed to fit the viewport (CSS `zoom` on main keeps layout and taps right), never below 1 so phones stay as they were.
+// The height term uses the real height of the card at zoom 1 (Busca's 12 tiles are taller than a syllable), so no screen scrolls in game mode; it is refitted when the content changes.
 const fitGame=()=>{
-  const el=document.documentElement,on=el.classList.contains('game');
-  if(!on){el.style.removeProperty('--gz');return}
-  el.style.setProperty('--gz',String(Math.min(2.4,Math.max(1,Math.min(innerWidth/560,innerHeight/480)))));
+  const el=document.documentElement;
+  if(!el.classList.contains('game')){el.style.removeProperty('--gz');return}
+  const cur=Number(el.style.getPropertyValue('--gz'))||1;
+  let hBase=480; // no card to measure (yet): the default
+  const st=document.querySelector('main .stage'),mn=document.querySelector('main');
+  if(st&&mn){const h=st.getBoundingClientRect().height/cur;if(h>0){const cs=getComputedStyle(mn);hBase=h+(parseFloat(cs.paddingTop)||0)+(parseFloat(cs.paddingBottom)||0)}}
+  const gz=Math.min(2.4,Math.max(1,Math.min(innerWidth/560,innerHeight/(hBase+2))));
+  if(!el.style.getPropertyValue('--gz')||Math.abs(gz-cur)>.005)el.style.setProperty('--gz',String(gz));
 };
+let fitQ=0;
+const fitSoon=()=>{if(fitQ)return;fitQ=1;(window.requestAnimationFrame||setTimeout)(()=>{fitQ=0;fitGame()})};
 window.addEventListener('resize',fitGame);window.addEventListener('orientationchange',fitGame);
+try{new MutationObserver(fitSoon).observe(document.querySelector('main'),{childList:true,subtree:true,attributes:true,attributeFilter:['hidden','class']})}catch(e){}
 const applyGame=on=>{document.documentElement.classList.toggle('game',on);$('gameOff').hidden=!on;fitGame()};
 function setGame(on){
   applyGame(on);

@@ -155,8 +155,11 @@ export function createSounds(ctx){
     if(!wrong)stat(x.l).ok++;
     S.total++;
     ctx.burst();sfx.ok();ctx.poke('cheer',900);ctx.sparkle($('mascot'),10);
+    // The picture takes the slot of the speaker button (it has done its job): the screen keeps its height, so game mode, which fills the viewport, never scrolls.
     const pic=el('div','pre-pic big',x.e);pic.id='prePic';
-    room().appendChild(pic);
+    const hb=$('preHear');
+    if(hb){const h=hb.offsetHeight;if(h){pic.style.height=h+'px';pic.style.fontSize=Math.min(84,Math.round(h*.9))+'px'}hb.replaceWith(pic)}
+    else room().appendChild(pic);
     $('hint').textContent=ctx.fmt(ctx.rnd(t('preOks')));
     ctx.sess.inc(!wrong);
     const finished=ctx.sess.done>=S.sessionLen;
