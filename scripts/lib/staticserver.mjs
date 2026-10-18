@@ -1,5 +1,5 @@
 // Static file serving for the dev server (npm run dev). Hardened because the project folder holds secrets:
-// no dotfiles (.env, .git), no node_modules, nothing outside the root, and bad URLs never crash the server.
+// no dotfiles (.env, .git), no node_modules, no lab/ (the experiment's recordings), nothing outside the root, and bad URLs never crash the server.
 import { createReadStream, statSync } from 'node:fs';
 import { join, extname, normalize, sep } from 'node:path';
 
@@ -18,6 +18,7 @@ export function resolveFile(root, rawUrl) {
   if (p.endsWith('/')) p += 'index.html';
   // decoded, so "%2e%2e" and "%2F" tricks are seen as what they are
   if (p.split('/').some((seg) => seg.startsWith('.') || seg === 'node_modules')) return { status: 404 };
+  if (p.split('/')[1] === 'lab') return { status: 404 }; // the voice-progress experiment (a child's recordings and transcripts): never over HTTP, not even on localhost
   const file = normalize(join(root, p));
   if (file !== root && !file.startsWith(root + sep)) return { status: 404 }; // "root + sep": /x/leemos must not match /x/leemos-old
   let st;
