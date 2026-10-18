@@ -281,7 +281,7 @@ html.close .session,html.close #goal,html.close #tiles,html.close #pic,html.clos
 .close-pic{font-size:72px;line-height:1}
 .close-pic.pop{animation:closePop .45s ease-out}
 .close-anchors{transition:opacity .35s ease}.close-anchors.joined{opacity:.55}
-.close-tile,.close-coda,.close-card,.close-chip{letter-spacing:.15em;text-indent:.15em} /* the indent balances the gap the spacing leaves after the last letter */
+.close-tile,.close-coda,.close-card,.close-chip{letter-spacing:.02em;text-indent:.02em} /* tight: the base must read as ONE syllable, not as two letters apart (a wide tracking made PE look like P E) */
 .close-tile .v,.close-chip .v{color:var(--vowel)}
 .close-tile:focus-visible,.close-coda:focus-visible,.close-card:focus-visible,.close-chip:focus-visible{outline:3px solid var(--c1);outline-offset:3px}
 .close-room.upper .close-tile,.close-room.upper .close-coda,.close-room.upper .close-card,.close-room.upper .close-chip{text-transform:uppercase}

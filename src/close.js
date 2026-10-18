@@ -140,7 +140,7 @@ export function createClose(ctx) {
   function unit(parent, u, onDone) {
     const wrap = el('div', 'close-unit'), row = el('div', 'close-syl'), arc = el('div', 'close-arc');
     const base = fill(el('button', 'close-tile base'), u.base); base.onclick = () => { if (!done) say(u.base); }; // once the syllable is closed its stretched sound plays: the base must not cut it
-    const coda = u.peek ? el('button', 'close-card', '?') : el('button', 'close-coda glow', '+' + u.coda);
+    const coda = u.peek ? el('button', 'close-card', '?') : el('button', 'close-coda glow', u.coda);
     coda.setAttribute('aria-label', u.peek ? t('closeCover') : t('closeAdd', { c: u.coda }));
     let done = false;
     const finish = () => {

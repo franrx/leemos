@@ -2090,7 +2090,7 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('close: at step 3 the mode opens, the fourth button is pressed and the reading screen is replaced', !croom(x).hidden && x.d.documentElement.classList.contains('close') && x.$('mClose').getAttribute('aria-pressed') === 'true' && csaved(x).mode === 'close');
   // the first syllable screen: base + glowing coda tile, an arc, the base sound
   const b0 = base(x), a0 = action(x);
-  check('close: a syllable screen shows the CV base and a glowing coda tile (+l at step 3), never three letters at once', /^[a-z]{2}$/.test(b0) && a0.classList.contains('close-coda') && a0.textContent === '+l' && !!x.d.querySelector('.close-arc') && !x.d.querySelector('.close-arc').classList.contains('wide'));
+  check('close: a syllable screen shows the CV base and a glowing coda tile (just the letter l at step 3, no plus sign), never three letters at once', /^[a-z]{2}$/.test(b0) && a0.classList.contains('close-coda') && a0.textContent === 'l' && !!x.d.querySelector('.close-arc') && !x.d.querySelector('.close-arc').classList.contains('wide'));
   check('close: the first screen of the session says the instruction text and shows 6 dots', x.$('hint').textContent === 'Lee la sílaba en voz alta y toca para cerrarla.' && x.d.querySelectorAll('.close-dots i').length === 6);
   const st0 = cprogress(x), tts0 = (x.w.__tts || []).length;
   x.d.querySelector('.close-tile.base').click();
@@ -2269,7 +2269,7 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('close: a Leo profile with a saved Cierra mode does not get the Cierra room', !fx.d.documentElement.classList.contains('close') && croom(fx).hidden);
     // the pulse exists for every control the rescue marks, and a revealed card stops glowing
     const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
-    check('close: the tiles have wider letter spacing, the vowel has its own colour token in both themes, the pop is dropped under reduced motion', /\.close-tile,[^{]*\.close-chip\{[^}]*letter-spacing:\.15em/.test(css) && /--vowel:/.test(css) && /\[data-theme="dark"\]\{[^}]*--vowel:/.test(css) && /\.close-pic\.pop\{[^}]*animation:closePop/.test(css) && /reduce\)\{[\s\S]*\.close-pic\.pop\{animation:none/.test(css));
+    check('close: the tiles are tight (a syllable reads as one block, never as letters apart), the vowel has its own colour token in both themes, the pop is dropped under reduced motion', /\.close-tile,[^{]*\.close-chip\{[^}]*letter-spacing:\.02em/.test(css) && !/\.close-tile,[^{]*\.close-chip\{[^}]*letter-spacing:\.1\d?em/.test(css) && /--vowel:/.test(css) && /\[data-theme="dark"\]\{[^}]*--vowel:/.test(css) && /\.close-pic\.pop\{[^}]*animation:closePop/.test(css) && /reduce\)\{[\s\S]*\.close-pic\.pop\{animation:none/.test(css));
     check('close: the rescue pulse is styled on the card, the tile and Juntar, and a revealed card stops glowing', /\.close-card\.rescue,[^{]*\.close-tile\.rescue,[^{]*#closeJoin\.rescue\{animation:closeGlow/.test(css) && /\.close-card\.docked\{[^}]*animation:none/.test(css));
   }
 
