@@ -63,6 +63,7 @@ check('page: starting shows the first item in capitals and records at that insta
 check('page: the microphone is asked for without gain control, noise suppression or echo cancellation (they change the timing and levels being measured)', p.w.__constraints && p.w.__constraints.audio && p.w.__constraints.audio.autoGainControl === false && p.w.__constraints.audio.noiseSuppression === false && p.w.__constraints.audio.echoCancellation === false, JSON.stringify(p.w.__constraints));
 check('page: while recording it tells the adult to stay silent until Listo (their voice would end up in the clip)', /no hables|silencio/i.test(p.$('status').textContent), p.$('status').textContent);
 check('page: a recorder is started and stopped before the first item (the first one of a page can take over a second to really start)', p.w.__warm === 1 && p.w.__recorders === 2, `${p.w.__warm} warm-up, ${p.w.__recorders} created`);
+check('page: a dot shows that the microphone is on while an item is being recorded', !p.$('recDot').hidden && p.$('recDot').getAttribute('aria-hidden') === 'true');
 check('page: the level bar follows the input while recording', p.$('meterFill').style.width === '60%', p.$('meterFill').style.width);
 await press(p, 'done');
 check('page: after Listo the audio is uploaded and the adult is asked for the verdict', audios(p).length === 1 && /^\/__lab\?session=elsa-read-\d{14}&n=0$/.test(audios(p)[0].url) && audios(p)[0].size > 0 && !p.$('ok').hidden && !p.$('fail').hidden && p.$('done').hidden && p.$('meter').hidden, audios(p)[0] && audios(p)[0].url);
@@ -92,6 +93,7 @@ check('page: a session has exactly n readings, each audio then label, numbered 0
 check('page: about 15% of the items repeat inside a session', labels(p).filter((c) => c.body.rep).length === 3 && new Set(labels(p).map((c) => c.body.key)).size === 17, `${labels(p).filter((c) => c.body.rep).length} repeats, ${new Set(labels(p).map((c) => c.body.key)).size} distinct`);
 check('page: the finished screen says so and offers to delete', p.$('big').textContent === '✓' && !p.$('wipe').hidden && /terminado/.test(p.$('info').textContent) && p.$('done').hidden);
 check('page: the microphone is released when the session ends', p.w.__stopped > 0, String(p.w.__stopped));
+check('page: and the dot is gone with it', p.$('recDot').hidden);
 const lv2 = new Set(levels.es.slice(0, 2).flatMap((L) => [...L.syl.map((s) => 's:' + s), ...L.words.map((o) => 'w:' + o.w)]));
 check('page: items only come from the chosen level and below, with the app keys', labels(p).every((c) => lv2.has(c.body.key)));
 p = await open('lang=es&level=2&n=20&who=elsa&kind=read&seed=5');
@@ -145,6 +147,7 @@ await press(p, 'start', 40);
 await press(p, 'done'); await press(p, 'ok');
 await press(p, 'wipe');
 const del = p.calls.find((x) => x.method === 'DELETE');
+check('page: wiping hides the dot too', p.$('recDot').hidden);
 check('page: wiping also releases the microphone and ends the session', p.w.__stopped > 0 && p.$('done').hidden && p.$('ok').hidden && p.$('fail').hidden, String(p.w.__stopped));
 check('page: confirming deletes exactly this session', !!del && /^\/__lab\?session=elsa-read-\d{14}$/.test(del.url) && audios(p)[0].url.includes(del.url.split('=')[1]), del && del.url);
 

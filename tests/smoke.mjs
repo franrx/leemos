@@ -419,9 +419,13 @@ check('minor: after a wrong tap focus moves to an enabled choice', !!a.d.activeE
 const recStart = async (micCfg) => { const x = await boot({ mic: micCfg }); x.$('recOpen').click(); x.$('recBtn').click(); await sleep(60); return x; };
 a = await recStart({ peak: 0.2 });
 check('recorder: the level bar shows and follows the input while recording', !a.$('recMeter').hidden && a.$('recMeterFill').style.width === '60%', a.$('recMeterFill').style.width);
+check('recorder: a dot beside the level bar shows that the microphone is on, even when the bar is flat (decorative for screen readers: the status says it)', !a.$('recDot').hidden && a.$('recDot').getAttribute('aria-hidden') === 'true' && /Grabando/.test(a.$('recStatus').textContent), a.$('recStatus').textContent);
 a.$('recBtn').click(); await sleep(30);
 check('recorder: a recording with sound is saved', a.$('recStatus').textContent === 'Guardada ✓' && /ya grabada/.test(a.$('recCount').textContent), a.$('recStatus').textContent);
 check('recorder: the level bar hides when recording stops', a.$('recMeter').hidden);
+check('recorder: and so does the dot', a.$('recDot').hidden);
+{ const c = await boot(); c.$('recOpen').click(); check('recorder: before recording the dot is not there', c.$('recDot').hidden); }
+check('recorder: the dot sits in the same row as the bar, and its pulse stops with reduced motion', /rec-row/.test(a.$('recMeter').parentElement.className) && /\.rec-dot\{animation:none\}|\.rec-dot,[^}]*animation:none/.test(readFileSync(join(ROOT, 'src/styles.css'), 'utf8').replace(/\s+/g, '')) , a.$('recMeter').parentElement.className);
 a = await recStart({ peak: 0 });
 a.$('recBtn').click(); await sleep(30);
 check('recorder: a silent recording is rejected with a hint about the microphone', /No se oyó nada/.test(a.$('recStatus').textContent) && !/ya grabada/.test(a.$('recCount').textContent) && a.$('recPlay').hidden, a.$('recStatus').textContent);

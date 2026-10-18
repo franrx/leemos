@@ -115,14 +115,14 @@
     recorder.onstart = () => { startLagMs = Date.now() - recStart; }; // how long the recorder took to really start
     recorder.start(); // the recording starts at the same instant the item is shown
     startMeter();
-    $('meter').hidden = false;
+    $('meter').hidden = false; $('recDot').hidden = false;
     status('Grabando… no hables tú hasta pulsar «Listo» (tu voz quedaría en la grabación). Pulsa «Listo» cuando ella termine.');
     show(['done', 'wipe']);
   }
 
   function stopRecording() {
     return new Promise((res) => {
-      recorder.onstop = () => { stopMeter(); $('meter').hidden = true; res(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })); };
+      recorder.onstop = () => { stopMeter(); $('meter').hidden = true; $('recDot').hidden = true; res(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })); };
       recorder.stop();
     });
   }
@@ -191,7 +191,7 @@
     if (!window.confirm || !window.confirm('¿Borrar todas las grabaciones de esta sesión?')) return;
     closed = true; // nothing more is recorded or uploaded after wiping
     try { if (recorder && recorder.state === 'recording') recorder.stop(); } catch (e) { /* not recording */ }
-    stopMeter(); $('meter').hidden = true; releaseMic(); show(['wipe']);
+    stopMeter(); $('meter').hidden = true; $('recDot').hidden = true; releaseMic(); show(['wipe']);
     try { await post(`/__lab?session=${encodeURIComponent(session)}`, { method: 'DELETE' }); status('Sesión borrada. Recarga la página para empezar otra.'); }
     catch (e) { status(`No se pudo borrar: ${e.message}`); }
   }

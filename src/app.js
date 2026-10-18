@@ -1043,7 +1043,7 @@ function renderRec(status){
   $('recText').textContent=item;
   $('recCount').textContent=t('recOf',{i:RS.i+1,n:RS.list.length})+(clipURL[ck(item)]?t('recDone'):'');
   $('recBtn').textContent=RS.on?t('recStop'):t('recStart');
-  $('recMeter').hidden=!RS.on;
+  $('recMeter').hidden=!RS.on;$('recDot').hidden=!RS.on;
   $('recPlay').hidden=!clipURL[ck(item)];
   $('recStatus').textContent=status||(RS.on?t('recRecording',{t:item}):'');
 }

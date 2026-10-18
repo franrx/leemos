@@ -188,6 +188,11 @@ input[type=range]{flex:1;min-width:140px;accent-color:var(--c2)}
 .hdr-actions{flex-wrap:wrap}
 .meter{height:16px;max-width:320px;margin:10px auto;border-radius:99px;background:color-mix(in srgb,var(--ink) 14%,transparent);overflow:hidden}
 .meter i{display:block;height:100%;width:0;border-radius:99px;background:var(--ok);transition:width .08s linear}
+/* A dot that pulses while the microphone is on, beside the level bar: the state stays visible even when the bar is flat (silence). */
+.rec-row{display:flex;align-items:center;justify-content:center;gap:12px}
+.rec-row .meter{flex:1;max-width:320px;margin:14px 0}
+.rec-dot{flex:none;width:14px;height:14px;border-radius:50%;background:var(--retry);animation:recPulse 1.6s ease-in-out infinite}
+@keyframes recPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.8)}}
 .pf-row{display:flex;align-items:center;gap:10px;margin:12px 0}
 .pf-row input,.pf-row select{flex:1;min-height:44px;font:inherit;border:2px solid var(--line);border-radius:12px;padding:6px 10px;background:var(--panel);color:var(--ink)}
 
@@ -237,7 +242,7 @@ html.pre #endLevelUpBtn{order:3}
   .mascot,.mascot.cheer,.mascot.cheer .wl,.mascot.cheer .wr,
   .mascot.dance,.mascot.dance .wl,.mascot.dance .wr,
   .mascot.antic-look,.mascot.antic-stretch,.mascot.antic-wave,.mascot.antic-wave .wl,
-  .spark,.flash,.tiles.win .tile{animation:none}
+  .spark,.flash,.tiles.win .tile,.rec-dot{animation:none}
   .lumi-big.talking .mascot,.lumi-big.talking .wl,.lumi-big.talking .wr{animation:none}
   .lumi-art,.lumi-big{transition:none}
 }
