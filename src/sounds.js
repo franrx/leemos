@@ -175,7 +175,9 @@ export function createSounds(ctx){
     const hb=$('preHear');
     if(hb){const h=hb.offsetHeight;if(h){pic.style.height=h+'px';pic.style.fontSize=Math.min(84,Math.round(h*.9))+'px'}hb.replaceWith(pic)}
     else room().appendChild(pic);
-    $('hint').textContent=ctx.fmt(ctx.rnd(t('preOks')));
+    const praise=ctx.fmt(ctx.rnd(t('preOks')));
+    $('hint').textContent=praise;
+    const spoke=S.sound&&ctx.sayLumi&&ctx.sayLumi(praise); // Lumi says it himself, a clip with Leo's name (he comes big); the next round waits for him
     ctx.sess.inc(!wrong);
     const finished=ctx.sess.done>=S.sessionLen;
     let reward=null;
@@ -185,7 +187,7 @@ export function createSounds(ctx){
     const e=epoch,alive=()=>e===epoch;
     if(reward)ctx.reward(reward,alive);
     else if(finished)ctx.later(()=>{if(alive())ctx.end()},1100);
-    else ctx.later(()=>{if(alive())next()},1300);
+    else ctx.later(()=>{if(alive())next()},spoke?2300:1300);
   }
 
   // End of session: offer the next group when most of this one is mastered. Returns whether it is offered.

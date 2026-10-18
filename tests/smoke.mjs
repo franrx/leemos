@@ -1519,8 +1519,30 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('iOS rule: the first round (started by a tap) plays and unlocks the answers', !!y.$('preChoices') && choices(y).every((b) => !b.disabled) && !y.$('preHear').classList.contains('needed'));
     const n0 = y.w.__audios.length, calls0 = y.audioCalls.filter((u) => u === 'audio/es/x.mp3').length;
     y.w.__inTap = true; choices(y).find((b) => b.dataset.l === y.$('preChoices').dataset.answer).click(); y.w.__inTap = false; await sleep(30);
-    check('iOS rule: the next round (started by a timer) plays by itself, on the element the first tap unlocked', !y.$('preHear').classList.contains('needed') && choices(y).every((b) => !b.disabled) && y.audioCalls.filter((u) => u === 'audio/es/x.mp3').length === calls0 + 1 && y.w.__audios.length === n0, `needed=${y.$('preHear').classList.contains('needed')} audios ${n0}->${y.w.__audios.length}`);
+    // +2 clips: Lumi's praise (a new element, started inside the tap) and the next letter sound (the reused one)
+    check('iOS rule: the next round (started by a timer) plays by itself, on the element the first tap unlocked (only the praise needs a new one)', !y.$('preHear').classList.contains('needed') && choices(y).every((b) => !b.disabled) && y.audioCalls.filter((u) => u === 'audio/es/x.mp3').length === calls0 + 2 && y.w.__audios.length === n0 + 1, `needed=${y.$('preHear').classList.contains('needed')} audios ${n0}->${y.w.__audios.length}`);
     check('iOS rule: no errors', y.errors.length === 0, y.errors.join(' | '));
+  }
+
+  // Lumi praises by himself at the end of a round (a clip with Leo's name; he comes big), not only when tapped
+  {
+    const MA2 = { ok: 3, fail: 0 }, seen0 = Object.fromEntries(readJSON('src/data/sounds.es.json').groups[0].letters.map((l) => ['snd:' + l.l, MA2])); // every round is a game, none an intro card
+    const roundEnd = async (sound) => {
+      const y = await boot({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', stats: seen0 } }, manifest: LEO_CLIPS });
+      y.w.__audioMode = 'auto'; await until(() => y.$('prePlay'));
+      if (!sound) { y.$('soundBtn').click(); await sleep(5); }
+      y.$('prePlay').click(); await sleep(10);
+      const a0 = y.w.__audios.length;
+      choices(y).find((b) => b.dataset.l === y.$('preChoices').dataset.answer).click();
+      const praise = y.$('hint').textContent; // read before the next round replaces it
+      await sleep(30);
+      return { y, praise, played: y.w.__audios.length - a0 };
+    };
+    const on = await roundEnd(true);
+    check('Lumi (Leo): a right answer ends the round with his praise clip on a new audio element (the letter sounds reuse their own)', on.played === 1, String(on.played));
+    check('Lumi (Leo): the praise is the sentence on screen, with Leo\'s name', /Leo/.test(on.praise) && on.y.errors.length === 0, on.praise + ' ' + on.y.errors.join('|'));
+    const off = await roundEnd(false);
+    check('Lumi (Leo): with the sounds button off he stays quiet', off.played === 0 && off.y.errors.length === 0, String(off.played));
   }
 
   // Lumi in Leo's screen: a tap on him or the bubble says the sentence on screen (a clip only, never the robot voice), but never over the letter sound

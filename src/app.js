@@ -416,7 +416,9 @@ function sayHint(big){
 // His praise (after an answer, a sticker, the end of a session): he comes big; with no clip it falls back to the browser voice, as before.
 function sayLumi(x){
   try{if(hasTTS)speechSynthesis.cancel()}catch(e){}
-  if(!lumiPlay(x,true))ttsSpeak(x);
+  const clip=lumiPlay(x,true);
+  if(!clip)ttsSpeak(x);
+  return clip; // true when a clip is playing (Leo's next round waits for it)
 }
 // Only counts as said once a clip really played (the manifest may still be loading when the first exercise appears).
 function introHint(){if(isGame(S.mode)&&(G[S.mode]?G[S.mode].canPlay():!!GP[S.mode]))return;if(sDone===0&&!hintIntro&&phase==='read'&&sayHint(false))hintIntro=true}
@@ -1270,7 +1272,7 @@ if(PROFILE.kind==='pre'){
     const imp=window.__leemosImport||(p=>import(p));
     const [mod,dEs,dCa]=await Promise.all([imp('./sounds.js'),loadJSON('src/data/sounds.es.json'),loadJSON('src/data/sounds.ca.json')]);
     const sess={reset(){sDone=sOk=sStk=0;renderSession();renderGoal()},inc(ok){sDone++;if(ok)sOk++},get done(){return sDone},addSticker(){sStk++}};
-    pre=mod.createSounds({doc:document,$,S,save,t,say,hear,sfx,poke,burst,sparkle:sparkleBurst,rnd,fmt,nm,later:(f,ms)=>setTimeout(f,ms),
+    pre=mod.createSounds({doc:document,$,S,save,t,say,hear,sayLumi,sfx,poke,burst,sparkle:sparkleBurst,rnd,fmt,nm,later:(f,ms)=>setTimeout(f,ms),
       data:{es:dEs,ca:dCa},earnSticker,sess,renderSession,renderGoal,renderAlbum,renderHard,end:showEnd,
       hasAudio:x=>!!(clipURL[ck(x)]||genFile(x)),
       reward:(e,alive)=>{pendingEnd=true;setTimeout(()=>{if(!alive||alive())showReward(e);else pendingEnd=false},500)}});
