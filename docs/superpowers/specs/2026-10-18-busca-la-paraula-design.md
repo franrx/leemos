@@ -40,7 +40,7 @@ New module `src/find.js`, no DOM in the pure part:
 
 - Entering Busca la paraula starts a game: page 1 of 5. A small row of 5 dots shows the page (reusing the dots look; it is not the session bar).
 - The target shows in the current case (Aa), large, with a speaker button that reads it aloud (hearing the target does not give the answer: she still has to find the copies).
-- Tap on a copy: it lights up, stays marked, and the word is read aloud. Tap on a marked copy: nothing. Tap on a look-alike: it wobbles once, silent. All 3 found: Lumi cheers (`sayLumi`) and the next page starts after a short pause.
+- Tap on a copy: it lights up, stays marked, and the word is read aloud. Tap on a marked copy: nothing. Tap on a look-alike: it wobbles once, silent. All 3 found: Lumi cheers with a praise sentence in his bubble and a hop (no spoken `sayLumi`, which would cut off the word that is being read aloud), and the next page starts after a short pause. The end of the game does speak (`sayLumi`, or the reward).
 - After page 5: the end screen with Lumi and a sticker (`earnSticker()`), then "play again" and the usual mode buttons.
 - Leaving mid-game (changing mode, language, level, profile) discards it; nothing is saved. Reloading starts a new game.
 - `prefers-reduced-motion`: no wobble and no pause animation; the lit state is a colour/outline change only. Targets ≥ 44 px, focus visible, tokens in `:root` with the dark variant.

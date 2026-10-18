@@ -392,14 +392,17 @@ function lumiPlay(x,big){
     return true;
   }catch(e){talkStop();return false}
 }
-function sayHint(big){return phase!=='read'&&phase!=='judge'?false:lumiPlay(hintFor(phase),big)}
+function sayHint(big){
+  if(find&&find.active())return lumiPlay(t('findIntro'),big); // in Busca la paraula the phase left over from a reading exercise must not pick the sentence
+  return phase!=='read'&&phase!=='judge'?false:lumiPlay(hintFor(phase),big)
+}
 // His praise (after an answer, a sticker, the end of a session): he comes big; with no clip it falls back to the browser voice, as before.
 function sayLumi(x){
   try{if(hasTTS)speechSynthesis.cancel()}catch(e){}
   if(!lumiPlay(x,true))ttsSpeak(x);
 }
 // Only counts as said once a clip really played (the manifest may still be loading when the first exercise appears).
-function introHint(){if(sDone===0&&!hintIntro&&phase==='read'&&sayHint(false))hintIntro=true}
+function introHint(){if(S.mode==='find'&&(find?find.canPlay():!!findP))return;if(sDone===0&&!hintIntro&&phase==='read'&&sayHint(false))hintIntro=true}
 function setPhase(p){
   phase=p;
   $('joinBtn').hidden=p!=='read';
@@ -451,7 +454,7 @@ function applyWorld(){
 }
 function next(){
   if(S.mode==='find'){
-    if(find&&find.canPlay()){find.begin();return}
+    if(find&&find.canPlay()){find.begin();renderMode();return}
     if(!find&&!findP)loadFind().then(f=>{if(f&&S.mode==='find')next()}); // a synced "find" on a device that has not loaded it yet
   }
   if(find)find.leave();
@@ -930,6 +933,7 @@ function loadFind(){
   })());
 }
 $('mFind').onclick=async()=>{
+  if(S.mode==='find'&&find&&find.active())return; // already playing: do not throw the page away
   const f=await loadFind();
   if(!f||!f.canPlay()){$('hint').textContent=t('findLocked');return}
   S.mode='find';save();renderMode();next();
@@ -977,6 +981,7 @@ function applyCase(){
   $('caseBtn').textContent=S.upper?'AA':'Aa';
   document.body.classList.toggle('upper',S.upper);
   $('tiles').classList.toggle('upper',S.upper);
+  $('findRoom').classList.toggle('upper',S.upper);
 }
 $('rate').value=S.rate;
 $('rate').oninput=e=>{S.rate=parseFloat(e.target.value);save()};

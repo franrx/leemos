@@ -244,7 +244,7 @@ html.find .session,html.find #goal,html.find #tiles,html.find #pic,html.find #st
 .find-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:560px}
 .find-tile{font:inherit;font-size:clamp(20px,5.2vw,32px);font-weight:600;color:var(--ink);background:var(--panel);border:2px solid var(--line);border-radius:14px;min-height:56px;padding:10px 6px;cursor:pointer;touch-action:manipulation}
 .find-tile:focus-visible,.find-target:focus-visible{outline:3px solid var(--c2);outline-offset:2px}
-.find-tile.found{background:var(--ok);border-color:var(--ok);color:#fff}
+.find-tile.found{background:var(--ok);border-color:var(--ok);color:#06251A}
 .find-tile.wobble{animation:findWobble .4s ease-in-out}
 .find-room.upper .find-tile,.find-room.upper .find-target{text-transform:uppercase}
 .find-done{font-size:1.3rem;font-weight:700;text-align:center}

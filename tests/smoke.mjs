@@ -1774,6 +1774,37 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   await sleep(30);
   check('find: if the module cannot load the app still shows a normal exercise and keeps the saved mode', room(x).hidden && x.d.querySelectorAll('.tile').length > 0 && saved(x).mode === 'find');
 
+  // review fixes: Lumi's bubble in the game, the highlighted button, Aa, the found colour, a second tap on Busca
+  {
+    const FIND_HINT = 'busca la palabra y toca las 3 copias.';
+    const man = { generated: 'test', clips: { es: { ...Object.fromEntries(HINT_KEYS.map((k) => [k, 'h.mp3'])), [FIND_HINT]: 'f.mp3' }, ca: {} } };
+    const plays = (x, f) => x.audioCalls.filter((u) => u === 'audio/es/' + f).length;
+    x = await boot({ storage: R({ mode: 'find' }), manifest: man });
+    await until(() => !room(x).hidden); await sleep(30);
+    check('find: opening in Busca never plays a reading instruction (syllable, word or judge sentence)', plays(x, 'h.mp3') === 0, String(plays(x, 'h.mp3')));
+    x.$('hint').click(); x.$('mascot').dispatchEvent(new x.w.Event('click'));
+    check('find: tapping the bubble or Lumi in the game plays the Busca sentence, not a reading one', plays(x, 'f.mp3') >= 2 && plays(x, 'h.mp3') === 0, `f=${plays(x, 'f.mp3')} h=${plays(x, 'h.mp3')}`);
+    check('find: a saved Busca mode highlights the Busca button on load, not Sílabas', x.$('mFind').getAttribute('aria-pressed') === 'true' && x.$('mSyl').getAttribute('aria-pressed') === 'false' && x.$('mWord').getAttribute('aria-pressed') === 'false');
+    x = await boot({ storage: R(), manifest: man });
+    x.$('joinBtn').click(); // the judging step of a word: its phase must not leak into the game
+    x.$('mFind').click(); await until(() => !room(x).hidden);
+    const h0 = plays(x, 'h.mp3'); x.$('hint').click();
+    check('find: coming from the judging step the bubble still says the Busca sentence', plays(x, 'h.mp3') === h0 && plays(x, 'f.mp3') >= 1, `h=${plays(x, 'h.mp3')} f=${plays(x, 'f.mp3')}`);
+    // a second tap on Busca does not throw the game away
+    x = await start();
+    copies(x)[0].click();
+    x.$('mFind').click(); await sleep(30);
+    check('find: tapping Busca again keeps the game and the copies already found', x.d.querySelectorAll('.find-tile.found').length === 1);
+    // Aa changes the case of the game on screen
+    x.$('caseBtn').click();
+    check('find: the Aa button changes the case of the tiles in the game on screen', !room(x).classList.contains('upper') && saved(x).upper === false);
+    x.$('caseBtn').click();
+    check('find: and back', room(x).classList.contains('upper'));
+    // the text of a found tile must stay readable on its green
+    const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
+    check('find: a found tile uses dark text on the green (white on it is 2.75:1 light, 1.77:1 dark)', /\.find-tile\.found\{[^}]*color:#06251A/.test(css));
+  }
+
   // Leo never sees the mode
   x = await bootLeo();
   check('find: Leo is in his own screen where the modes row is hidden', x.d.documentElement.classList.contains('pre'));
