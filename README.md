@@ -44,7 +44,7 @@ Sin claves puedes probar todo el pipeline con `--provider mock` (pitidos; necesi
 
 **Aviso:** los cuatro proveedores reales se escribieron siguiendo su documentación pública pero **no se han probado con claves reales**. El proveedor `mock` y el resto del pipeline sí están probados. Si una llamada falla, el mensaje de error del proveedor se imprime tal cual.
 
-**Sobre el catalán mallorquín:** no se conoce ninguna voz neuronal comercial de balear; todas son de catalán central. Para el acento de casa, graba tú las palabras con la app.
+**Sobre el catalán:** la app usa el catalán central (estándar), que es el de las voces neuronales (Joana, Ximena) y el del libro de clase. Si algún día quieres otro acento, graba tú las palabras con «Grabar mi voz».
 
 Las frases de ánimo llevan el nombre («¡Muy bien, Elsa!»). Se generan con `NAME` del `.env` (por defecto Elsa). Si en la app se cambia el nombre, esas frases usan la voz del navegador.
 

@@ -23,7 +23,7 @@ Can recordings of Elsa reading, compared with the reference clip, tell us someth
 
 ## Honest limits (to restate in the report)
 
-- Labels are a parent's quick judgment, so they are noisy. One child, one microphone, one room. Results do not transfer to other children, other dialects (Mallorca) or other devices.
+- Labels are a parent's quick judgment, so they are noisy. One child, one microphone, one room. Results do not transfer to other children, other dialects or other devices.
 - Natural mistakes are rare, so negatives come mostly from **on-purpose wrong readings**, which are easier to detect than real confusions. A good score on them overstates real performance; say so.
 - Her audio is a child's voice: it stays on this laptop in `lab/` (gitignored), is never synced or uploaded, and is deleted when the experiment is closed.
 

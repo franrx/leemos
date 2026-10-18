@@ -88,7 +88,7 @@ Sílabas inversas de 2 letras (ab, ic, um…): Azure las deletrea («a be»). Re
 ## Pendientes, por orden
 1. **Generar el audio real** y revisarlo (ver README). Empezar por un nivel y un idioma para afinar `spoken.mjs` antes de generar todo.
 2. **Revisar el catalán con alguien nativo.** Palabras dudosas: *camí, dofí, cranc, espasa, ninot, formiga, pingüí, mona, mus-sol*. El nivel 1 es corto (con m s l n hay pocas palabras).
-3. **Catalán mallorquín** (viven en Palma): no se conocen voces neuronales comerciales de balear; lo realista es que Fran grabe las palabras con la app («Grabar mi voz»).
+3. ~~Catalán mallorquín~~ **descartado**: el catalán de la app es el **central (estándar)**, decisión de Fran. Las voces de Azure (Joana para sílabas y palabras, Ximena para Lumi) son de catalán central, así que los clips generados sirven tal cual y no hace falta grabar nada. Si algún día se quiere el acento de casa, «Grabar mi voz» sigue ahí.
 4. Autohospedar la fuente Andika (licencia OFL) para que funcione 100% offline; hoy se pide a Google Fonts.
 5. Frases cortas con palabras que ya domina; modo «arma la palabra» arrastrando bloques.
 6. ~~Pegatinas por mundo~~ **hecho** (6 por mundo; el selector de mundos muestra n/6 y el álbum va agrupado por mundo).
