@@ -203,6 +203,7 @@ input[type=range]{flex:1;min-width:140px;accent-color:var(--c2)}
 
 /* ---------- Letter sounds (pre-reader profile) ---------- */
 html.pre .modes,html.pre #tiles,html.pre #pic,html.pre #stage .actions,html.pre #caseBtn{display:none!important}
+html.pre body:not(.pre-home) #profileBtn{display:none!important} /* Leo: the profile switch only on his home screen, never mid-round */
 .level.group{pointer-events:none}
 .level[aria-current="true"]{border-color:var(--c2);box-shadow:0 0 0 3px color-mix(in srgb,var(--c2) 30%,transparent)}
 .level.locked{opacity:.55}

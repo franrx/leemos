@@ -395,7 +395,7 @@ check('minor: for Leo the unlock button is secondary and "Otra sesión" is prima
 
 // Parents switch profile from their panel; the child cannot reach the chip.
 a = await bootLeo();
-check('minor: Leo has no profile chip; the parents panel has a switch button', a.$('profileBtn').hidden && !!a.$('profileOpen'));
+check('minor: Leo has the profile chip on his home screen (an adult switches there) and the parents panel keeps its switch button', !a.$('profileBtn').hidden && a.d.body.classList.contains('pre-home') && !!a.$('profileOpen'));
 a.$('profileOpen').click();
 check('minor: the parents-panel button opens the profile sheet', !a.$('profiles').hidden);
 a = await boot();
@@ -1550,7 +1550,7 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   const cssT = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
   const preHide = (cssT.match(/html\.pre #levels[^{]*\{[^}]*\}|html\.pre [^{]*#stage \.actions[^{]*\{[^}]*\}/) || [''])[0];
   check('Leo header: the level row and the world button are no longer hidden for him; the profile switch and Aa still are', !/#levels/.test(preHide) && !/#worldBtn/.test(preHide) && /#caseBtn/.test(preHide) && /\.modes/.test(preHide), preHide.slice(0, 200));
-  check('Leo header: the profile chip stays parent-only (hidden for him)', (() => { const x = readFileSync(join(ROOT, 'src/app.js'), 'utf8'); return /\$\('profileBtn'\)\.hidden=true/.test(x); })());
+  check('Leo header: the profile chip shows only on his home screen: a rule hides it once a round starts (no pre-home class) and the game button is in the header for both', /html\.pre body:not\(\.pre-home\) #profileBtn\{[^}]*display:none/.test(cssT) && !!readFileSync(join(ROOT, 'index.html'), 'utf8').match(/<header>[\s\S]*id="gameBtn"[\s\S]*<\/header>/));
   const g0 = readJSON('src/data/sounds.es.json').groups, gca = readJSON('src/data/sounds.ca.json').groups;
   const x = await boot({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', stats: Object.fromEntries(g0[0].letters.map((l) => ['snd:' + l.l, MAS])) } } });
   x.w.__audioMode = 'auto'; await until(() => x.$('prePlay'));
@@ -1562,6 +1562,18 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('Leo header: the world button is there for him, and the language switch redraws the groups in Catalan', (() => { x.$('langBtn').click(); return true; })());
   await sleep(30);
   check('Leo header (ca): the cards follow the language', cards().length === gca.length && cards()[1].querySelector('b').textContent === '2. ' + gca[1].letters.map((l) => l.l).join(' ') && x.errors.length === 0, x.errors.join(' | ') || cards()[1].querySelector('b').textContent);
+  check('Leo header: the profile chip is visible while he is on the Jugar screen and a round hides the home class', !x.$('profileBtn').hidden && x.d.body.classList.contains('pre-home'));
+  x.$('prePlay').click(); await sleep(10);
+  check('Leo header: once a round has started the home class is gone (so the chip is hidden by CSS)', !x.d.body.classList.contains('pre-home'));
+  // the game-mode button is in the header for both profiles and turns the mode on without opening the panel
+  const gb = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 } } });
+  check('game button: the header has it, named for screen readers in both languages', !!gb.$('gameBtn') && gb.$('gameBtn').getAttribute('aria-label') === 'Modo juego (pantalla completa)');
+  gb.$('gameBtn').click(); await sleep(5);
+  check('game button: one tap turns game mode on (no need to open the parents\' panel) and remembers it', gb.d.documentElement.classList.contains('game') && gb.w.localStorage.getItem('leemos-game') === '1' && gb.errors.length === 0, gb.errors.join(' | '));
+  const gl = await bootLeo(); gl.$('gameBtn').click(); await sleep(5);
+  check('game button: it works on Leo\'s screen too', gl.d.documentElement.classList.contains('game') && gl.errors.length === 0, gl.errors.join(' | '));
+  const gc = await boot({ lang: 'ca-ES', storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 } } });
+  check('game button (ca): the label is in Catalan', gc.$('gameBtn').getAttribute('aria-label') === 'Mode joc (pantalla completa)', gc.$('gameBtn').getAttribute('aria-label'));
   // Elsa's own cards are untouched
   const e = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12 } } });
   check('Leo header: Elsa still has her five level buttons', [...e.d.querySelectorAll('#levels .level')].length === 5 && [...e.d.querySelectorAll('#levels .level')].every((c) => c.tagName === 'BUTTON'));

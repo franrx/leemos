@@ -1221,6 +1221,7 @@ function setGame(on){
 }
 $('gameOn').onclick=()=>{$('parents').open=false;setGame(true)};
 $('gameOff').onclick=()=>setGame(false);
+$('gameBtn').onclick=()=>setGame(true);
 try{applyGame(!!localStorage.getItem(GAME_KEY))}catch(e){applyGame(false)}
 $('endMore').onclick=()=>{$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();pre?pre.begin():next()};
 $('endLevelUpBtn').onclick=()=>{if(pre)pre.unlockNext();else{S.level++;save();renderLevels()}$('end').hidden=true;sDone=sOk=sStk=0;newWorld();renderSession();pre?pre.begin():next()};
@@ -1266,7 +1267,7 @@ if(PROFILE.kind==='pre'){
       hasAudio:x=>!!(clipURL[ck(x)]||genFile(x)),
       reward:(e,alive)=>{pendingEnd=true;setTimeout(()=>{if(!alive||alive())showReward(e);else pendingEnd=false},500)}});
     $('pre').hidden=false;
-    $('profileBtn').hidden=true; // a child must not reach another profile; parents switch from their panel
+    // the profile chip is visible on his home screen only (an adult switches there); CSS hides it once a round starts. The panel keeps its own switch button.
     document.querySelector('[data-i="pIntro"]').setAttribute('data-i','prePIntro');
     applyLang();
     pre.refresh();

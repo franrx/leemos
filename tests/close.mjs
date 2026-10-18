@@ -93,7 +93,7 @@ const CKEYS = ['mClose', 'closeLocked', 'closeIntro', 'closeGoal', 'closeAgain',
 check('i18n: every closed-syllables key exists in both languages and is not empty', CKEYS.every((k) => typeof es18[k] === 'string' && es18[k] && typeof ca18[k] === 'string' && ca18[k]));
 check('i18n: the Catalan instruction and the done text use "síl·laba" with the punt volat', /síl·laba/.test(ca18.closeIntro) && /síl·labes/.test(ca18.closeDone));
 const swText = readFileSync(join(ROOT, 'sw.js'), 'utf8');
-check('service worker: close.js and its data are cached with the shell and the version was bumped', /'src\/close\.js'/.test(swText) && /'src\/data\/closed\.es\.json'/.test(swText) && /'src\/data\/closed\.ca\.json'/.test(swText) && /VERSION = 'leemos-v12'/.test(swText));
+check('service worker: close.js and its data are cached with the shell and the version was bumped', /'src\/close\.js'/.test(swText) && /'src\/data\/closed\.es\.json'/.test(swText) && /'src\/data\/closed\.ca\.json'/.test(swText) && /VERSION = 'leemos-v13'/.test(swText));
 
 console.log(failures ? `\n${failures} close test(s) FAILED` : '\nAll close tests passed');
 process.exit(failures ? 1 : 0);
