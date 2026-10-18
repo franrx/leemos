@@ -1940,6 +1940,36 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   x = await startC();
   x.$('caseBtn').click();
   check('close: the Aa button changes the case of the screen on screen', !croom(x).classList.contains('upper') && csaved(x).upper === false);
+  // word screens: Spanish at step 12 has 2+ qualifying words, so a session is 4 syllables + 2 words
+  {
+    const wx = await startC({ pathEs: 12 });
+    const act = () => wx.d.querySelector('.close-current .close-coda') || wx.d.querySelector('.close-current .close-tile.base'); // the coda to dock if there is one, else the open syllable
+    for (let i = 0; i < 4; i++) { await finishScreen(wx); }
+    check('close: after the 4 syllable screens the word screens come, with an empty anchor row and the first syllable', !!wx.d.querySelector('.close-anchors') && wx.d.querySelectorAll('.close-chip').length === 0 && !!wx.d.querySelector('.close-current'));
+    const picBefore = wx.d.querySelector('.close-pic');
+    check('close: the picture is hidden until the word is read (the app rule)', !picBefore || picBefore.hidden || !picBefore.textContent);
+    act().click(); await sleep(20);
+    check('close: a finished syllable docks into the anchor chip', wx.d.querySelectorAll('.close-chip').length === 1);
+    const chip = wx.d.querySelector('.close-chip');
+    const before = wx.audioCalls.length + (wx.w.__tts || []).length;
+    chip.click();
+    check('close: tapping the anchor chip plays that syllable again (a stretched clip for the closed one)', wx.audioCalls.length + (wx.w.__tts || []).length > before);
+    check('close: the anchor chip has a screen-reader label', chip.getAttribute('aria-label').length > 0);
+    act().click(); await sleep(20);
+    const join = wx.$('closeJoin');
+    check('close: when every syllable is done a Juntar button appears (not before)', !!join && wx.d.querySelectorAll('.close-chip').length === 2);
+    check('close: the picture is still hidden before Juntar', !wx.d.querySelector('.close-pic') || wx.d.querySelector('.close-pic').hidden);
+    const pw0 = wx.audioCalls.length + (wx.w.__tts || []).length;
+    join.click(); join.click(); // a double tap
+    check('close: Juntar plays the word and only then shows the picture (a double tap counts once)', wx.d.querySelector('.close-pic') && !wx.d.querySelector('.close-pic').hidden && wx.d.querySelector('.close-pic').textContent.length > 0 && wx.audioCalls.length + (wx.w.__tts || []).length - pw0 === 1);
+    await sleep(5);
+    await sleep(20);
+    check('close: the second word screen starts with an empty anchor row', wx.d.querySelectorAll('.close-chip').length === 0 && wx.d.querySelectorAll('.close-dots i.on').length === 5);
+    for (let k = 0; k < 2; k++) { act()?.click(); await sleep(20); }
+    const j2 = wx.$('closeJoin'); if (j2) { j2.click(); await sleep(30); }
+    check('close: after the second word the session ends with one sticker, nothing else recorded', csaved(wx).stickers === 1 && !csaved(wx).total && !wx.$('reward').hidden && wx.errors.length === 0, `stickers=${csaved(wx).stickers} ${wx.errors.join('|')}`);
+  }
+
   // Leo never sees the mode
   x = await bootLeo();
   check('close: Leo is on his own screen where the modes row is hidden', x.d.documentElement.classList.contains('pre'));

@@ -105,6 +105,47 @@ export function createClose(ctx) {
     return { finish, coda, base, isDone: () => done };
   }
 
+  // An open syllable has nothing to close: a tile she reads and taps to dock it.
+  function openUnit(parent, u, onDone) {
+    const wrap = el('div', 'close-unit'), row = el('div', 'close-syl'), arc = el('div', 'close-arc wide');
+    const tile = el('button', 'close-tile base', u.text);
+    let done = false;
+    const finish = () => { if (done) return; done = true; say(u.text); onDone(); };
+    tile.onclick = finish;
+    row.appendChild(tile); wrap.append(row, arc); parent.appendChild(wrap);
+    return { finish, coda: tile, base: tile, isDone: () => done };
+  }
+
+  // A word: its syllables one at a time; a closed one is built 2+1; each finished syllable docks into an anchor chip she can tap to hear it again.
+  function wordFlow(stage, w) {
+    const units = w.parts.map((p) => { const c = splitClosed(p); return c ? { text: p, closed: true, base: c.base, coda: c.coda } : { text: p, closed: false }; });
+    const anchors = el('div', 'close-anchors'), cur = el('div', 'close-current'), pic = el('div', 'close-pic'); pic.hidden = true;
+    stage.append(anchors, cur, pic);
+    const g0 = gen;
+    let i = 0, joined = false, ctl = null;
+    const dock = (u) => {
+      const chip = el('button', 'close-chip', u.text); chip.setAttribute('aria-label', t('closeAnchor') + ': ' + u.text);
+      chip.onclick = () => (u.closed ? lumiPlay('~' + u.text, false) : say(u.text));
+      anchors.appendChild(chip);
+      i++; step();
+    };
+    const step = () => {
+      if (g0 !== gen) return;
+      cur.innerHTML = '';
+      if (i >= units.length) {
+        const j = el('button', 'btn primary', t('join')); j.id = 'closeJoin';
+        j.onclick = () => { if (joined) return; joined = true; sfx.join(); say(w.text); pic.textContent = w.emoji || ''; pic.hidden = !w.emoji; j.hidden = true; complete(); };
+        cur.appendChild(j); j.focus();
+        return;
+      }
+      const u = units[i];
+      const after = () => { const g = gen; later(() => { if (g === gen) dock(u); }, u.closed ? 900 : 0); };
+      ctl = u.closed ? unit(cur, { text: u.text, base: u.base, coda: u.coda, peek: false }, after) : openUnit(cur, u, after);
+      ctl.coda.focus();
+    };
+    step();
+  }
+
   function complete() {
     if (advancing) return;
     advancing = true;
@@ -127,7 +168,7 @@ export function createClose(ctx) {
       const c = unit(stage, { text: p.syl, base: p.base, coda: p.coda, peek: p.peek }, complete);
       c.coda.focus();
     } else {
-      complete(); // replaced by the word screen in the next task
+      wordFlow(stage, p.w);
     }
     if (first && S.sound) lumiPlay(t('closeIntro'), false);
   }
