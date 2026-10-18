@@ -93,12 +93,12 @@ check('session: counters are whole numbers and capped like the others', same(mer
 check('prefs: each key is decided on its own, so a change on one device never overwrites another key', (() => { const r = mergeData({ prefs: { theme: pf('dark', 300), sound: pf(true, 100) } }, { prefs: { theme: pf('light', 200), sound: pf(false, 250) } }).prefs; return r.theme.v === 'dark' && r.sound.v === false; })());
 check('prefs: a tie is broken by the value as text, whatever the argument order', mergeData({ prefs: { mode: pf('word', 50) } }, { prefs: { mode: pf('syl', 50) } }).prefs.mode.v === mergeData({ prefs: { mode: pf('syl', 50) } }, { prefs: { mode: pf('word', 50) } }).prefs.mode.v);
 check('prefs: invalid values are dropped (wrong type, out of range, unknown)', (() => {
-  const bad = mergeData({ prefs: { theme: pf('purple', 9), mode: pf('x', 9), sessionLen: pf(7, 9), rate: pf(5, 9), world: pf(1000, 9), lang: pf('fr', 9), sound: pf('yes', 9), upper: pf(1, 9), pathEs: pf(0, 9), pathCa: pf(13, 9), pathAuto: pf('yes', 9) } }, {}).prefs;
+  const bad = mergeData({ prefs: { theme: pf('purple', 9), mode: pf('x', 9), sessionLen: pf(7, 9), rate: pf(5, 9), world: pf(1000, 9), lang: pf('fr', 9), sound: pf('yes', 9), upper: pf(1, 9), pathEs: pf(0, 9), pathCa: pf(13, 9), pathAuto: pf('yes', 9), wordStyle: pf('zzz', 9) } }, {}).prefs;
   const bad2 = mergeData({ prefs: { pathEs: pf(2.5, 9), pathCa: pf('3', 9) } }, {}).prefs;
   return Object.keys(bad).length === 0 && Object.keys(bad2).length === 0;
 })());
 check('prefs: the valid values are accepted', (() => {
-  const ok = mergeData({ prefs: { theme: pf('', 1), mode: pf('word', 1), sessionLen: pf(15, 1), rate: pf(0.6, 1), world: pf('auto', 1), lang: pf('ca', 1), sound: pf(false, 1), upper: pf(true, 1), pathEs: pf(5, 1), pathCa: pf(12, 1), pathAuto: pf(false, 1) } }, {}).prefs;
+  const ok = mergeData({ prefs: { theme: pf('', 1), mode: pf('word', 1), sessionLen: pf(15, 1), rate: pf(0.6, 1), world: pf('auto', 1), lang: pf('ca', 1), sound: pf(false, 1), upper: pf(true, 1), pathEs: pf(5, 1), pathCa: pf(12, 1), pathAuto: pf(false, 1), wordStyle: pf('whole', 1) } }, {}).prefs;
   return PREF_KEYS.every((k) => ok[k]);
 })());
 check('prefs: an entry without a valid timestamp is dropped and a non-object prefs is ignored', !('theme' in mergeData({ prefs: { theme: { v: 'dark' } } }, {}).prefs) && Object.keys(mergeData({ prefs: [1, 2] }, { prefs: 'x' }).prefs).length === 0);

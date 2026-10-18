@@ -79,7 +79,7 @@ const save=()=>{
   }
   try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
 };
-const S=Object.assign({stats:{},level:0,mode:'syl',upper:true,rate:.75,theme:'',name:PROFILE.name,total:0,progress:0,stickers:0,sound:true,voiceURI:'',voiceURIs:{es:'',ca:''},world:'auto',lang:((navigator.language||'').toLowerCase().indexOf('ca')===0?'ca':'es'),sessionLen:PROFILE.kind==='pre'?5:10,pre:{es:0,ca:0},resets:{es:0,ca:0},modAt:0,session:{done:0,ok:0,stk:0,at:0},prefs:{}},load());
+const S=Object.assign({stats:{},level:0,mode:'syl',upper:true,rate:.75,theme:'',name:PROFILE.name,total:0,progress:0,stickers:0,sound:true,voiceURI:'',voiceURIs:{es:'',ca:''},world:'auto',lang:((navigator.language||'').toLowerCase().indexOf('ca')===0?'ca':'es'),sessionLen:PROFILE.kind==='pre'?5:10,pre:{es:0,ca:0},resets:{es:0,ca:0},modAt:0,session:{done:0,ok:0,stk:0,at:0},prefs:{},wordStyle:'auto'},load());
 // Stickers are collected per world (spec: 2026-10-17-world-stickers-design.md): S.stk = {worldId: n} owns the first n of that world's set.
 // An old save has only the counter S.stickers: its stickers are the first ones of the old order, each in its world's set.
 // Runs before lastFp is taken, so loading an old state is not a progress change (modAt decides level and name in the sync).
@@ -101,7 +101,7 @@ let sDone=0,sOk=0,sStk=0,pendingEnd=false,resting=false; // declared early: save
 let onProgressChange=()=>{}; // replaced by the sync glue
 // Session in progress and preferences (spec: docs/superpowers/specs/2026-10-17-session-prefs-sync-design.md). Each has its own
 // timestamp, so none of them can overwrite another value on a second device or move modAt (which decides level and name).
-const PREF_KEYS=['mode','world','sessionLen','upper','lang','rate','sound','theme','pathEs','pathCa','pathAuto']; // keep identical to merge.js; never the voice
+const PREF_KEYS=['mode','world','sessionLen','upper','lang','rate','sound','theme','pathEs','pathCa','pathAuto','wordStyle']; // keep identical to merge.js; never the voice
 const SESSION_TTL=12*3600*1000; // a session left over from yesterday must not resume
 const MAX_AT=8.64e15; // keep identical to merge.js: a stamp beyond it is invalid there
 const stampAfter=prev=>Math.min(MAX_AT,Math.max(Date.now(),(prev||0)+1));
@@ -121,6 +121,7 @@ if(!S.pre)S.pre={es:0,ca:0};
 // changes until a parent closes some); a new one starts at M. Runs before the baselines (lastPref), so it stamps nothing.
 {const started=S.total>0||Object.keys(S.stats).length>0,okPos=v=>Number.isInteger(v)&&v>=1&&v<=12;
  if(!okPos(S.pathEs))S.pathEs=started?12:1;if(!okPos(S.pathCa))S.pathCa=started?12:1;if(typeof S.pathAuto!=='boolean')S.pathAuto=true}
+if(!['auto','split','whole'].includes(S.wordStyle))S.wordStyle='auto'; // an unknown saved or synced value means automatic
 // One-time switch to capitals (the school book is all capitals): readers only, once per profile; she can switch back with Aa.
 if(PROFILE.kind==='reader'&&!S.upperMigrated){if(!S.prefs.upper)S.upper=true;S.upperMigrated=true;save()} // a profile that already has a synced capitals preference keeps it
 lastSessFp=sessFp();lastPref=prefSnap();
@@ -243,6 +244,11 @@ const poolFor=mode=>{
   const all=[];for(let l=0;l<=S.level;l++)all.push(...itemsFor(l,mode));return all;
 };
 const effMode=()=>S.mode==='word'&&openItems('word').length>=MIN_WORDS?'word':'syl'; // the stored preference S.mode is never changed by this
+// Words are shown split into syllables while they are new or hard, and whole (one plain block, like the school book) once she reads them well:
+// at least two correct readings and wins ahead of failures by 2, so one failed whole reading sends the word back to split. 'split' and 'whole'
+// force a style. A one-syllable word has nothing to split.
+const wholeReady=s=>!!s&&s.ok>=2&&s.ok-s.fail>=2;
+const wholeFor=it=>it.mode==='word'&&it.parts.length>=2&&(S.wordStyle==='whole'||(S.wordStyle!=='split'&&wholeReady(S.stats[it.key])));
 const recent=[]; // keys of the last exercises (not saved)
 function pick(){
   const all=poolFor(effMode());
@@ -255,6 +261,7 @@ function pick(){
   let r=Math.random()*wts.reduce((a,b)=>a+b,0),it=pool[0];
   for(let i=0;i<pool.length;i++){r-=wts[i];if(r<=0){it=pool[i];break}}
   recent.push(it.key);if(recent.length>12)recent.shift();
+  it.whole=wholeFor(it);
   return it;
 }
 
@@ -278,7 +285,7 @@ function renderHard(){
   list.forEach(([k])=>{const c=document.createElement('span');c.className='chip';c.textContent=k.replace(/^ca:/,'').replace(/^(snd|s|w):/,'');box.appendChild(c)});
 }
 const hintFor=p=>p==='read'
-  ? t(((cur&&cur.mode)||effMode())==='syl'?'hintSyl':'hintWord',{n:nm()})
+  ? (cur&&cur.whole?t('hintWhole',{n:nm()}):t(((cur&&cur.mode)||effMode())==='syl'?'hintSyl':'hintWord',{n:nm()}))
   : t('hintJudge');
 // Lumi's instruction sentence: a recording or a generated clip only. The browser voice is robotic, so with no clip he stays silent.
 // While it plays his beak moves; tapped (big) he also grows to the middle of the screen.
@@ -399,19 +406,21 @@ function setPhase(p){
   $('hint').textContent=hintFor(p);
 }
 function show(){
-  const it=cur, t=$('tiles');
-  t.classList.remove('merged');t.innerHTML='';
+  const it=cur, tl=$('tiles'); // not `t`: that is the translation function
+  tl.classList.remove('merged');tl.innerHTML='';
+  const parts=it.whole?[it.text]:it.parts; // whole style: the word as one block, as the book prints it
   const w=Math.min(window.innerWidth,660)*.86;
-  const fs=Math.max(44,Math.min(130,Math.floor(w/(it.text.length*.62+it.parts.length*.5+.4))));
-  t.style.setProperty('--fs',fs+'px');
-  it.parts.forEach((p,i)=>{
+  const fs=Math.max(44,Math.min(130,Math.floor(w/(it.text.length*.62+parts.length*.5+.4))));
+  tl.style.setProperty('--fs',fs+'px');
+  parts.forEach((p,i)=>{
     const b=document.createElement('button');
-    b.className='tile c'+(i%5)+(it.mode==='syl'?' static':'');
+    b.className=it.whole?'tile whole static':'tile c'+(i%5)+(it.mode==='syl'?' static':'');
     b.textContent=p;
     b.setAttribute('aria-label',p);
-    if(it.mode==='word') b.onclick=()=>say(p);
-    t.appendChild(b);
+    if(it.mode==='word'&&!it.whole) b.onclick=()=>say(p); // hearing a whole word first would give the answer away
+    tl.appendChild(b);
   });
+  $('joinBtn').textContent=it.whole?t('check'):t('join');
   const pic=$('pic');
   pic.hidden=it.mode!=='word'||!it.emoji; // a word without a picture (e.g. "no", "dia") has no slot at all
   pic.className='pic q';pic.textContent='?';
@@ -540,7 +549,7 @@ const stateOf=id=>{
 // Write merged data into a profile (the active one lives in S; the others only in localStorage).
 const IDLE_MS=30000; // a value changed on THIS device within the last 30 s is kept: nobody is interrupted while playing
 function applyMerged(m,adoptSession){
-  const before={lang:S.lang,mode:S.mode,world:S.world,sessionLen:S.sessionLen,pos:pathPos()};
+  const before={lang:S.lang,mode:S.mode,world:S.world,sessionLen:S.sessionLen,pos:pathPos(),wordStyle:S.wordStyle};
   const wasStarted=S.total>0||Object.keys(S.stats).length>0;
   mergeMod.applySynced(S,m); // sets the progress fields, S.session, S.prefs and the plain preference fields (never the voice)
   // a fresh device that has just received an experienced child: its placeholder M (never chosen, never stamped) is not what the child had
@@ -550,7 +559,7 @@ function applyMerged(m,adoptSession){
   if(S.level>=LEVELS.length)S.level=0;
   // preferences, through the same functions the UI uses
   applyTheme();applyCase();applySound();applyWorld();
-  $('rate').value=S.rate;$('sessionSel').value=String(S.sessionLen);
+  $('rate').value=S.rate;$('sessionSel').value=String(S.sessionLen);$('wordStyleSel').value=S.wordStyle;
   renderMode();
   // the session in progress: a finished or stale one starts a new session
   const s=m.session;
@@ -565,7 +574,7 @@ function applyMerged(m,adoptSession){
   if(S.lang!==before.lang)applyLang();else renderSession();
   renderGoal();
   if(S.world!==before.world)renderWorlds(); // not on every pull: it would replace the buttons (and the focus) of an open worlds overlay
-  if(S.lang!==before.lang||((S.mode!==before.mode||(pathPos()!==before.pos&&cur&&!eligible(cur)))&&!resting))pre?pre.refresh():next(); // while resting, next() would start (and stamp) a new session // a different context needs a new exercise; otherwise the card on screen stays
+  if(S.lang!==before.lang||((S.mode!==before.mode||S.wordStyle!==before.wordStyle||(pathPos()!==before.pos&&cur&&!eligible(cur)))&&!resting))pre?pre.refresh():next(); // while resting, next() would start (and stamp) a new session // a different context needs a new exercise; otherwise the card on screen stays
 }
 // Returns the merged data. The child may have answered while the request was in flight, so the server's data is merged
 // into the CURRENT local state (never copied over it): a sync can only add progress, never take it away.
@@ -1102,6 +1111,8 @@ $('hint').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();sayH
 $('mascot').onclick=()=>sayHint(true);
 $('lumiBig').onclick=()=>{if(curAudio)curAudio.pause();talkStop()};
 $('sessionSel').onchange=e=>{S.sessionLen=parseInt(e.target.value,10);save();renderSession()};
+$('wordStyleSel').value=S.wordStyle;
+$('wordStyleSel').onchange=e=>{S.wordStyle=e.target.value;save();if(!resting&&!pre)next()}; // acts at once: the next word is shown in the chosen style
 // Game mode: only the game on screen (no header buttons, levels, modes or parents' panel), and full screen where the browser allows it. It is a setting of
 // this device (not synced) and is left with the small X in the corner. The page may already carry the class (the inline script in <head> sets it before painting).
 const GAME_KEY='leemos-game';

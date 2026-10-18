@@ -1578,5 +1578,78 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('game mode: the exit button is small, in a corner, inside the safe area, and at least 44 px to tap', /\.game-off\{[^}]*position:\s*fixed[^}]*env\(safe-area-inset-top\)/.test(css) && /\.game-off\{[^}]*min-width:\s*44px[^}]*min-height:\s*44px|\.game-off\{[^}]*width:\s*44px[^}]*height:\s*44px/.test(css));
 }
 
+// ---------- 42. words shown whole, like the school book ----------
+{
+  const WORDS4 = [{ w: 'ma-no', e: '✋' }, { w: 'ma-ma', e: '👩' }, { w: 'so-pa', e: '🍲' }, { w: 'pa-la', e: '🪓' }];
+  const patchLevels = (d) => d.map((L, i) => (i === 0 ? { ...L, syl: ['ma', 'me', 'mi', 'mo', 'mu'], words: WORDS4 } : L));
+  const patchSol = (d) => d.map((L, i) => (i === 0 ? { ...L, syl: ['ma', 'me', 'mi', 'mo', 'mu'], words: [{ w: 'sol', e: '☀️' }, ...WORDS4.slice(0, 3)] } : L));
+  const st = (extra = {}) => ({ name: 'Elsa', mode: 'word', level: 0, pathEs: 12, pathCa: 12, ...extra });
+  const KEYS4 = WORDS4.map((o) => 'w:' + o.w);
+  const stats = (ok, fail) => Object.fromEntries(KEYS4.map((k) => [k, { ok, fail }]));
+  const tiles = (x) => [...x.d.querySelectorAll('#tiles .tile')];
+  const wordNow = (x) => tiles(x).map((b) => b.textContent).join('');
+  const first = async (state, extra = {}) => { const x = await boot({ levelsPatch: patchLevels, storage: { 'leemos-v1': state }, ...extra }); return x; };
+  const isWhole = (x) => tiles(x).length === 1 && tiles(x)[0].classList.contains('whole');
+
+  // the parents' panel offers the three styles, automatic first
+  let x = await first(st());
+  const opts = [...x.d.querySelectorAll('#wordStyleSel option')].map((o) => o.value);
+  check('whole words: the parents\' panel offers Automático, Separadas and Como el libro, and automatic is the default', opts.join() === 'auto,split,whole' && x.$('wordStyleSel').value === 'auto', opts.join());
+
+  // the rule in automatic: read correctly at least twice AND wins ahead of failures by 2
+  const cases = [['no record', {}, false], ['ok 1', stats(1, 0), false], ['ok 2', stats(2, 0), true], ['ok 2 fail 1', stats(2, 1), false], ['ok 3 fail 1', stats(3, 1), true], ['ok 5 fail 4', stats(5, 4), false], ['ok 0 fail 3', stats(0, 3), false]];
+  for (const [name, s, expectWhole] of cases) {
+    x = await first(st({ stats: s }));
+    const w = wordNow(x);
+    const multi = WORDS4.some((o) => o.w.replace(/-/g, '') === w);
+    check(`whole words (auto): ${name} -> ${expectWhole ? 'whole' : 'split'}`, multi && isWhole(x) === expectWhole && (expectWhole ? tiles(x).length === 1 : tiles(x).length === 2), `${w} ${tiles(x).length} tiles`);
+  }
+
+  // forced styles
+  x = await first(st({ wordStyle: 'split', stats: stats(5, 0) }));
+  check('whole words (separadas): always split, even for a word she has mastered', tiles(x).length === 2 && !isWhole(x) && x.$('joinBtn').textContent === 'Juntar');
+  x = await first(st({ wordStyle: 'whole' }));
+  check('whole words (como el libro): one plain block with the whole word, even when it is new', isWhole(x) && WORDS4.some((o) => o.w.replace(/-/g, '') === wordNow(x)), wordNow(x));
+  check('whole words: the block has no syllable colour, is not tappable (hearing it would give the answer away) and the button says Comprobar', !/\bc[0-4]\b/.test(tiles(x)[0].className) && tiles(x)[0].onclick === null && x.$('joinBtn').textContent === 'Comprobar', tiles(x)[0].className + ' | ' + x.$('joinBtn').textContent);
+  check('whole words: Lumi\'s instruction is to read the word aloud, not to join syllables', /lee la palabra/i.test(x.$('hint').textContent) && !/únelas/.test(x.$('hint').textContent), x.$('hint').textContent);
+  // the normal flow still works: check, then the adult judges
+  x.$('joinBtn').click(); await sleep(5);
+  check('whole words: Comprobar plays the word, shows the picture and asks the adult to judge', !x.$('okBtn').hidden && !x.$('noBtn').hidden && x.$('joinBtn').hidden && x.$('pic').classList.contains('on'));
+  x.$('okBtn').click(); await sleep(10);
+  const rec = JSON.parse(x.w.localStorage.getItem('leemos-v1'));
+  check('whole words: a judged reading counts like any other (same record, same total)', rec.total === 1 && Object.values(rec.stats).some((s) => s.ok === 1), JSON.stringify(rec.stats));
+  // one-syllable words and Sílabas mode are not touched
+  x = await first(st({ wordStyle: 'whole', mode: 'syl' }));
+  check('whole words: in Sílabas mode the syllables stay as they are', tiles(x).every((b) => !b.classList.contains('whole')) && x.$('joinBtn').textContent === 'Juntar');
+  let one = null;
+  for (let i = 0; i < 40 && !one; i++) { const y = await boot({ levelsPatch: patchSol, storage: { 'leemos-v1': st({ wordStyle: 'whole' }) } }); if (wordNow(y) === 'sol') one = y; }
+  check('whole words: a one-syllable word has nothing to split and keeps the normal tile and the Juntar button', !!one && tiles(one).length === 1 && !tiles(one)[0].classList.contains('whole') && one.$('joinBtn').textContent === 'Juntar');
+
+  // the parent's setting acts at once, is saved and stamped as a preference
+  x = await first(st({ wordStyle: 'split' }));
+  x.$('wordStyleSel').value = 'whole'; x.$('wordStyleSel').dispatchEvent(new x.w.Event('change')); await sleep(10);
+  const saved = JSON.parse(x.w.localStorage.getItem('leemos-v1'));
+  check('whole words: choosing Como el libro in the panel shows the next word whole and saves it as a synced preference', isWhole(x) && saved.wordStyle === 'whole' && saved.prefs.wordStyle.v === 'whole', JSON.stringify(saved.prefs && saved.prefs.wordStyle));
+  // a bad stored value falls back to automatic
+  x = await first(st({ wordStyle: 'weird' }));
+  check('whole words: an unknown saved value falls back to automatic', x.$('wordStyleSel').value === 'auto' && x.errors.length === 0);
+  // another device changes it
+  const { s: supa, app } = await signedBoot({ syncEvery: 120, levelsPatch: patchLevels });
+  const row = supa.rows.get(RID_A); row.data = { ...row.data, prefs: { ...(row.data.prefs || {}), wordStyle: { v: 'whole', at: Date.now() + 5000 } } }; row.version++;
+  await until(() => JSON.parse(app.w.localStorage.getItem('leemos-v1')).wordStyle === 'whole', 3000);
+  await sleep(40);
+  check('whole words: a style chosen on another device is applied and shown in the panel', app.$('wordStyleSel').value === 'whole');
+  const { s: supa2, app: app2 } = await signedBoot({ syncEvery: 120, levelsPatch: patchLevels });
+  const row2 = supa2.rows.get(RID_A); row2.data = { ...row2.data, prefs: { wordStyle: { v: 'zzz', at: Date.now() + 5000 } } }; row2.version++;
+  await sleep(500);
+  check('whole words: a hostile value from the server never reaches the app', JSON.parse(app2.w.localStorage.getItem('leemos-v1')).wordStyle !== 'zzz' && app2.errors.length === 0);
+  // Catalan texts
+  x = await first(st({ wordStyle: 'whole' }), { lang: 'ca-ES' });
+  check('whole words: and in Catalan', x.$('joinBtn').textContent === 'Comprova' && /llegeix la paraula/i.test(x.$('hint').textContent) && /Com el llibre/.test(x.$('wordStyleSel').textContent), x.$('joinBtn').textContent + ' | ' + x.$('hint').textContent);
+  // the whole-word tile is static: no animation or transition
+  const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
+  check('whole words: the plain tile is styled, and has no animation or transition', /\.tile\.whole\{/.test(css) && !/\.tile\.whole\{[^}]*(animation|transition)/.test(css));
+}
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

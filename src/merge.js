@@ -48,6 +48,7 @@ const PREF_OK = {
   pathEs: (v) => Number.isInteger(v) && v >= 1 && v <= 12, // letters open in Spanish (Camino de Elsa)
   pathCa: (v) => Number.isInteger(v) && v >= 1 && v <= 12,
   pathAuto: (v) => typeof v === 'boolean',
+  wordStyle: (v) => v === 'auto' || v === 'split' || v === 'whole', // how words are shown: by the app, split into syllables, or whole like the school book
 };
 export const PREF_KEYS = Object.keys(PREF_OK); // never the voice: it differs per device
 const cleanPref = (k, prefs) => {

@@ -144,6 +144,8 @@ input[type=text],select{font:inherit;padding:8px 12px;border-radius:12px;border:
 .tile.c2{background:var(--c2);color:var(--t2)}
 .tile.c3{background:var(--c3);color:var(--t3)}
 .tile.c4{background:var(--c4);color:var(--t4)}
+/* A word shown whole, like the school book: one plain block of the word, no syllable colours. */
+.tile.whole{background:var(--panel);color:var(--ink);border:2px solid var(--line);border-radius:.18em;padding:.1em .28em .12em;letter-spacing:.03em;box-shadow:none}
 .tiles.merged .tile:not(:first-child){border-top-left-radius:0;border-bottom-left-radius:0}
 .tiles.merged .tile:not(:last-child){border-top-right-radius:0;border-bottom-right-radius:0}
 .upper .tile{text-transform:uppercase}
