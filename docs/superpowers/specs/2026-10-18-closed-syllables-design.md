@@ -47,13 +47,13 @@ A session is **6 screens** (about 4 minutes, one objective each) and ends with a
 
 **Peek-a-boo**, for the second half of the syllable screens: the base *PA* is shown and the coda is hidden behind a "?" card inside the same arc. She reads *PA* aloud, taps the card, the card turns over to *S*, and the stretched clip plays.
 
-**Word screen:** the syllables appear one at a time, left to right. A closed syllable is always built with the 2+1 steps (base, then the coda docks). Once a syllable is done it docks into an **anchor chip** at the top: a small tile she can tap at any time to hear that syllable again, so she does not have to hold it in memory while she decodes the next. When the last syllable is done, a "Juntar" button appears (the app's existing join), the whole word plays, and only then the picture appears.
+**Word screen:** the syllables appear one at a time, left to right. A closed syllable is always built with the 2+1 steps (base, then the coda docks). Once a syllable is done it docks into an **anchor chip** at the top (a closed syllable stays in two parts, base and coda, never one block of three letters): a small tile she can tap at any time to hear that syllable again, so she does not have to hold it in memory while she decodes the next. When the last syllable is done, a "Juntar" button appears (the app's existing join), the whole word plays, and only then the picture appears.
 
 All screens: tiles ≥ 44 px, focus visible, colours as tokens with the dark variant, texts via `t()` in both languages. With `prefers-reduced-motion` the slide and the flip become instant (the arc and the final state remain).
 
 ## 3. The 3-second rescue (zero stall)
 
-A timer starts when each step is shown and resets on every tap. If she does nothing for **3 seconds** (`window.__leemosRescueMs` overrides it in tests):
+A timer starts when each step is shown (on the first screen of a session 3 s later, so it does not cut Lumi's instruction) and resets on every tap, also a tap on Lumi or on the bubble. If she does nothing for **3 seconds** (`window.__leemosRescueMs` overrides it in tests):
 - **Syllable screen:** Lumi plays the base sound, the coda tile (or the "?" card) starts pulsing, and her only task is to tap it.
 - **Word screen:** Lumi plays the syllable that is on screen (the closed one stretched, the open one normal) and docks it into the anchor chip for her, **once per word**; the remaining syllables are hers (they only pulse).
 - The rescue fires **once per step** (no repeated nagging); after it, the pulse stays and there is no further timer.

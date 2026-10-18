@@ -66,6 +66,7 @@
   "closeCover": "Tapa: toca para ver la última letra",
   "closeAnchor": "Escuchar otra vez",
   "closeAdd": "Añadir {c}",
+  "closeWordHint": "Lee cada sílaba y junta la palabra.",
   "pathTitle": "Camino de letras",
   "pathHelp": "Las letras abiertas son las que practica. Toca una letra para abrir hasta ella y cerrar las siguientes, según el libro del cole.",
   "pathAuto": "Abrir letras solas cuando domine las de ahora",

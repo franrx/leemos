@@ -262,6 +262,7 @@ html.close .session,html.close #goal,html.close #tiles,html.close #pic,html.clos
 .close-tile,.close-coda,.close-card,.close-chip{font:inherit;font-weight:700;color:var(--ink);background:var(--panel);border:3px solid var(--c2);border-radius:18px;cursor:pointer;touch-action:manipulation}
 .close-tile,.close-coda,.close-card{font-size:clamp(48px,14vw,88px);min-width:72px;min-height:88px;padding:4px 18px}
 .close-chip{font-size:1.4rem;min-height:48px;min-width:56px;padding:4px 14px}
+.chip-coda{margin-left:.2em;color:var(--c2)}
 .close-coda{border-style:dashed;color:var(--c2)}
 .close-coda.glow,.close-card{animation:closeGlow 1.6s ease-in-out infinite}
 .close-coda.rescue,.close-card.rescue,.close-tile.rescue,#closeJoin.rescue{animation:closeGlow .6s ease-in-out infinite;background:color-mix(in srgb,var(--c1) 35%,var(--panel))}

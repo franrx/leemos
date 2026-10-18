@@ -467,7 +467,7 @@ function next(fresh){
       Object.entries(G).forEach(([k,o])=>{if(o&&k!==S.mode)o.leave()});
       g.begin();renderMode();return;
     }
-    if(!g&&!GP[S.mode]){const m=S.mode;loadGame(m).then(f=>{if(f&&S.mode===m)next()})} // a synced game mode on a device that has not loaded it yet
+    if(!g&&!GP[S.mode]){const m=S.mode;loadGame(m).then(f=>{if(f&&S.mode===m&&f.canPlay())next()})} // a synced game mode on a device that has not loaded it yet
   }
   Object.values(G).forEach(g=>g&&g.leave());
   if(resting){resting=false;sDone=sOk=sStk=0;newWorld();renderSession()}
@@ -939,7 +939,8 @@ function loadGame(name){
   return GP[name]||(GP[name]=(async()=>{
     try{
       const imp=window.__leemosImport||(p=>import(p));
-      const load=Promise.all([imp('./'+def.file),def.data?Promise.all(['es','ca'].map(l=>loadJSON('src/data/'+def.data+'.'+l+'.json').then(d=>{CLOSED[l]=d}))):null]).then(r=>r[0]);
+      const load=Promise.all([imp('./'+def.file),def.data?Promise.all(['es','ca'].map(l=>loadJSON('src/data/'+def.data+'.'+l+'.json').then(d=>{CLOSED[l]=d}).catch(()=>{}))):null]).then(r=>r[0]);
+      // (one language failing to load only locks that language)
       const mod=await Promise.race([load,new Promise((_,no)=>setTimeout(()=>no(new Error('timeout')),window[def.ms]||5000))]); // a stalled network must not hold the first screen
       G[name]=mod[def.create]({doc:document,$,S,t,fmt,rnd,nm,say,lumiPlay,sayLumi,sfx,poke,sparkle:sparkleBurst,later:(f,ms)=>setTimeout(f,ms),
         earnSticker,showReward,refresh:()=>{renderLevels();renderHard();renderAlbum()},pathPos,levels:()=>LEVELS,data:()=>CLOSED[S.lang],save});

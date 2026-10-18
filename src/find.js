@@ -125,5 +125,7 @@ export function createFind(ctx) {
     else { again.focus(); sfx.win(); if (S.sound) sayLumi(msg); }
   }
 
+  $('rewardOk').addEventListener('click', () => { if (!over) return; const g = gen; later(() => { const a = $('findAgain'); if (g === gen && a) a.focus(); }, 0); }); // the reward closes: keyboard focus goes to "again"
+
   return { canPlay, begin, leave, active: () => !!game, intro: 'findIntro' };
 }

@@ -15,7 +15,7 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null, reduced = false, voice = null, syncConfig = null, supa = null, syncEvery = 0, openPath = true, hangImport = null } = {}) {
+async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null, reduced = false, voice = null, syncConfig = null, supa = null, syncEvery = 0, openPath = true, hangImport = null, onDom = null } = {}) {
   const errors = [];
   const audioCalls = [];
   const vc = new VirtualConsole();
@@ -78,6 +78,7 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
     },
   });
   const w = dom.window;
+  if (onDom) onDom(w); // a test can observe the page from the start
   const p = w.eval(`(async()=>{'use strict';${appJs}\n})()`);
   p.catch((e) => errors.push('boot: ' + e.message));
   for (let i = 0; i < 100 && !w.document.getElementById('hello').textContent.startsWith('¡Hola') && !w.document.getElementById('hello').textContent.startsWith('Hola,'); i++) await sleep(20);
@@ -1741,7 +1742,9 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   for (let p = 1; p < 5; p++) { copies(x).forEach((b) => b.click()); await sleep(20); }
   check('find: after 5 pages the game ends with one sticker, the reward and the again button', saved(x).stickers === 1 && !x.$('reward').hidden && !!x.$('findAgain') && tiles(x).length === 0, `stickers=${saved(x).stickers}`);
   check('find: the whole game left the stats, total and the session untouched', JSON.stringify(saved(x).stats || {}) === '{}' && !saved(x).total && (saved(x).session.done | 0) === 0);
-  x.$('rewardOk').click(); x.$('findAgain').click(); await sleep(10);
+  x.$('rewardOk').click(); await sleep(10);
+  check('find: when the reward closes keyboard focus goes to the again button', x.d.activeElement === x.$('findAgain'));
+  x.$('findAgain').click(); await sleep(10);
   check('find: again starts a new game from page 1', tiles(x).length === 12 && x.d.querySelectorAll('.find-dots i.on').length === 0 && saved(x).stickers === 1);
   check('find: the whole run raised no errors', x.errors.length === 0, x.errors.join(' | '));
 
@@ -1917,7 +1920,9 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   await finishScreen(x); await finishScreen(x);
   check('close: after 6 screens a sticker is given once, the reward shows and the again button appears', csaved(x).stickers === 1 && !x.$('reward').hidden && !!x.$('closeAgain'), `stickers=${csaved(x).stickers}`);
   check('close: the whole session left stats, total and the session counters untouched', cprogress(x) === st0);
-  x.$('rewardOk').click(); x.$('closeAgain').click(); await sleep(10);
+  x.$('rewardOk').click(); await sleep(10);
+  check('close: when the reward closes keyboard focus goes to the again button', x.d.activeElement === x.$('closeAgain'));
+  x.$('closeAgain').click(); await sleep(10);
   check('close: again starts a new session from screen 1', x.d.querySelectorAll('.close-dots i.on').length === 0 && !!action(x) && csaved(x).stickers === 1);
   check('close: the whole run raised no errors', x.errors.length === 0, x.errors.join(' | '));
 
@@ -1947,6 +1952,7 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     for (let i = 0; i < 4; i++) { await finishScreen(wx); }
     check('close: after the 4 syllable screens the word screens come, with an empty anchor row and the first syllable', !!wx.d.querySelector('.close-anchors') && wx.d.querySelectorAll('.close-chip').length === 0 && !!wx.d.querySelector('.close-current'));
     const picBefore = wx.d.querySelector('.close-pic');
+    check('close: a word screen says its own instruction, not the one about closing a syllable', wx.$('hint').textContent === 'Lee cada sílaba y junta la palabra.');
     check('close: the picture is hidden until the word is read (the app rule)', !picBefore || picBefore.hidden || !picBefore.textContent);
     act().click(); await sleep(20);
     check('close: a finished syllable docks into the anchor chip', wx.d.querySelectorAll('.close-chip').length === 1);
@@ -1958,6 +1964,7 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     act().click(); await sleep(20);
     const join = wx.$('closeJoin');
     check('close: when every syllable is done a Juntar button appears (not before)', !!join && wx.d.querySelectorAll('.close-chip').length === 2);
+    check('close: the closed syllable shows in the chip as its base and its coda, not one unsegmented block', wx.d.querySelectorAll('.close-chip .chip-coda').length === 1 && wx.d.querySelectorAll('.close-chip .chip-base').length === 1);
     check('close: the picture is still hidden before Juntar', !wx.d.querySelector('.close-pic') || wx.d.querySelector('.close-pic').hidden);
     const pw0 = wx.audioCalls.length + (wx.w.__tts || []).length;
     join.click(); join.click(); // a double tap
@@ -2061,6 +2068,38 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     // the pulse exists for every control the rescue marks, and a revealed card stops glowing
     const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
     check('close: the rescue pulse is styled on the card, the tile and Juntar, and a revealed card stops glowing', /\.close-card\.rescue,[^{]*\.close-tile\.rescue,[^{]*#closeJoin\.rescue\{animation:closeGlow/.test(css) && /\.close-card\.docked\{[^}]*animation:none/.test(css));
+  }
+
+  // deferred minors of the Cierra review
+  {
+    // a synced game mode that arrives while the pool is locked replaces the exercise once, not twice
+    let shows = 0;
+    const { s: sp, app } = await signedBoot({ syncEvery: 120, onDom: (w) => { new w.MutationObserver((recs) => { if (recs.some((r) => r.target.id === 'tiles' && r.addedNodes.length)) shows++; }).observe(w.document.getElementById('tiles'), { childList: true }); } });
+    const before = shows;
+    const row = sp.rows.get(RID_A); row.data = { ...row.data, prefs: { ...(row.data.prefs || {}), mode: { v: 'close', at: Date.now() + 5000 }, pathEs: { v: 1, at: Date.now() + 5000 } } }; row.version++;
+    await until(() => JSON.parse(app.w.localStorage.getItem('leemos-v1')).mode === 'close', 3000); await sleep(200);
+    check('close: a synced Cierra that arrives while it is locked swaps the exercise once, not twice', shows - before === 1, `shows=${shows - before}`);
+
+    // one data file failing does not lock the other language
+    const fx = await boot({ storage: CR(), manifest: cman }); fx.w.__audioMode = 'auto'; fx.w.__leemosRescueMs = 9000;
+    const f0 = fx.w.fetch; fx.w.fetch = (u, ...a) => (/closed\.ca\.json/.test(u) ? Promise.resolve({ ok: false, status: 404, json: async () => ({}) }) : f0(u, ...a));
+    fx.$('mClose').click(); await until(() => !croom(fx).hidden);
+    check('close: if the other language data fails to load Cierra still works in the current one', !croom(fx).hidden && !!action(fx));
+
+    // rescue timing: later on the first screen (the instruction plays), reset by taps on Lumi and the bubble, and the base does not cut the stretched clip
+    const gx = await boot({ storage: CR(), manifest: cman }); gx.w.__audioMode = 'auto'; gx.w.__leemosRescueMs = 5000;
+    const ms = []; const st0 = gx.w.setTimeout; gx.w.setTimeout = (f, m, ...a) => { ms.push(m); return st0(f, m, ...a); };
+    gx.$('mClose').click(); await until(() => !croom(gx).hidden);
+    check('close: on the first screen the rescue waits longer, so it does not cut the instruction', ms.includes(8000), ms.join(',')); // 5000 (the rescue) + 3000 (the instruction clip)
+    const n0 = ms.filter((v) => v === 5000).length;
+    gx.$('hint').click();
+    check('close: a tap on the bubble pushes the rescue back', ms.filter((v) => v === 5000).length === n0 + 1);
+    gx.$('mascot').dispatchEvent(new gx.w.Event('click'));
+    check('close: and so does a tap on Lumi', ms.filter((v) => v === 5000).length === n0 + 2);
+    action(gx).click();
+    const a0 = gx.audioCalls.length;
+    gx.d.querySelector('.close-tile.base').click();
+    check('close: tapping the base while the stretched sound is playing does not cut it', gx.audioCalls.length === a0);
   }
 
   // Leo never sees the mode

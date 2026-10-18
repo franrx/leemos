@@ -66,6 +66,7 @@
   "closeCover": "Tapa: toca per veure l'última lletra",
   "closeAnchor": "Escoltar una altra vegada",
   "closeAdd": "Afegir {c}",
+  "closeWordHint": "Llegeix cada síl·laba i ajunta la paraula.",
   "pathTitle": "Camí de lletres",
   "pathHelp": "Les lletres obertes són les que practica. Toca una lletra per obrir fins a ella i tancar les següents, segons el llibre de l'escola.",
   "pathAuto": "Obre lletres soles quan domini les d'ara",

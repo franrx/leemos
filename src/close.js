@@ -92,13 +92,16 @@ export function createClose(ctx) {
   const rescueMs = () => doc.defaultView.__leemosRescueMs || 3000;
   const disarm = () => { clearTimeout(rescueT); rescueT = 0; };
   // 3 seconds with no tap: model the hard part and leave the rest to her. Once per step; any tap pushes it back; nothing is shown or recorded as a failure.
-  const arm = () => {
+  const INTRO_MS = 3000; // the first screen plays Lumi's instruction: the rescue must not start while it is still playing
+  const arm = (extra = 0) => {
     disarm();
     if (rescued || advancing || over || !plan || !rescueFn) return;
     const g = gen;
-    rescueT = later(() => { if (g !== gen || rescued || advancing || over) return; rescued = true; rescueFn(); }, rescueMs());
+    rescueT = later(() => { if (g !== gen || rescued || advancing || over) return; rescued = true; rescueFn(); }, rescueMs() + extra);
   };
-  room.addEventListener('click', () => { if (!rescued) arm(); }, true);
+  const tapped = () => { if (!rescued) arm(); }; // any tap, also on Lumi or the bubble, pushes the rescue back
+  room.addEventListener('click', tapped, true);
+  ['hint', 'mascot'].forEach((id) => $(id).addEventListener('click', tapped));
   const bank = () => ((data() || {}).syl) || [];
   const canPlay = () => openSyllables(bank(), pathPos()).length >= MIN_SYL;
   const el = (tag, cls, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -119,7 +122,7 @@ export function createClose(ctx) {
   // One 2+1 unit: the CV base, then the coda (a glowing tile to dock, or a "?" card to turn over). onDone runs once, after the stretched sound starts.
   function unit(parent, u, onDone) {
     const wrap = el('div', 'close-unit'), row = el('div', 'close-syl'), arc = el('div', 'close-arc');
-    const base = el('button', 'close-tile base', u.base); base.onclick = () => say(u.base);
+    const base = el('button', 'close-tile base', u.base); base.onclick = () => { if (!done) say(u.base); }; // once the syllable is closed its stretched sound plays: the base must not cut it
     const coda = u.peek ? el('button', 'close-card', '?') : el('button', 'close-coda glow', '+' + u.coda);
     coda.setAttribute('aria-label', u.peek ? t('closeCover') : t('closeAdd', { c: u.coda }));
     let done = false;
@@ -153,7 +156,9 @@ export function createClose(ctx) {
     const g0 = gen;
     let i = 0, joined = false, ctl = null, wordRescued = false; // the rescue models ONE syllable of a word; the rest is hers
     const dock = (u) => {
-      const chip = el('button', 'close-chip', u.text); chip.setAttribute('aria-label', t('closeAnchor') + ': ' + u.text);
+      const chip = el('button', 'close-chip'); chip.setAttribute('aria-label', t('closeAnchor') + ': ' + u.text);
+      if (u.closed) chip.append(el('span', 'chip-base', u.base), el('span', 'chip-coda', u.coda)); // a built closed syllable stays in two parts, never one block of three letters
+      else chip.textContent = u.text;
       chip.onclick = () => (u.closed ? lumiPlay('~' + u.text, false) : say(u.text));
       anchors.appendChild(chip);
       i++; step();
@@ -196,12 +201,12 @@ export function createClose(ctx) {
     for (let i = 0; i < plan.length; i++) dots.appendChild(el('i', i < idx ? 'on' : ''));
     const stage = el('div', 'close-stage');
     room.append(dots, stage);
-    $('hint').textContent = t('closeIntro');
+    $('hint').textContent = t(p.kind === 'syl' ? 'closeIntro' : 'closeWordHint');
     if (p.kind === 'syl') {
       const c = unit(stage, { text: p.syl, base: p.base, coda: p.coda, peek: p.peek }, complete);
       c.coda.focus();
       rescueFn = () => { say(p.base); c.coda.classList.add('rescue'); }; // the base is modelled, the coda tile pulses harder, and she still has the last tap
-      arm();
+      arm(first ? INTRO_MS : 0);
       if (!first) say(p.base); // the base sound starts each screen after the first (the first one plays the instruction instead)
     } else {
       wordFlow(stage, p.w);
@@ -220,6 +225,8 @@ export function createClose(ctx) {
     if (reward) later(() => showReward(reward), 500);
     else { again.focus(); sfx.win(); if (S.sound) sayLumi(msg); }
   }
+
+  $('rewardOk').addEventListener('click', () => { if (!over) return; const g = gen; later(() => { const a = $('closeAgain'); if (g === gen && a) a.focus(); }, 0); }); // the reward closes: keyboard focus goes to "again"
 
   return { canPlay, begin, leave, active: () => !!plan, intro: 'closeIntro' };
 }

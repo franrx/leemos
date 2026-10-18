@@ -83,7 +83,7 @@ for (const lang of ['es', 'ca']) {
   check(`[${lang}] record list: the stretch clips can be recorded, shown as the syllable`, rec.length === need.size && rec.every((c) => c.key === '~' + c.shown));
 }
 const es18 = readJSON('src/data/i18n.es.json'), ca18 = readJSON('src/data/i18n.ca.json');
-const CKEYS = ['mClose', 'closeLocked', 'closeIntro', 'closeGoal', 'closeAgain', 'closeDone', 'closeCover', 'closeAnchor', 'closeAdd'];
+const CKEYS = ['mClose', 'closeLocked', 'closeIntro', 'closeGoal', 'closeAgain', 'closeDone', 'closeCover', 'closeAnchor', 'closeAdd', 'closeWordHint'];
 check('i18n: every closed-syllables key exists in both languages and is not empty', CKEYS.every((k) => typeof es18[k] === 'string' && es18[k] && typeof ca18[k] === 'string' && ca18[k]));
 check('i18n: the Catalan instruction and the done text use "síl·laba" with the punt volat', /síl·laba/.test(ca18.closeIntro) && /síl·labes/.test(ca18.closeDone));
 const swText = readFileSync(join(ROOT, 'sw.js'), 'utf8');
