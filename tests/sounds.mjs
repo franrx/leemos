@@ -1,5 +1,5 @@
 // Unit tests for the letter-sound data and pure selection logic. Plain Node, no DOM.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -126,6 +126,11 @@ for (const lang of ['es', 'ca']) {
   const leoLines = [I.preIntroHint, I.preGameHint, I.preRest, ...I.preNos, ...I.preOks].map((x) => x.split('{n}').join('Leo'));
   check(`[${lang}] Leo's own lines (intro, game, rest, "almost" and praise) are phrase clips with his name`, leoLines.every((x) => hasClip(lang, x.toLowerCase(), 'phrase')), leoLines.filter((x) => !hasClip(lang, x.toLowerCase(), 'phrase')).join(' | '));
   check(`[${lang}] every picture word is a clip`, all.every((x) => hasClip(lang, x.w.toLowerCase())));
+}
+// GitHub Pages runs Jekyll, which silently skips files whose name starts with "_" (the clips of "¡Muy bien!" are _a1muy_20bien...): .nojekyll makes it serve them
+{
+  const under = ['es', 'ca'].flatMap((l) => readdirSync(join(ROOT, 'audio', l)).filter((f) => f.startsWith('_')));
+  check('pages: .nojekyll exists, so the clips whose names start with an underscore are served (' + under.length + ' of them)', !under.length || existsSync(join(ROOT, '.nojekyll')), String(under.length));
 }
 // A lone consonant read by a text voice comes out as the letter NAME ("eme"); an explicit IPA spelling avoids that.
 for (const lang of ['es', 'ca']) {
