@@ -88,12 +88,13 @@ export function createFind(ctx) {
     room.innerHTML = '';
     const dots = el('div', 'find-dots'); dots.setAttribute('role', 'img'); dots.setAttribute('aria-label', t('findGoal', { i: page + 1, n: game.length }));
     for (let i = 0; i < game.length; i++) dots.appendChild(el('i', i < page ? 'on' : ''));
-    const target = el('button', 'find-target', p.target.text); target.setAttribute('aria-label', t('findHear')); target.onclick = () => say(p.target.text);
+    const target = el('button', 'find-target', p.target.text); target.setAttribute('aria-label', t('findHear') + ': ' + p.target.text); target.onclick = () => say(p.target.text);
     const grid = el('div', 'find-grid');
-    p.tiles.forEach((tile) => { const b = el('button', 'find-tile', tile.text); b.onclick = () => tap(b, tile); grid.appendChild(b); });
+    p.tiles.forEach((tile) => { const b = el('button', 'find-tile', tile.text); b.setAttribute('aria-pressed', 'false'); b.onclick = () => tap(b, tile); grid.appendChild(b); });
     room.append(dots, target, grid);
     $('hint').textContent = t('findIntro');
-    if (first && S.sound) lumiPlay(t('findIntro'), false); // only a clip: without one it is silent
+    if (first) { if (S.sound) lumiPlay(t('findIntro'), false); } // only a clip: without one it is silent
+    else target.focus(); // a new page must not drop the keyboard onto the page
   }
 
   function tap(b, tile) {
@@ -121,7 +122,7 @@ export function createFind(ctx) {
     room.append(el('p', 'find-done', msg), again);
     $('hint').textContent = msg;
     if (reward) later(() => showReward(reward), 500);
-    else { sfx.win(); if (S.sound) sayLumi(msg); }
+    else { again.focus(); sfx.win(); if (S.sound) sayLumi(msg); }
   }
 
   return { canPlay, begin, leave, active: () => !!game };

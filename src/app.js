@@ -452,9 +452,11 @@ function applyWorld(){
   const w=WORLDS[worldNow()],st=$('stage');
   st.style.setProperty('--wa',w.a);st.style.setProperty('--wb',w.b);st.style.setProperty('--deco','"'+w.deco+'"');
 }
-function next(){
+// fresh: the caller changed what a game is made of (language, Camino letter), so a game on screen is replaced; any other next() (a stale
+// timer, a word-style change, a reset) leaves the page she is on, and a game that is finishing keeps its sticker.
+function next(fresh){
   if(S.mode==='find'){
-    if(find&&find.canPlay()){find.begin();renderMode();return}
+    if(find&&find.canPlay()){if(find.active()&&!fresh)return;find.begin();renderMode();return}
     if(!find&&!findP)loadFind().then(f=>{if(f&&S.mode==='find')next()}); // a synced "find" on a device that has not loaded it yet
   }
   if(find)find.leave();
@@ -585,7 +587,7 @@ function applyMerged(m,adoptSession){
   if(S.lang!==before.lang)applyLang();else renderSession();
   renderGoal();
   if(S.world!==before.world)renderWorlds(); // not on every pull: it would replace the buttons (and the focus) of an open worlds overlay
-  if(S.lang!==before.lang||((S.mode!==before.mode||S.wordStyle!==before.wordStyle||(pathPos()!==before.pos&&cur&&!eligible(cur)))&&!resting))pre?pre.refresh():next(); // while resting, next() would start (and stamp) a new session // a different context needs a new exercise; otherwise the card on screen stays
+  if(S.lang!==before.lang||((S.mode!==before.mode||S.wordStyle!==before.wordStyle||(pathPos()!==before.pos&&(S.mode==='find'||(cur&&!eligible(cur)))))&&!resting))pre?pre.refresh():next(S.lang!==before.lang||pathPos()!==before.pos); // while resting, next() would start (and stamp) a new session // a different context needs a new exercise; otherwise the card on screen stays
 }
 // Returns the merged data. The child may have answered while the request was in flight, so the server's data is merged
 // into the CURRENT local state (never copied over it): a sync can only add progress, never take it away.
@@ -925,7 +927,7 @@ function loadFind(){
   return findP||(findP=(async()=>{
     try{
       const imp=window.__leemosImport||(p=>import(p));
-      const mod=await imp('./find.js');
+      const mod=await Promise.race([imp('./find.js'),new Promise((_,no)=>setTimeout(()=>no(new Error('timeout')),window.__leemosFindTimeout||5000))]); // a stalled network must not hold the first screen
       find=mod.createFind({doc:document,$,S,t,fmt,rnd,nm,say,lumiPlay,sayLumi,sfx,poke,sparkle:sparkleBurst,later:(f,ms)=>setTimeout(f,ms),
         earnSticker,showReward,refresh:()=>{renderLevels();renderHard();renderAlbum()},pathPos,levels:()=>LEVELS,save});
       return find;
@@ -934,6 +936,7 @@ function loadFind(){
 }
 $('mFind').onclick=async()=>{
   if(S.mode==='find'&&find&&find.active())return; // already playing: do not throw the page away
+  if(pendingEnd)return; // the end of a reading session is on its way: it must not open over the game
   const f=await loadFind();
   if(!f||!f.canPlay()){$('hint').textContent=t('findLocked');return}
   S.mode='find';save();renderMode();next();
@@ -963,7 +966,8 @@ function setPath(n,quiet){
   n=Math.max(1,Math.min(12,n|0));
   if(S.lang==='ca')S.pathCa=n;else S.pathEs=n;
   save();renderPath();renderMode();renderLevels();
-  if(!quiet&&!pre&&cur&&!resting&&!eligible(cur))next(); // a parent closed letters: an exercise that is no longer allowed is swapped (opening more keeps it)
+  if(!quiet&&!pre&&!resting&&S.mode==='find'&&find&&find.active())next(true); // the Camino letter is the game's letter: a new game
+  else if(!quiet&&!pre&&cur&&!resting&&!eligible(cur))next(); // a parent closed letters: an exercise that is no longer allowed is swapped (opening more keeps it)
 }
 $('pathAuto').onchange=()=>{S.pathAuto=$('pathAuto').checked;save()};
 // After a session: the next letter opens when at least 75% of the items the current letter just made available are mastered (or there are none).
@@ -1193,7 +1197,7 @@ function setLang(l){
   S.lang=l;LEVELS=LV[l]||LV_ES;
   if(S.level>=LEVELS.length)S.level=0;
   sDone=sOk=sStk=0;pendingEnd=false;resting=false;newWorld();
-  save();applyLang();renderSession();pre?pre.refresh():next();
+  save();applyLang();renderSession();pre?pre.refresh():next(true);
 }
 $('langBtn').onclick=()=>setLang(S.lang==='es'?'ca':'es');
 

@@ -15,7 +15,7 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null, reduced = false, voice = null, syncConfig = null, supa = null, syncEvery = 0, openPath = true } = {}) {
+async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = null, importFails = false, mic = null, levelsPatch = null, reduced = false, voice = null, syncConfig = null, supa = null, syncEvery = 0, openPath = true, hangImport = null } = {}) {
   const errors = [];
   const audioCalls = [];
   const vc = new VirtualConsole();
@@ -29,7 +29,8 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
       const withPath = (k, v) => (openPath && typeof v !== 'string' && /^leemos-v1(:|$)/.test(k) && v.pathEs === undefined ? { ...v, pathEs: 12, pathCa: 12 } : v);
       for (const [k, v] of Object.entries(storage)) w.localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(withPath(k, v)));
       if (openPath && !('leemos-profiles' in storage) && !('leemos-v1' in storage)) w.localStorage.setItem('leemos-v1', JSON.stringify({ pathEs: 12, pathCa: 12 }));
-      w.__leemosImport = importFails ? () => Promise.reject(new Error('offline')) : (p) => import(pathToFileURL(join(ROOT, 'src', p)).href);
+      w.__leemosImport = importFails ? () => Promise.reject(new Error('offline')) : (p) => (hangImport && p.endsWith(hangImport) ? new Promise(() => {}) : import(pathToFileURL(join(ROOT, 'src', p)).href));
+      if (hangImport) w.__leemosFindTimeout = 150; // a stalled import must give up; short here so the test does not wait
       w.matchMedia = (q) => ({ matches: reduced && /reduced-motion/.test(q), addEventListener() {}, removeListener() {} });
       w.speechSynthesis = { getVoices: () => [{ name: 'Joana Online (Natural)', lang: 'ca-ES', voiceURI: 'j' }, { name: 'Google español', lang: 'es-ES', voiceURI: 'g' }], cancel() {}, speak(u) { (w.__tts ||= []).push(u.text); } };
       w.SpeechSynthesisUtterance = function (t) { this.text = t; };
@@ -1803,6 +1804,66 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     // the text of a found tile must stay readable on its green
     const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
     check('find: a found tile uses dark text on the green (white on it is 2.75:1 light, 1.77:1 dark)', /\.find-tile\.found\{[^}]*color:#06251A/.test(css));
+  }
+
+  // deferred minors: a stray next(), a stalled import, screen readers, the end of a reading session
+  {
+    // a stray next() (the parent changes the word style) keeps the page, and one landing in the pause after page 5 keeps the sticker
+    x = await start();
+    copies(x)[0].click();
+    x.$('wordStyleSel').value = 'whole'; x.$('wordStyleSel').dispatchEvent(new x.w.Event('change')); await sleep(30);
+    check('find: a change of word style mid-game keeps the page and the copies already found', x.d.querySelectorAll('.find-tile.found').length === 1);
+    x.$('wordStyleSel').value = 'auto'; x.$('wordStyleSel').dispatchEvent(new x.w.Event('change'));
+    copies(x).forEach((b) => b.click()); await sleep(20);
+    for (let p = 2; p < 5; p++) { copies(x).forEach((b) => b.click()); await sleep(20); }
+    copies(x).forEach((b) => b.click());
+    x.$('wordStyleSel').value = 'whole'; x.$('wordStyleSel').dispatchEvent(new x.w.Event('change')); // lands in the pause after the last page
+    await sleep(30);
+    check('find: and one landing in the pause after the last page does not cost the sticker', saved(x).stickers === 1 && !!x.$('findAgain'), `stickers=${saved(x).stickers}`);
+    // changes that do need a new game still start one
+    x = await start();
+    copies(x)[0].click();
+    x.$('langBtn').click(); await sleep(30);
+    check('find: changing the language starts a new game in that language', x.d.querySelectorAll('.find-tile.found').length === 0 && x.$('hint').textContent === 'Busca la paraula i toca les 3 còpies.');
+    x = await start();
+    copies(x)[0].click();
+    x.d.querySelectorAll('#pathRow button')[0].click(); await sleep(30);
+    check('find: a parent moving the Camino starts a new game with the new letter', x.d.querySelectorAll('.find-tile.found').length === 0 && /^m/.test(target(x)) && tiles(x).length === 12, target(x));
+
+    // a position pulled from another device mid-game starts a new game with that letter
+    {
+      const { s: sp, app } = await signedBoot({ syncEvery: 120 });
+      app.$('mFind').click(); await until(() => !app.$('findRoom').hidden);
+      const cp = [...app.d.querySelectorAll('.find-tile')].filter((b) => b.textContent === app.d.querySelector('.find-target').textContent);
+      cp[0].click();
+      const cur = JSON.parse(app.w.localStorage.getItem('leemos-v1')).pathEs, nv = cur === 3 ? 4 : 3;
+      const row = sp.rows.get(RID_A); row.data = { ...row.data, prefs: { ...(row.data.prefs || {}), pathEs: { v: nv, at: Date.now() + 5000 } } }; row.version++;
+      await until(() => JSON.parse(app.w.localStorage.getItem('leemos-v1')).pathEs === nv, 3000);
+      await sleep(40);
+      check('find: a Camino position pulled from another device mid-game starts a new game', app.d.querySelectorAll('.find-tile.found').length === 0 && app.d.querySelectorAll('.find-tile').length === 12 && !app.$('findRoom').hidden, `cur=${cur} nv=${nv}`);
+    }
+
+    // a stalled find.js import gives up instead of leaving the stage empty
+    x = await boot({ storage: R({ mode: 'find' }), hangImport: 'find.js' });
+    await sleep(30);
+    check('find: if the find.js import stalls the app gives up and shows a normal exercise, keeping the saved mode', room(x).hidden && x.d.querySelectorAll('.tile').length > 0 && saved(x).mode === 'find');
+
+    // screen readers and keyboard
+    x = await start();
+    check('find: the target button says the word, and every tile announces its state', x.d.querySelector('.find-target').getAttribute('aria-label').includes(target(x)) && tiles(x).every((b) => b.getAttribute('aria-pressed') === 'false'));
+    copies(x)[0].click();
+    check('find: a found tile is announced as pressed', copies(x)[0].getAttribute('aria-pressed') === 'true');
+    copies(x).forEach((b) => b.click()); await sleep(20);
+    check('find: each new page puts keyboard focus on the target, not on the page', x.d.activeElement === x.d.querySelector('.find-target'));
+
+    // the end of a reading session must not open over the game
+    x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', sessionLen: 5, world: 0, pathEs: 12, pathCa: 12 } } });
+    await playSession(x, 4);
+    x.$('joinBtn').click(); x.$('okBtn').click(); // the last answer: its reward is due in 500 ms
+    x.$('mFind').click(); await sleep(30);
+    check('find: Busca is ignored while the end of a reading session is on its way', room(x).hidden && saved(x).mode !== 'find' && !x.$('reward').hidden);
+    x.$('rewardOk').click(); await sleep(300);
+    check('find: and the session end screen then shows on the normal screen', !x.$('end').hidden && room(x).hidden);
   }
 
   // Leo never sees the mode
