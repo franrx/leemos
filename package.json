@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "node scripts/dev-server.mjs",
-    "test": "node tests/smoke.mjs && node tests/sounds.mjs && node tests/clipstore.mjs && node tests/record.mjs && node tests/azure.mjs && node tests/staticserver.mjs && node tests/sw.mjs && node tests/levels.mjs && node tests/merge.mjs && node tests/migration.mjs && node tests/sync.mjs && node tests/stickers.mjs && node tests/lab.mjs && node tests/lab-page.mjs && node tests/labdsp.mjs && node tests/lab-analyze.mjs && node tests/lab-play.mjs",
+    "test": "node tests/smoke.mjs && node tests/sounds.mjs && node tests/clipstore.mjs && node tests/record.mjs && node tests/azure.mjs && node tests/staticserver.mjs && node tests/sw.mjs && node tests/levels.mjs && node tests/find.mjs && node tests/merge.mjs && node tests/migration.mjs && node tests/sync.mjs && node tests/stickers.mjs && node tests/lab.mjs && node tests/lab-page.mjs && node tests/labdsp.mjs && node tests/lab-analyze.mjs && node tests/lab-play.mjs",
     "audio": "node scripts/generate-audio.mjs",
     "azure:voices": "node scripts/azure-voices.mjs",
     "audio:plan": "node scripts/generate-audio.mjs --dry-run",
