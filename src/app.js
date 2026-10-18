@@ -129,6 +129,7 @@ LEVELS=LV[S.lang]||LV_ES;
 if(!(S.level>=0&&S.level<LEVELS.length)){S.level=0;lastFp=fpOf()} // a correction, not a progress change: no modAt stamp // a saved level that does not exist (newer app version, bad data) falls back to the first
 let cur=null,last=null,phase='read',resetArmed=false;
 let pre=null;
+let find=null,findP=null; // Busca la paraula (src/find.js), loaded the first time it is needed
 let curWorld=Math.floor(Math.random()*WORLDS.length);
 
 const $=id=>document.getElementById(id);
@@ -449,6 +450,11 @@ function applyWorld(){
   st.style.setProperty('--wa',w.a);st.style.setProperty('--wb',w.b);st.style.setProperty('--deco','"'+w.deco+'"');
 }
 function next(){
+  if(S.mode==='find'){
+    if(find&&find.canPlay()){find.begin();return}
+    if(!find&&!findP)loadFind().then(f=>{if(f&&S.mode==='find')next()}); // a synced "find" on a device that has not loaded it yet
+  }
+  if(find)find.leave();
   if(resting){resting=false;sDone=sOk=sStk=0;newWorld();renderSession()}
   applyWorld();
   cur=pick();last=cur.key;show();
@@ -906,10 +912,28 @@ $('noBtn').onclick=()=>record(false);
 $('mSyl').onclick=()=>setMode('syl');
 $('mWord').onclick=()=>setMode('word');
 function renderMode(){
-  const m=effMode(),ok=openItems('word').length>=MIN_WORDS;
-  $('mSyl').setAttribute('aria-pressed',m==='syl');$('mWord').setAttribute('aria-pressed',m==='word');
+  const m=effMode(),ok=openItems('word').length>=MIN_WORDS,fo=!!(find&&S.mode==='find'&&find.canPlay());
+  $('mSyl').setAttribute('aria-pressed',!fo&&m==='syl');$('mWord').setAttribute('aria-pressed',!fo&&m==='word');$('mFind').setAttribute('aria-pressed',fo);
   $('mWord').setAttribute('aria-disabled',!ok);$('mWord').classList.toggle('dim',!ok);$('mWord').title=ok?'':t('wordsLocked');
 }
+// Loads src/find.js on first use; a failure leaves find null (the mode then says "locked" and the saved preference is kept).
+function loadFind(){
+  if(find)return Promise.resolve(find);
+  return findP||(findP=(async()=>{
+    try{
+      const imp=window.__leemosImport||(p=>import(p));
+      const mod=await imp('./find.js');
+      find=mod.createFind({doc:document,$,S,t,fmt,rnd,nm,say,lumiPlay,sayLumi,sfx,poke,sparkle:sparkleBurst,later:(f,ms)=>setTimeout(f,ms),
+        earnSticker,showReward,refresh:()=>{renderLevels();renderHard();renderAlbum()},pathPos,levels:()=>LEVELS,save});
+      return find;
+    }catch(e){findP=null;return null}
+  })());
+}
+$('mFind').onclick=async()=>{
+  const f=await loadFind();
+  if(!f||!f.canPlay()){$('hint').textContent=t('findLocked');return}
+  S.mode='find';save();renderMode();next();
+};
 function setMode(m){
   if(m==='word'&&openItems('word').length<MIN_WORDS){$('hint').textContent=t('wordsLocked');return} // dimmed: not enough words are open yet, and say so
   S.mode=m;save();
@@ -1170,6 +1194,7 @@ $('langBtn').onclick=()=>setLang(S.lang==='es'?'ca':'es');
 
 applyTheme();applyCase();applySound();applyLang();loadClips();updateProfileChip();
 loadManifest().then(()=>{introHint();setTimeout(warmAudio,3000)});
+if(S.mode==='find')await loadFind();
 renderGoal();next();
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 

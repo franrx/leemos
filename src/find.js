@@ -59,3 +59,70 @@ export function makeGame(getPool, rng, n = PAGES) {
   }
   return pages;
 }
+
+// The screen. ctx: { doc, $, S, t, fmt, rnd, nm, say, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, save, rng }
+export function createFind(ctx) {
+  const { doc, $, S, t, fmt, rnd, nm, say, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, save, rng = Math.random } = ctx;
+  const room = $('findRoom'), html = doc.documentElement;
+  let game = null, page = 0, found = 0, over = false, gen = 0; // gen: a pending "next page" from a game that was left must not act
+  const letters = () => (pathPos() >= 12 ? BOOK : [STEPS[pathPos() - 1]]);
+  const canPlay = () => { const w = wordsOf(levels()); return letters().every((l) => pool(w, l).length > OTHERS); };
+  const getPool = (r) => pool(wordsOf(levels()), pathPos() >= 12 ? BOOK[Math.floor(r() * BOOK.length)] : STEPS[pathPos() - 1]);
+  const el = (tag, cls, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+
+  function leave() { gen++; game = null; room.hidden = true; room.innerHTML = ''; html.classList.remove('find'); }
+
+  function begin() {
+    gen++;
+    if (!canPlay()) { leave(); return false; }
+    game = makeGame(getPool, rng); page = 0; over = false;
+    if (!game.length) { leave(); return false; }
+    html.classList.add('find'); room.hidden = false; room.classList.toggle('upper', !!S.upper);
+    render(true);
+    return true;
+  }
+
+  function render(first) {
+    found = 0;
+    const p = game[page];
+    room.innerHTML = '';
+    const dots = el('div', 'find-dots'); dots.setAttribute('role', 'img'); dots.setAttribute('aria-label', t('findGoal', { i: page + 1, n: game.length }));
+    for (let i = 0; i < game.length; i++) dots.appendChild(el('i', i < page ? 'on' : ''));
+    const target = el('button', 'find-target', p.target.text); target.setAttribute('aria-label', t('findHear')); target.onclick = () => say(p.target.text);
+    const grid = el('div', 'find-grid');
+    p.tiles.forEach((tile) => { const b = el('button', 'find-tile', tile.text); b.onclick = () => tap(b, tile); grid.appendChild(b); });
+    room.append(dots, target, grid);
+    $('hint').textContent = t('findIntro');
+    if (first && S.sound) lumiPlay(t('findIntro'), false); // only a clip: without one it is silent
+  }
+
+  function tap(b, tile) {
+    if (!game || over || found >= 3 || b.classList.contains('found')) return;
+    if (tile.copy) {
+      b.classList.add('found'); b.setAttribute('aria-pressed', 'true');
+      sfx.ok(); say(tile.text); found++;
+      if (found === 3) {
+        const g = gen;
+        poke('cheer', 900); sparkle(b, 10);
+        $('hint').textContent = fmt(rnd(t('oks')));
+        later(() => { if (g !== gen) return; page++; page < game.length ? render(false) : finish(); }, 1100);
+      }
+    } else {
+      b.classList.add('wobble'); later(() => b.classList.remove('wobble'), 500);
+    }
+  }
+
+  function finish() {
+    over = true;
+    const reward = earnSticker(); save(); refresh();
+    const msg = t('findDone', { n: nm() });
+    room.innerHTML = '';
+    const again = el('button', 'btn primary', t('findAgain')); again.id = 'findAgain'; again.onclick = () => begin();
+    room.append(el('p', 'find-done', msg), again);
+    $('hint').textContent = msg;
+    if (reward) later(() => showReward(reward), 500);
+    else { sfx.win(); if (S.sound) sayLumi(msg); }
+  }
+
+  return { canPlay, begin, leave, active: () => !!game };
+}

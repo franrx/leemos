@@ -234,7 +234,23 @@ html.pre #endLevelUpBtn{order:3}
 /* A sticker just earned: the album opens scrolled to its slot and the slot arrives once. */
 .sticker.fresh{animation:stickerArrives .8s .35s cubic-bezier(.16,1,.3,1) both}
 @keyframes stickerArrives{0%{transform:scale(.2) rotate(-12deg);opacity:0}60%{transform:scale(1.16) rotate(3deg);opacity:1}100%{transform:none;opacity:1}}
+/* Busca la paraula */
+html.find .session,html.find #goal,html.find #tiles,html.find #pic,html.find #stage .actions{display:none!important}
+.find-room{display:flex;flex-direction:column;align-items:center;gap:16px;width:100%}
+.find-dots{display:flex;gap:7px}
+.find-dots i{width:16px;height:16px;border-radius:50%;background:color-mix(in srgb,var(--ink) 14%,transparent)}
+.find-dots i.on{background:var(--c1)}
+.find-target{font:inherit;font-size:clamp(40px,11vw,72px);font-weight:700;color:var(--ink);background:var(--panel);border:3px solid var(--c2);border-radius:18px;padding:6px 28px;min-height:64px;cursor:pointer}
+.find-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:560px}
+.find-tile{font:inherit;font-size:clamp(20px,5.2vw,32px);font-weight:600;color:var(--ink);background:var(--panel);border:2px solid var(--line);border-radius:14px;min-height:56px;padding:10px 6px;cursor:pointer;touch-action:manipulation}
+.find-tile:focus-visible,.find-target:focus-visible{outline:3px solid var(--c2);outline-offset:2px}
+.find-tile.found{background:var(--ok);border-color:var(--ok);color:#fff}
+.find-tile.wobble{animation:findWobble .4s ease-in-out}
+.find-room.upper .find-tile,.find-room.upper .find-target{text-transform:uppercase}
+.find-done{font-size:1.3rem;font-weight:700;text-align:center}
+@keyframes findWobble{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
 @media (prefers-reduced-motion: reduce){
+  .find-tile.wobble{animation:none}
   .newletter,.newletter::after,.sticker.fresh{animation:none}
   .newletter::after{opacity:0}
   .path-row button,.mode{transition:none}

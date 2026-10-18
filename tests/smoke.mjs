@@ -1703,5 +1703,81 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('motion: and moves the position', JSON.parse(x.w.localStorage.getItem('leemos-v1')).pathEs === 2 && x.d.querySelectorAll('#pathRow button:not(.closed)').length === 2);
 }
 
+// ---------- 43. Busca la paraula: find the 3 copies among 12 look-alikes ----------
+{
+  const R = (extra = {}) => ({ 'leemos-v1': { name: 'Elsa', pathEs: 3, pathCa: 12, world: 0, ...extra } });
+  const room = (x) => x.$('findRoom');
+  const tiles = (x) => [...x.d.querySelectorAll('.find-tile')];
+  const target = (x) => x.d.querySelector('.find-target').textContent;
+  const copies = (x) => tiles(x).filter((b) => b.textContent === target(x));
+  const others = (x) => tiles(x).filter((b) => b.textContent !== target(x));
+  const saved = (x) => JSON.parse(x.w.localStorage.getItem('leemos-v1'));
+  const progress = (x) => JSON.stringify({ s: saved(x).stats, t: saved(x).total, p: saved(x).progress, lv: saved(x).level, m: saved(x).modAt, sess: saved(x).session });
+  const start = async (extra, opts = {}) => { const x = await boot({ storage: R(extra), ...opts }); x.w.__audioMode = 'auto'; x.$('mFind').click(); await until(() => !room(x).hidden); return x; };
+
+  const withSfx = (x) => { x.w.__osc = 0; x.w.AudioContext = class { constructor() { this.currentTime = 0; this.state = 'running'; this.destination = {}; } createOscillator() { x.w.__osc++; return { frequency: {}, connect() {}, start() {}, stop() {} }; } createGain() { return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; } resume() {} }; }; // counts the sound effects
+  let x = await start();
+  withSfx(x);
+  check('find: the third mode button exists and a tap opens the game', !!x.$('mFind') && !room(x).hidden && x.d.documentElement.classList.contains('find') && x.$('mFind').getAttribute('aria-pressed') === 'true');
+  check('find: a page has 12 tiles, 3 copies of the target, and 5 dots', tiles(x).length === 12 && copies(x).length === 3 && x.d.querySelectorAll('.find-dots i').length === 5);
+  check('find: the target is a word of the current letters (Camino step 3 = m p l)', /^[mpl]/.test(target(x)));
+  check('find: the saved preference is the mode', saved(x).mode === 'find');
+  const before = progress(x), tts0 = (x.w.__tts || []).length, audio0 = x.audioCalls.length;
+  others(x)[0].click();
+  check('find: a wrong tap wobbles, says nothing and counts nothing', others(x).some((b) => b.classList.contains('wobble')) && (x.w.__tts || []).length === tts0 && x.audioCalls.length === audio0 && progress(x) === before);
+  check('find: and no sound effect plays for a wrong tap (never a punishment sound)', x.w.__osc === 0, String(x.w.__osc));
+  const c = copies(x);
+  c[0].click();
+  check('find: a copy lights up and is read aloud, with its pleasant sound', c[0].classList.contains('found') && (x.w.__tts || []).includes(target(x)) && x.w.__osc > 0);
+  const tts1 = (x.w.__tts || []).length;
+  c[0].click();
+  check('find: tapping a found copy again does nothing', (x.w.__tts || []).length === tts1 && x.d.querySelectorAll('.find-tile.found').length === 1);
+  c[1].click(); c[2].click();
+  check('find: after the third copy a tap on a look-alike does not wobble (the page is closing)', (() => { const o = others(x)[1]; o.click(); return !o.classList.contains('wobble'); })());
+  await sleep(20);
+  check('find: the next page starts by itself with one dot filled', x.d.querySelectorAll('.find-dots i.on').length === 1 && tiles(x).length === 12 && x.d.querySelectorAll('.find-tile.found').length === 0);
+  check('find: no sticker and no session progress before the end', (saved(x).stickers | 0) === 0 && (saved(x).session.done | 0) === 0);
+  for (let p = 1; p < 5; p++) { copies(x).forEach((b) => b.click()); await sleep(20); }
+  check('find: after 5 pages the game ends with one sticker, the reward and the again button', saved(x).stickers === 1 && !x.$('reward').hidden && !!x.$('findAgain') && tiles(x).length === 0, `stickers=${saved(x).stickers}`);
+  check('find: the whole game left the stats, total and the session untouched', JSON.stringify(saved(x).stats || {}) === '{}' && !saved(x).total && (saved(x).session.done | 0) === 0);
+  x.$('rewardOk').click(); x.$('findAgain').click(); await sleep(10);
+  check('find: again starts a new game from page 1', tiles(x).length === 12 && x.d.querySelectorAll('.find-dots i.on').length === 0 && saved(x).stickers === 1);
+  check('find: the whole run raised no errors', x.errors.length === 0, x.errors.join(' | '));
+
+  // leaving mid-game gives nothing and cancels the pending page
+  x = await start();
+  copies(x).forEach((b) => b.click());
+  x.$('mSyl').click(); await sleep(30);
+  check('find: changing mode mid-game closes it, no sticker, and the stale page timer does not reopen it', room(x).hidden && !x.d.documentElement.classList.contains('find') && (saved(x).stickers | 0) === 0 && x.d.querySelectorAll('.find-tile').length === 0 && saved(x).mode === 'syl' && x.errors.length === 0, x.errors.join(' | '));
+
+  // reload with the mode saved
+  x = await boot({ storage: R({ mode: 'find' }) });
+  await until(() => !room(x).hidden);
+  check('find: a saved mode starts the game on load', !room(x).hidden && tiles(x).length === 12);
+
+  // the last Camino step draws book letters
+  x = await start({ pathEs: 12 });
+  check('find: with every letter open the target starts with one of the 11 book letters', /^[mplntsfbdrc]/.test(target(x)) && tiles(x).length === 12);
+
+  // Catalan
+  x = await boot({ storage: R({ lang: 'ca', pathCa: 2 }) });
+  x.$('mFind').click(); await until(() => !room(x).hidden);
+  check('find (ca): works in Catalan with the current letters', tiles(x).length === 12 && /^[mp]/.test(target(x)));
+
+  // a pool that is too small: locked, preference untouched
+  x = await boot({ storage: R(), levelsPatch: (d) => d.map((l) => ({ ...l, words: l.words.slice(0, 3) })) });
+  x.$('mFind').click(); await sleep(30);
+  check('find: with too few words the button says so and the saved mode does not change', room(x).hidden && x.$('hint').textContent === 'Busca la palabra se abre cuando hay palabras suficientes de la letra.' && (saved(x).mode || 'syl') === 'syl');
+
+  // the module cannot load (offline): normal exercises, preference untouched
+  x = await boot({ storage: R({ mode: 'find' }), importFails: true });
+  await sleep(30);
+  check('find: if the module cannot load the app still shows a normal exercise and keeps the saved mode', room(x).hidden && x.d.querySelectorAll('.tile').length > 0 && saved(x).mode === 'find');
+
+  // Leo never sees the mode
+  x = await bootLeo();
+  check('find: Leo is in his own screen where the modes row is hidden', x.d.documentElement.classList.contains('pre'));
+}
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
