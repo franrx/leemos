@@ -64,5 +64,25 @@ for (const lang of ['es', 'ca']) {
 const es = readJSON('src/data/levels.es.json');
 check('es: at step 3 only one qualifying word is open (pulpo), so the session is all syllables', openWords(wordsFrom(es), 3).map((w) => w.text).join() === 'pulpo');
 
+import { spokenFor } from '../scripts/spoken.mjs';
+import { recordList } from '../scripts/lib/clipstore.mjs';
+for (const lang of ['es', 'ca']) {
+  const bank = readJSON(`src/data/closed.${lang}.json`).syl;
+  const clips = buildClipList({ langs: [lang] });
+  const st = clips.filter((c) => c.kind === 'stretch');
+  check(`[${lang}] clips: one stretch clip per bank syllable, keyed "~syllable" so it never collides with the normal clip`, st.length === bank.length && st.every((c) => c.key === '~' + c.text && c.file.startsWith('_7e')) && bank.every((s) => st.some((c) => c.text === s)) && !clips.some((c) => c.kind !== 'stretch' && c.key.startsWith('~')));
+  check(`[${lang}] clips: the instruction closeIntro is in the phrase list`, clips.some((c) => c.kind === 'phrase' && c.text === readJSON(`src/data/i18n.${lang}.json`).closeIntro));
+  const ssml = st.map((c) => spokenFor(c));
+  check(`[${lang}] spoken: a stretch clip is SSML with a long vowel and a long coda, never the plain syllable`, ssml.every((s, i) => s.startsWith('<') && /<prosody/.test(s) && s !== st[i].text) && spokenFor(st.find((c) => c.text === 'pas')).includes('aa') && /s{2,}/.test(spokenFor(st.find((c) => c.text === 'pas'))));
+  const rec = recordList({ lang }).filter((c) => c.kind === 'stretch');
+  check(`[${lang}] record list: the stretch clips can be recorded, shown as the syllable`, rec.length === bank.length && rec.every((c) => c.key === '~' + c.shown));
+}
+const es18 = readJSON('src/data/i18n.es.json'), ca18 = readJSON('src/data/i18n.ca.json');
+const CKEYS = ['mClose', 'closeLocked', 'closeIntro', 'closeGoal', 'closeAgain', 'closeDone', 'closeCover', 'closeAnchor', 'closeAdd'];
+check('i18n: every closed-syllables key exists in both languages and is not empty', CKEYS.every((k) => typeof es18[k] === 'string' && es18[k] && typeof ca18[k] === 'string' && ca18[k]));
+check('i18n: the Catalan instruction and the done text use "síl·laba" with the punt volat', /síl·laba/.test(ca18.closeIntro) && /síl·labes/.test(ca18.closeDone));
+const swText = readFileSync(join(ROOT, 'sw.js'), 'utf8');
+check('service worker: close.js and its data are cached with the shell and the version was bumped', /'src\/close\.js'/.test(swText) && /'src\/data\/closed\.es\.json'/.test(swText) && /'src\/data\/closed\.ca\.json'/.test(swText) && /VERSION = 'leemos-v7'/.test(swText));
+
 console.log(failures ? `\n${failures} close test(s) FAILED` : '\nAll close tests passed');
 process.exit(failures ? 1 : 0);

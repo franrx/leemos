@@ -34,6 +34,7 @@ export function recordList({ lang, audioDir = join(ROOT, 'audio') }) {
   return [
     ...letters.map((x) => entry(x.l, 'sound', { word: x.w, emoji: x.e })),
     ...letters.map((x) => entry(x.w, 'word', { emoji: x.e })),
+    ...readJSON(`src/data/closed.${lang}.json`).syl.map((s) => entry('~' + s, 'stretch', { shown: s })),
   ];
 }
 

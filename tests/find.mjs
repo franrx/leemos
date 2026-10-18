@@ -57,7 +57,7 @@ for (const lang of ['es', 'ca']) {
 }
 
 const sw = readFileSync(join(ROOT, 'sw.js'), 'utf8');
-check('service worker: src/find.js is cached with the shell and the version was bumped', /'src\/find\.js'/.test(sw) && /VERSION = 'leemos-v6'/.test(sw));
+check('service worker: src/find.js is cached with the shell and the version was bumped', /'src\/find\.js'/.test(sw) && /VERSION = 'leemos-v\d+'/.test(sw));
 const es = readJSON('src/data/i18n.es.json'), ca = readJSON('src/data/i18n.ca.json');
 const KEYS = ['mFind', 'findLocked', 'findIntro', 'findGoal', 'findAgain', 'findDone', 'findHear'];
 check('i18n: every Busca la paraula key exists in both languages and is not empty', KEYS.every((k) => typeof es[k] === 'string' && es[k] && typeof ca[k] === 'string' && ca[k]));

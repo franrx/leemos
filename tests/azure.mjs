@@ -62,7 +62,7 @@ for (const lang of ['es', 'ca']) {
   const i18n = JSON.parse(readFileSync(new URL(`../src/data/i18n.${lang}.json`, import.meta.url), 'utf8'));
   const phrases = buildClipList({ name: 'Elsa', langs: [lang] }).filter((c) => c.kind === 'phrase').map((c) => c.text);
   const filled = (k) => i18n[k].replace('{n}', 'Elsa');
-  check(`clips: the ${lang} phrase list has the three instructions Lumi says for words and syllables, and the whole-word one`, ['hintSyl', 'hintWord', 'hintWhole', 'hintJudge', 'findIntro'].every((k) => phrases.includes(filled(k))), ['hintSyl', 'hintWord', 'hintWhole', 'hintJudge', 'findIntro'].filter((k) => !phrases.includes(filled(k))).join(','));
+  check(`clips: the ${lang} phrase list has the three instructions Lumi says for words and syllables, and the whole-word one`, ['hintSyl', 'hintWord', 'hintWhole', 'hintJudge', 'findIntro', 'closeIntro'].every((k) => phrases.includes(filled(k))), ['hintSyl', 'hintWord', 'hintWhole', 'hintJudge', 'findIntro', 'closeIntro'].filter((k) => !phrases.includes(filled(k))).join(','));
 }
 
 // ...and its audio has to exist: a phrase in the list whose clip is missing from the manifest or from disk would leave Lumi silent for it.
@@ -71,11 +71,22 @@ for (const lang of ['es', 'ca']) {
   const manifest = JSON.parse(readFileSync(new URL('../audio/manifest.json', import.meta.url), 'utf8'));
   for (const lang of ['es', 'ca']) {
     const i18n = JSON.parse(readFileSync(new URL(`../src/data/i18n.${lang}.json`, import.meta.url), 'utf8'));
-    const missing = ['hintSyl', 'hintWord', 'hintWhole', 'hintJudge', 'findIntro'].filter((k) => {
+    const missing = ['hintSyl', 'hintWord', 'hintWhole', 'hintJudge', 'findIntro', 'closeIntro'].filter((k) => {
       const file = manifest.clips[lang][i18n[k].replace('{n}', 'Elsa').toLowerCase()];
       return !file || !existsSync(new URL(`../audio/${lang}/${file}`, import.meta.url));
     });
     check(`clips: Lumi's ${lang} instructions (syllables, words, whole words, judging) all have their audio in the manifest and on disk`, missing.length === 0, missing.join(','));
+  }
+}
+
+// ...and so does every stretched closed syllable (the clip key is "~syllable").
+{
+  const { existsSync } = await import('node:fs');
+  const manifest = JSON.parse(readFileSync(new URL('../audio/manifest.json', import.meta.url), 'utf8'));
+  for (const lang of ['es', 'ca']) {
+    const bank = JSON.parse(readFileSync(new URL(`../src/data/closed.${lang}.json`, import.meta.url), 'utf8')).syl;
+    const missing = bank.filter((s) => { const file = manifest.clips[lang]['~' + s]; return !file || !existsSync(new URL(`../audio/${lang}/${file}`, import.meta.url)); });
+    check(`clips: every closed syllable has its stretched audio in the ${lang} manifest and on disk`, missing.length === 0, missing.slice(0, 5).join(','));
   }
 }
 

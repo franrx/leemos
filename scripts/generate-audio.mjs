@@ -6,7 +6,7 @@
 //   npm run audio -- --provider elevenlabs --lang ca real run for Catalan only
 //   npm run audio -- --provider azure --only "ma,me" regenerate specific clips (case-insensitive text)
 //
-// Flags: --provider <name>  --lang es|ca|all  --only a,b,c  --kind phrase|word|syllable|sound  --force  --limit N  --concurrency N
+// Flags: --provider <name>  --lang es|ca|all  --only a,b,c  --kind phrase|word|syllable|sound|stretch  --force  --limit N  --concurrency N
 //        --no-post (skip ffmpeg trim/normalise)  --name Elsa  --dry-run
 // Existing files are skipped unless --force or --only. Config comes from .env (see .env.example).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

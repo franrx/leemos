@@ -34,6 +34,12 @@ export function spokenFor(clip) {
       return clip.ipa ? `<phoneme alphabet='ipa' ph='${clip.ipa}'>${clip.text}</phoneme>` : clip.text;
     case 'word':
       return clip.text;
+    case 'stretch': {
+      // The CV base with a long vowel, then the coda held on (continuous, no stop): "pas" -> paaasss. The first recipe to listen to; per-clip fixes go in pronunciation.<lang>.json.
+      const m = /^([^aeiouáéíóúàèòïü]+)([aeiouáéíóúàèòïü]+)([srl])$/.exec(clip.text);
+      if (!m) return clip.text;
+      return `<prosody rate="-35%">${m[1]}${m[2].repeat(3)}${m[3].repeat(3)}</prosody>`;
+    }
     default:
       return clip.text; // phrases
   }

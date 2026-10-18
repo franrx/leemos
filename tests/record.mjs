@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recordList } from '../scripts/lib/clipstore.mjs';
+const N_ES = recordList({ lang: 'es', audioDir: '/nonexistent' }).length, N_CA = recordList({ lang: 'ca', audioDir: '/nonexistent' }).length; // the length of each list, so the page checks do not break when the list grows
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(ROOT, 'tools/record.html'), 'utf8').replace(/<script src="record.js"><\/script>/, '');
@@ -45,7 +46,7 @@ const startRec = async (p) => { p.$('rec').click(); await sleep(50); };
 const stopRec = async (p) => { p.$('rec').click(); await sleep(30); };
 
 let p = await open();
-check('page: shows the first letter sound and the progress', p.$('big').textContent === 'a' && /^0 de 48/.test(p.$('progress').textContent), `${p.$('big').textContent} | ${p.$('progress').textContent}`);
+check('page: shows the first letter sound and the progress', p.$('big').textContent === 'a' && new RegExp(`^0 de ${N_ES}`).test(p.$('progress').textContent), `${p.$('big').textContent} | ${p.$('progress').textContent}`);
 for (let i = 0; i < 5; i++) p.$('next').click();
 check('page: a letter sound is shown with its picture word as context', p.$('big').textContent === 'm' && /mano/.test(p.$('ctx').textContent) && p.$('ctx').textContent.includes('✋'), p.$('ctx').textContent);
 p = await open();
@@ -58,7 +59,7 @@ for (let i = 0; i < firstPlain - firstShared; i++) p.$('next').click();
 check('page: a clip only Leo uses has no warning', p.$('shared').hidden);
 
 p = await open({ has: [0, 1, 2] });
-check('page: starts at the first clip that is still missing', p.$('big').textContent === 'o' && /^3 de 48/.test(p.$('progress').textContent), `${p.$('big').textContent} | ${p.$('progress').textContent}`);
+check('page: starts at the first clip that is still missing', p.$('big').textContent === 'o' && new RegExp(`^3 de ${N_ES}`).test(p.$('progress').textContent), `${p.$('big').textContent} | ${p.$('progress').textContent}`);
 
 p = await open({ peak: 0.2 });
 await startRec(p);
@@ -70,7 +71,7 @@ check('page: and the recording dot with it', p.$('recDot').hidden);
 check('page: a recording with sound can be played and saved', !p.$('save').hidden && !p.$('play').hidden);
 p.$('save').click(); await sleep(40);
 check('page: saving posts the audio to the dev server for that clip', p.posts.length === 1 && p.posts[0].url === '/__clip?lang=es&key=a' && p.posts[0].type === 'audio/webm' && p.posts[0].size > 0, JSON.stringify(p.posts));
-check('page: after saving it moves on to the next missing clip and counts it', p.$('big').textContent === 'e' && /^1 de 48/.test(p.$('progress').textContent), `${p.$('big').textContent} | ${p.$('progress').textContent}`);
+check('page: after saving it moves on to the next missing clip and counts it', p.$('big').textContent === 'e' && new RegExp(`^1 de ${N_ES}`).test(p.$('progress').textContent), `${p.$('big').textContent} | ${p.$('progress').textContent}`);
 check('page: it confirms the save', /Guardada/.test(p.$('status').textContent), p.$('status').textContent);
 
 p = await open({ peak: 0 });
@@ -89,7 +90,7 @@ check('page: a server error is shown and the recording is kept for a retry', /bo
 
 p = await open();
 p.$('lang').value = 'ca'; p.$('lang').dispatchEvent(new p.w.Event('change')); await sleep(40);
-check('page: switching language loads the Catalan list', /^0 de 46/.test(p.$('progress').textContent) && p.$('big').textContent === 'a', p.$('progress').textContent);
+check('page: switching language loads the Catalan list', new RegExp(`^0 de ${N_CA}`).test(p.$('progress').textContent) && p.$('big').textContent === 'a', p.$('progress').textContent);
 
 p = await open({ offline: true });
 check('page: without the dev server it explains how to start it', /npm run dev/.test(p.$('status').textContent), p.$('status').textContent);

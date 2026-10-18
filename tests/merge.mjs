@@ -102,6 +102,7 @@ check('prefs: the valid values are accepted', (() => {
   return PREF_KEYS.every((k) => ok[k]);
 })());
 check('prefs: mode "find" (Busca la paraula) is a valid synced value', mergeData({ prefs: { mode: pf('find', 1) } }, {}).prefs.mode?.v === 'find');
+check('prefs: mode "close" (closed syllables) is a valid synced value', mergeData({ prefs: { mode: pf('close', 1) } }, {}).prefs.mode?.v === 'close');
 check('prefs: an entry without a valid timestamp is dropped and a non-object prefs is ignored', !('theme' in mergeData({ prefs: { theme: { v: 'dark' } } }, {}).prefs) && Object.keys(mergeData({ prefs: [1, 2] }, { prefs: 'x' }).prefs).length === 0);
 check('prefs: voice settings can never come through', !('voiceURI' in mergeData({ prefs: { voiceURI: pf('x', 9) } }, {}).prefs) && !('voiceURIs' in mergeData({ prefs: { voiceURIs: pf({}, 9) } }, {}).prefs));
 check('prefs: __proto__ and unknown keys are ignored', (() => { const r = mergeData(JSON.parse('{"prefs":{"__proto__":{"v":"dark","at":9},"constructor":{"v":1,"at":9}}}'), {}).prefs; return Object.keys(r).length === 0 && !({}).v; })());

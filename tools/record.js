@@ -17,9 +17,9 @@
   function render() {
     const c = clips[idx];
     if (!c) return;
-    $('big').textContent = c.text;
+    $('big').textContent = c.shown || c.text;
     $('big').className = c.kind === 'word' ? 'big word' : 'big';
-    $('ctx').textContent = c.kind === 'sound' ? `el SONIDO de la letra, como en «${c.word}» ${c.emoji}` : `la palabra ${c.emoji}`;
+    $('ctx').textContent = c.kind === 'sound' ? `el SONIDO de la letra, como en «${c.word}» ${c.emoji}` : c.kind === 'stretch' ? `alarga la vocal y mantén la última letra, sin cortar: «${c.shown}» sonando como «paaas»` : `la palabra ${c.emoji}`;
     $('shared').hidden = !c.shared;
     $('progress').textContent = `${doneCount()} de ${clips.length} grabadas${c.has ? ' · esta ya está grabada ✓' : ''}`;
     $('rec').textContent = recording ? '⏹ Parar' : (c.has ? '⏺ Grabar otra vez' : '⏺ Grabar');
@@ -89,7 +89,7 @@
       startMeter();
       recording = true;
       const c = clips[idx];
-      status(c.kind === 'sound' ? `Grabando… di solo el SONIDO de «${c.text}» (no el nombre de la letra) y pulsa Parar.` : `Grabando… di «${c.text}» y pulsa Parar.`);
+      status(c.kind === 'sound' ? `Grabando… di solo el SONIDO de «${c.text}» (no el nombre de la letra) y pulsa Parar.` : `Grabando… di «${c.shown || c.text}» y pulsa Parar.`);
       render();
     } else {
       const blob = await new Promise((res) => {

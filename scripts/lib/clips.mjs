@@ -40,8 +40,10 @@ export function buildClipList({ name = 'Elsa', langs = ['es', 'ca'] } = {}) {
         parts.forEach((p) => add(lang, p, 'syllable'));
       }
     }
+    const closed = readJSON(`src/data/closed.${lang}.json`);
+    closed.syl.forEach((s) => { const key = '~' + s; if (!out.has(lang + ':' + key)) out.set(lang + ':' + key, { lang, text: s, key, kind: 'stretch', file: slug(key) + '.mp3' }); });
     const fill = (s) => s.split('{n}').join(name);
-    [...i18n.oks, ...i18n.nos, i18n.rewardTitle, i18n.endTitle, i18n.hintSyl, i18n.hintWord, i18n.hintWhole, i18n.hintJudge, i18n.findIntro].forEach((s) => add(lang, fill(s), 'phrase'));
+    [...i18n.oks, ...i18n.nos, i18n.rewardTitle, i18n.endTitle, i18n.hintSyl, i18n.hintWord, i18n.hintWhole, i18n.hintJudge, i18n.findIntro, i18n.closeIntro].forEach((s) => add(lang, fill(s), 'phrase'));
     add(lang, i18n.sample, 'word');
   }
   return [...out.values()];
