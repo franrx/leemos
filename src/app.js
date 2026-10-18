@@ -201,7 +201,7 @@ function updateRecInfo(){$('recInfo').textContent=t('recInfo',{k:Object.keys(cli
 async function loadClips(){try{const all=await idbAll();Object.entries(all).forEach(([k,b])=>setClip(k,b))}catch(e){}updateRecInfo()}
 function playClip(t){
   const u=clipURL[t];if(!u)return false;
-  try{if(curAudio)curAudio.pause();curAudio=new Audio(u);curAudio.play().catch(()=>{});return true}catch(e){return false}
+  try{const a=newAudio(u);if(curAudio&&curAudio!==a)curAudio.pause();curAudio=a;a.play().catch(()=>{});return true}catch(e){return false}
 }
 // Generated clips (see scripts/generate-audio.mjs). audio/manifest.json maps lowercase text -> file, per language.
 let genManifest={clips:{es:{},ca:{}}};
@@ -222,9 +222,10 @@ function ttsSpeak(t){
 function playGen(t){
   const f=genFile(t);if(!f)return false;
   try{
-    if(curAudio)curAudio.pause();
-    curAudio=new Audio(clipUrl(S.lang,t.toLowerCase(),f));
-    curAudio.play().catch(()=>ttsSpeak(t));
+    const a=newAudio(clipUrl(S.lang,t.toLowerCase(),f));
+    if(curAudio&&curAudio!==a)curAudio.pause();
+    curAudio=a;
+    a.play().catch(()=>ttsSpeak(t));
     return true;
   }catch(e){return false}
 }
@@ -327,6 +328,21 @@ const jawSet=v=>jawEls.forEach(e=>e.style.setProperty('--jaw',v));
 const IOS=/iPad|iPhone|iPod/.test(navigator.userAgent||'')||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 // "playback": the page's sound is not muted by the mute setting (the session would otherwise be ambient once Web Audio, like the chimes, has played)
 try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}
+// iOS only starts audio from a timer on an element a tap has already played (the sticker after Busca, the praise after an answer, the intro card's sound): there
+// every clip goes through ONE shared element (voiceEl), set up by the first tap with a silent clip; elsewhere each clip gets its own element.
+function newAudio(u){
+  if(!IOS)return new Audio(u);
+  const a=voiceEl();try{a.pause()}catch(e){}
+  a.onended=a.onerror=null;a.src=u;return a;
+}
+const SILENT='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+if(IOS){
+  const prime=()=>{
+    ['touchend','click'].forEach(e=>document.removeEventListener(e,prime,true));
+    try{const a=voiceEl();if(!a.src){a.src=SILENT;const p=a.play();if(p&&p.then)p.then(()=>dbg('prime ok'),e=>dbg('prime REJECT '+e.name))}}catch(e){}
+  };
+  ['touchend','click'].forEach(e=>document.addEventListener(e,prime,true));
+}
 function levelMeter(au,tapped){
   if(IOS)return null;
   try{
@@ -401,6 +417,7 @@ function hintAudio(x){const u=hintURL(x);return u?new Audio(u):null}
 // iOS only starts an audio element inside a tap, and the next round of Leo starts from a timer: so every letter sound plays on ONE element (hearEl) that
 // an earlier tap already played; a fresh `new Audio` here would be refused each time. Changing its src and calling play() again is allowed.
 let hearEl=null,hearing=false,hearStop=null;
+const voiceEl=()=>hearEl||(hearEl=new Audio()); // the one element a tap has unlocked (see newAudio)
 function hear(t,done){
   const fin0=done||(()=>{});
   try{if(hasTTS)speechSynthesis.cancel()}catch(e){}
@@ -413,8 +430,7 @@ function hear(t,done){
   guard=setTimeout(()=>fin('played'),8000); // a clip that never reports its end must not lock the answers for ever
   try{
     if(curAudio&&curAudio!==hearEl)curAudio.pause();
-    if(!hearEl)hearEl=new Audio();
-    const au=hearEl;curAudio=au;hearing=true;
+    const au=voiceEl();curAudio=au;hearing=true;
     au.pause();au.onended=()=>fin('played');au.onerror=()=>fin('none');
     au.src=u;
     const p=au.play();
@@ -423,9 +439,10 @@ function hear(t,done){
 }
 // Plays a clip or recording of `x` with Lumi talking (big = he comes to the middle of the screen). False if there is neither.
 function lumiPlay(x,big){
-  const au=hintAudio(x);if(!au)return false;
+  const u=hintURL(x);if(!u)return false;
   try{
-    if(curAudio)curAudio.pause();curAudio=au;
+    const au=newAudio(u);
+    if(curAudio&&curAudio!==au)curAudio.pause();curAudio=au;
     const mtr=levelMeter(au,big);
     dbg('lumi route='+(mtr?'web-audio':'direct')+' ctx='+(talkCtx?talkCtx.state:'none')+' session='+(navigator.audioSession?navigator.audioSession.type:'n/a'));
     talkStart(big,x,mtr);

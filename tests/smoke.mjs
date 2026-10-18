@@ -44,7 +44,7 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
           w.__plays = (w.__plays || 0) + 1;
           if (w.__audioMode === 'blocked') return Promise.reject(Object.assign(new Error('play() was not allowed'), { name: 'NotAllowedError' }));
           if (w.__audioMode === 'missing') return Promise.reject(Object.assign(new Error('no supported source'), { name: 'NotSupportedError' }));
-          if (w.__strict && !this.__unlocked && !w.__inTap) return Promise.reject(Object.assign(new Error('play() was not allowed'), { name: 'NotAllowedError' }));
+          if (w.__strict && !this.__unlocked && !w.__inTap) { w.__refused = (w.__refused || 0) + 1; return Promise.reject(Object.assign(new Error('play() was not allowed'), { name: 'NotAllowedError' })); }
           this.__unlocked = true;
           if (w.__audioMode === 'auto' && this.onended) this.onended(); // ends at once, before play() returns
           return Promise.resolve();
@@ -1566,12 +1566,12 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
       const y = await boot({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', stats: seen2 }, 'leemos-debug': '1' }, manifest: LEO_CLIPS, voice: { state: 'running', sample: 128 }, onDom });
       y.w.__audioMode = 'auto'; await until(() => y.$('prePlay'));
       y.$('prePlay').click(); await sleep(10);
-      const a0 = y.w.__audios.length;
+      const a0 = y.w.__audios.length, c0 = y.audioCalls.length;
       choices(y).find((b) => b.dataset.l === y.$('preChoices').dataset.answer).click(); await sleep(30);
-      return { y, praised: y.w.__audios.length - a0 };
+      return { y, praised: y.w.__audios.length - a0, clips: y.audioCalls.length - c0 };
     };
     const ip = await round(ipad);
-    check('iPad: Lumi\'s praise plays and no Web Audio context is made for his beak', ip.praised === 1 && (ip.y.w.__acs || []).length === 1 && ip.y.errors.length === 0, `praised=${ip.praised} acs=${(ip.y.w.__acs || []).length} ${ip.y.errors.join('|')}`); // the one context left is the chime's, not Lumi's
+    check('iPad: Lumi\'s praise plays on the shared element a tap unlocked (no new one) and no Web Audio context is made for his beak', ip.praised === 0 && ip.clips >= 1 && (ip.y.w.__acs || []).length === 1 && ip.y.errors.length === 0, `new elements=${ip.praised} clips=${ip.clips} acs=${(ip.y.w.__acs || []).length} ${ip.y.errors.join('|')}`); // the one context left is the chime's, not Lumi's
     check('iPad: the page asks for the "playback" audio session (sound even with the mute setting on)', ip.y.w.navigator.audioSession.type === 'playback');
     check('iPad: the debug panel says which route Lumi used', /lumi route=direct/.test(ip.y.$('dbg').textContent), ip.y.$('dbg').textContent);
     const other = await round(null);
@@ -1878,6 +1878,22 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('motion: a button tapped again still works after the in-place update', (() => { after[1].click(); return true; })());
   await sleep(5);
   check('motion: and moves the position', JSON.parse(x.w.localStorage.getItem('leemos-v1')).pathEs === 2 && x.d.querySelectorAll('#pathRow button:not(.closed)').length === 2);
+}
+
+// ---------- 43b. iPad: the praise that starts from a timer (the sticker after Busca, the answer's praise) still plays ----------
+{
+  const ipad = (w) => { Object.defineProperty(w.navigator, 'platform', { value: 'MacIntel' }); Object.defineProperty(w.navigator, 'maxTouchPoints', { value: 5 }); };
+  const ANY = { generated: 'test', clips: { es: new Proxy({}, { get: (_, k) => (typeof k === 'string' ? 'x.mp3' : undefined) }), ca: {} } };
+  const tap = (y, f) => { y.w.__inTap = true; try { f(); } finally { y.w.__inTap = false; } }; // a real tap: audio may start inside it
+  const y = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 3, pathCa: 12, world: 0 } }, manifest: ANY, onDom: ipad });
+  y.w.__audioMode = 'auto'; y.w.__strict = true;
+  tap(y, () => y.$('mFind').click()); await until(() => !y.$('findRoom').hidden);
+  const pageCopies = () => { const t = y.d.querySelector('.find-target').textContent; return [...y.d.querySelectorAll('.find-tile')].filter((b) => b.textContent === t); };
+  for (let p = 0; p < 5; p++) { tap(y, () => pageCopies().forEach((b) => b.click())); await sleep(30); } // the pages and the reward follow from timers, with no tap
+  check('iPad (Busca): the sticker reward is shown after the last page', !y.$('reward').hidden);
+  check('iPad (Busca): nothing the app played was refused, including the praise that started from a timer', !(y.w.__refused > 0) && y.errors.length === 0, `refused=${y.w.__refused} ${y.errors.join('|')}`);
+  const calls = y.audioCalls.length; tap(y, () => y.$('rewardOk').click()); await sleep(10);
+  check('iPad (Busca): the clips of the game were played (intro, the words, the praise)', calls >= 8, String(calls));
 }
 
 // ---------- 43. Busca la paraula: find the 3 copies among 12 look-alikes ----------
