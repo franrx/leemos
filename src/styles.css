@@ -235,3 +235,6 @@ html.pre #endLevelUpBtn{order:3}
 .path-auto{min-height:44px}
 .path-auto input{width:24px;height:24px;flex:none}
 html.pre #path{display:none!important}
+/* Leo: the answers wait for the sound (dimmed, and the browser blocks the taps), and when the browser refused to play it by itself the speaker is the one thing to press. */
+.pre-choices.waiting .pre-choice{opacity:.4}
+.pre-hear.needed{outline:4px solid var(--c2);outline-offset:4px}

@@ -353,6 +353,25 @@ function hintAudio(x){
   const u=clipURL[ck(x)];if(u)return new Audio(u);
   const f=genFile(x);return f?new Audio(clipUrl(S.lang,x.toLowerCase(),f)):null;
 }
+// Plays the sound of `t` (a recording or a generated clip) like say() but tells `done` what happened, so Leo's game can keep the answers locked
+// until it was really heard: 'played' (it ended), 'blocked' (the browser refused to start it: there was no tap in this call stack, e.g. the next
+// round starting from a timer), 'none' (no clip, or one that cannot be loaded: nothing can be waited for, so nothing may stay locked; with no
+// clip at all `done` runs at once).
+function hear(t,done){
+  const fin0=done||(()=>{});
+  try{if(hasTTS)speechSynthesis.cancel()}catch(e){}
+  const au=hintAudio(t);
+  if(!au){ttsSpeak(t);fin0('none');return}
+  let over=false,guard=0;
+  const fin=v=>{if(!over){over=true;clearTimeout(guard);fin0(v)}};
+  guard=setTimeout(()=>fin('played'),8000); // a clip that never reports its end must not lock the answers for ever
+  try{
+    if(curAudio)curAudio.pause();curAudio=au;
+    au.onended=()=>fin('played');au.onerror=()=>fin('none');
+    const p=au.play();
+    if(p&&p.catch)p.catch(e=>fin(e&&e.name==='NotAllowedError'?'blocked':'none'));
+  }catch(e){fin('none')}
+}
 // Plays a clip or recording of `x` with Lumi talking (big = he comes to the middle of the screen). False if there is neither.
 function lumiPlay(x,big){
   const au=hintAudio(x);if(!au)return false;
@@ -1120,7 +1139,7 @@ if(PROFILE.kind==='pre'){
     const imp=window.__leemosImport||(p=>import(p));
     const [mod,dEs,dCa]=await Promise.all([imp('./sounds.js'),loadJSON('src/data/sounds.es.json'),loadJSON('src/data/sounds.ca.json')]);
     const sess={reset(){sDone=sOk=sStk=0;renderSession();renderGoal()},inc(ok){sDone++;if(ok)sOk++},get done(){return sDone},addSticker(){sStk++}};
-    pre=mod.createSounds({doc:document,$,S,save,t,say,sfx,poke,burst,sparkle:sparkleBurst,rnd,fmt,nm,later:(f,ms)=>setTimeout(f,ms),
+    pre=mod.createSounds({doc:document,$,S,save,t,say,hear,sfx,poke,burst,sparkle:sparkleBurst,rnd,fmt,nm,later:(f,ms)=>setTimeout(f,ms),
       data:{es:dEs,ca:dCa},earnSticker,sess,renderSession,renderGoal,renderAlbum,renderHard,end:showEnd,
       hasAudio:x=>!!(clipURL[ck(x)]||genFile(x)),
       reward:(e,alive)=>{pendingEnd=true;setTimeout(()=>{if(!alive||alive())showReward(e);else pendingEnd=false},500)}});

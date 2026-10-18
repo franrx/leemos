@@ -58,7 +58,7 @@ export function createSounds(ctx){
   const stat=l=>S.stats[key(l)]||(S.stats[key(l)]={ok:0,fail:0});
   const el=(tag,cls,txt)=>{const e=doc.createElement(tag);if(cls)e.className=cls;if(txt!==undefined)e.textContent=txt;return e};
   const room=()=>$('pre');
-  let cur=null,last=null,wrong=false,busy=false,fresh=0,epoch=0;
+  let cur=null,last=null,wrong=false,busy=false,heard=false,again=()=>{},fresh=0,epoch=0; // heard: this round's sound has played; again: listens again (locks the answers)
 
   function home(){
     cur=null;busy=false;epoch++; // epoch: timers scheduled before this point must not resurrect a screen
@@ -108,11 +108,11 @@ export function createSounds(ctx){
     say(x.l);
   }
   function game(x){
-    cur=x;wrong=false;busy=false;
+    cur=x;wrong=false;busy=false;heard=false;
+    const e=epoch;
     const n=choiceCount(S.stats[key(x.l)]);
     const opts=shuffle([x,...pickDistractors(x,pool(),S.stats,lang(),n-1)]);
-    const hear=el('button','btn pre-hear','🔊 '+t('preHear'));hear.id='preHear';
-    hear.onclick=()=>say(x.l);
+    const hearBtn=el('button','btn pre-hear','🔊 '+t('preHear'));hearBtn.id='preHear';
     const row=el('div','pre-choices');row.id='preChoices';
     row.dataset.answer=x.l; // test hook; the child cannot read the DOM
     opts.forEach(o=>{
@@ -121,21 +121,33 @@ export function createSounds(ctx){
       b.onclick=()=>choose(o,b,x);
       row.appendChild(b);
     });
-    room().replaceChildren(hear,row);
-    hear.focus();
+    // He must hear the sound before he can answer. The answers are locked while it plays and open when it has ended (or when there is no clip to wait for).
+    // If the browser refuses to start it by itself (a round that starts from a timer, not a tap) the speaker is marked and stays the only thing to press.
+    const lock=on=>{row.classList.toggle('waiting',on);row.querySelectorAll('.pre-choice:not(.gone)').forEach(b=>{b.disabled=on})};
+    function listen(){
+      heard=false;lock(true);hearBtn.classList.remove('needed');
+      ctx.hear(x.l,r=>{
+        if(cur!==x||e!==epoch)return; // he has moved on
+        if(r==='blocked'){hearBtn.classList.add('needed');$('hint').textContent=t('preTapHear');hearBtn.focus();return}
+        heard=true;lock(false);
+        if(wrong){const f=row.querySelector('.pre-choice:not(:disabled)');if(f)f.focus()} // after a wrong answer, keyboard focus goes back to an answer
+      });
+    }
+    again=listen;
+    hearBtn.onclick=()=>{if(heard){ctx.hear(x.l);return}listen()}; // once heard, the speaker only replays
+    room().replaceChildren(hearBtn,row);
+    hearBtn.focus();
     $('hint').textContent=t('preGameHint');
-    say(x.l);
+    listen();
   }
   function choose(o,b,x){
-    if(busy||cur!==x)return;
+    if(busy||cur!==x||!heard)return; // not before he has heard the sound
     if(o.l===x.l){correct(x,b);return}
     sfx.retry();ctx.poke('tilt',800);
     b.classList.add('gone');b.disabled=true;
     if(!wrong){wrong=true;stat(x.l).fail++;save();ctx.renderHard()}
     $('hint').textContent=ctx.fmt(ctx.rnd(t('preNos')));
-    const nextChoice=room().querySelector('.pre-choice:not(:disabled)');
-    if(nextChoice)nextChoice.focus(); // the tapped button just became disabled and dropped focus
-    say(x.l); // replay the sound so the next try is informed
+    again(); // replay the sound so the next try is informed; the answers stay locked until it has ended (no tapping them over and over)
   }
   function correct(x,b){
     busy=true;

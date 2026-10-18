@@ -33,7 +33,18 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
       w.matchMedia = (q) => ({ matches: reduced && /reduced-motion/.test(q), addEventListener() {}, removeListener() {} });
       w.speechSynthesis = { getVoices: () => [{ name: 'Joana Online (Natural)', lang: 'ca-ES', voiceURI: 'j' }, { name: 'Google español', lang: 'es-ES', voiceURI: 'g' }], cancel() {}, speak(u) { (w.__tts ||= []).push(u.text); } };
       w.SpeechSynthesisUtterance = function (t) { this.text = t; };
-      w.Audio = function (src) { audioCalls.push(src); (w.__audios ||= []).push(this); this.play = () => Promise.resolve(); this.pause = () => { this.paused = true; }; };
+      // w.__audioMode: 'manual' (default: a clip never ends by itself), 'auto' (ends at once), 'blocked' (the browser refuses to start it: NotAllowedError), 'missing' (it cannot be loaded)
+      w.Audio = function (src) {
+        audioCalls.push(src); (w.__audios ||= []).push(this);
+        this.play = () => {
+          w.__plays = (w.__plays || 0) + 1;
+          if (w.__audioMode === 'blocked') return Promise.reject(Object.assign(new Error('play() was not allowed'), { name: 'NotAllowedError' }));
+          if (w.__audioMode === 'missing') return Promise.reject(Object.assign(new Error('no supported source'), { name: 'NotSupportedError' }));
+          if (w.__audioMode === 'auto' && this.onended) this.onended(); // ends at once, before play() returns
+          return Promise.resolve();
+        };
+        this.pause = () => { this.paused = true; };
+      };
       // fake Web Audio for Lumi's beak: voice.sample is the constant byte the analyser reports (128 = silence); voice.state is the context state
       if (voice) w.AudioContext = class { constructor() { (w.__acs ||= []).push(1); this.state = voice.state || 'running'; this.destination = {}; } resume() { return Promise.resolve(); } createMediaElementSource() { return { connect() {} }; } createAnalyser() { return { fftSize: 0, connect() {}, getByteTimeDomainData: (arr) => arr.fill(voice.sample) }; } };
       if (mic) {
@@ -225,7 +236,7 @@ const LEO = { 'leemos-profiles': { active: 'leo', list: [{ id: 'elsa', name: 'El
 const allEs = readJSON('src/data/sounds.es.json').groups.flatMap((g) => g.letters);
 const manifestAny = { generated: 'test', clips: { es: new Proxy({}, { get: (_, k) => (typeof k === 'string' ? 'x.mp3' : undefined) }), ca: {} } };
 const until = async (fn, ms = 2000) => { for (let i = 0; i < ms / 20; i++) { if (fn()) return true; await sleep(20); } return false; };
-const bootLeo = async (extra = {}) => { const x = await boot({ storage: LEO, ...extra }); await until(() => x.$('prePlay')); return x; };
+const bootLeo = async (extra = {}) => { const x = await boot({ storage: LEO, ...extra }); x.w.__audioMode = 'auto'; await until(() => x.$('prePlay')); return x; }; // Leo's sounds are heard at once unless a test says otherwise
 const choice = (app, l) => [...app.d.querySelectorAll('.pre-choice')].find((b) => b.dataset.l === l);
 async function playPre(app, n, { right = true } = {}) {
   for (let i = 0; i < n; i++) {
@@ -1415,6 +1426,74 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   x = await boot({ storage: { 'leemos-v1': { name: 'Elsa', mode: 'word', pathEs: 1, pathCa: 1 } } });
   x.$('mWord').click(); await sleep(5);
   check('review: tapping the dimmed Palabras explains why', /Palabras se abre/.test(x.$('hint').textContent), x.$('hint').textContent);
+}
+
+// ---------- 39. Leo: the sound is heard before he can answer ----------
+{
+  const LEO_CLIPS = { generated: 'test', clips: { es: new Proxy({}, { get: (_, k) => (typeof k === 'string' ? 'x.mp3' : undefined) }), ca: {} } };
+  const leoState = (x) => JSON.parse(x.w.localStorage.getItem('leemos-v1:leo') || '{}');
+  // starts a session and goes through the intro card to the first game round
+  const toGame = async (mode, opts = {}) => {
+    const x = await bootLeo({ manifest: opts.noClips ? null : LEO_CLIPS });
+    x.w.__audioMode = mode;
+    x.$('prePlay').click(); await sleep(10);
+    if (x.$('preNext')) { x.$('preNext').click(); await sleep(10); }
+    return x;
+  };
+  const choices = (x) => [...x.d.querySelectorAll('#preChoices .pre-choice')];
+  const finish = async (x) => { const a = x.w.__audios[x.w.__audios.length - 1]; a.onended(); await sleep(5); };
+  const statsOf = (x) => JSON.stringify([leoState(x).stats, leoState(x).total]);
+
+  let x = await toGame('manual');
+  const before = statsOf(x);
+  check('listen first: when a round starts the answers are locked and look it', choices(x).length >= 2 && choices(x).every((b) => b.disabled) && x.$('preChoices').classList.contains('waiting'));
+  choices(x).forEach((b) => b.onclick()); await sleep(5);
+  check('listen first: tapping an answer before the sound has played does nothing, even bypassing the disabled button', statsOf(x) === before && leoState(x).total === 0 && choices(x).every((b) => !b.classList.contains('gone')), statsOf(x));
+  await finish(x);
+  check('listen first: when the sound ends the answers unlock', choices(x).every((b) => !b.disabled) && !x.$('preChoices').classList.contains('waiting'));
+  const right = choices(x).find((b) => b.dataset.l === x.$('preChoices').dataset.answer);
+  right.click(); await sleep(5);
+  check('listen first: and a right answer then counts', leoState(x).total === 1 && JSON.stringify(leoState(x).stats).includes('"ok":1'), statsOf(x));
+
+  // the browser refuses to start the sound by itself (no tap in this call stack): the answers stay locked until he taps the speaker
+  x = await toGame('blocked');
+  check('autoplay refused: the answers stay locked, the speaker button is marked and says what to do', choices(x).every((b) => b.disabled) && x.$('preHear').classList.contains('needed') && /Toca 🔊/.test(x.$('hint').textContent) && x.d.activeElement === x.$('preHear'), x.$('hint').textContent);
+  x.w.__audioMode = 'auto';
+  x.$('preHear').click(); await sleep(10);
+  check('autoplay refused: tapping the speaker plays it and unlocks the answers', choices(x).every((b) => !b.disabled) && !x.$('preHear').classList.contains('needed'));
+  const plays = x.w.__plays;
+  x.$('preHear').click(); await sleep(10);
+  check('listen first: tapping the speaker again just replays it and does not lock the answers again', x.w.__plays === plays + 1 && choices(x).every((b) => !b.disabled) && !x.$('preChoices').classList.contains('waiting'));
+
+  // a wrong answer replays the sound and locks the answers again until it has ended: no tapping the same ones over and over
+  x = await toGame('manual');
+  await finish(x);
+  const target = x.$('preChoices').dataset.answer;
+  const wrong = choices(x).find((b) => b.dataset.l !== target);
+  wrong.click(); await sleep(5);
+  check('wrong answer: it is marked, counted once, and the rest lock again while the sound plays', wrong.classList.contains('gone') && wrong.disabled && leoState(x).stats['snd:' + wrong.dataset.l] === undefined && leoState(x).stats['snd:' + target].fail === 1 && choices(x).every((b) => b.disabled) && x.$('preChoices').classList.contains('waiting'), statsOf(x));
+  choices(x).forEach((b) => b.onclick()); await sleep(5);
+  check('wrong answer: hammering the answers while it plays changes nothing', leoState(x).stats['snd:' + target].fail === 1 && leoState(x).stats['snd:' + target].ok === 0 && leoState(x).total === 0);
+  await finish(x);
+  const left = choices(x).filter((b) => !b.disabled);
+  check('wrong answer: when it ends only the answers not yet tried unlock, and focus goes to one of them', left.length >= 1 && left.every((b) => b.dataset.l !== wrong.dataset.l) && wrong.disabled && left.includes(x.d.activeElement), String(left.length));
+
+  // never a dead end
+  x = await toGame('auto', { noClips: true });
+  check('no clip at all: there is nothing to wait for, so the answers are open', choices(x).length >= 2 && choices(x).every((b) => !b.disabled));
+  x = await toGame('missing');
+  check('a clip that cannot be loaded does not lock him out either', choices(x).length >= 2 && choices(x).every((b) => !b.disabled));
+  x = await toGame('manual');
+  x.w.__audios[x.w.__audios.length - 1].onerror(); await sleep(5);
+  check('a clip that fails while loading unlocks the answers', choices(x).every((b) => !b.disabled));
+
+  // the next round after a right answer starts by itself (a timer, not a tap): it must try to play and start locked
+  x = await toGame('auto');
+  await sleep(10);
+  const p0 = x.w.__plays;
+  choices(x).find((b) => b.dataset.l === x.$('preChoices').dataset.answer).click(); await sleep(30);
+  check('next round: after a right answer the next sound is attempted on its own', x.w.__plays > p0, `${p0} -> ${x.w.__plays}`);
+  check('the whole run raised no errors', x.errors.length === 0, x.errors.join(' | '));
 }
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
