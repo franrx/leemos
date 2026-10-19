@@ -1880,6 +1880,57 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('motion: and moves the position', JSON.parse(x.w.localStorage.getItem('leemos-v1')).pathEs === 2 && x.d.querySelectorAll('#pathRow button:not(.closed)').length === 2);
 }
 
+// ---------- 43a. Elsa's mute for the reading sounds (words, syllables, letters): Lumi and the effects stay ----------
+{
+  const ANYC = { generated: 'test', clips: { es: new Proxy({}, { get: (_, k) => (typeof k === 'string' ? 'x.mp3' : undefined) }), ca: {} } };
+  const ELSA = { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12, world: 0, mode: 'word' } }; // word mode: its split tiles are tappable
+  const m = await boot({ storage: ELSA, manifest: ANYC }); m.w.__audioMode = 'auto';
+  check('mute: the header has a button for the reading sounds, named in Spanish, separate from the bell', !!m.$('muteBtn') && m.$('muteBtn').getAttribute('aria-label') === 'Silenciar palabras, sílabas y letras' && m.$('muteBtn').id !== 'soundBtn' && m.$('muteBtn').getAttribute('aria-pressed') === 'false' && m.$('muteBtn').textContent === '🔊');
+  check('mute: game mode has its own copy next to the exit X', !!m.$('muteGame') && m.$('muteGame').classList.contains('game-off') && m.$('muteGame').getAttribute('aria-label') === 'Silenciar palabras, sílabas y letras');
+  const tile = () => m.d.querySelector('#tiles .tile'), tts0 = (m.w.__tts || []).length, c0 = m.audioCalls.length;
+  tile().click();
+  check('mute: with it off a tapped syllable is read aloud', m.audioCalls.length > c0 || (m.w.__tts || []).length > tts0);
+  m.$('muteBtn').click(); await sleep(5);
+  check('mute: the button shows it is on, and the choice is kept on this device only (its own key, not in the profile)', m.$('muteBtn').getAttribute('aria-pressed') === 'true' && m.$('muteBtn').textContent === '🔇' && m.w.localStorage.getItem('leemos-mute') === '1' && !('mute' in JSON.parse(m.w.localStorage.getItem('leemos-v1'))));
+  const c1 = m.audioCalls.length, t1 = (m.w.__tts || []).length;
+  tile().click(); m.$('hearBtn').click(); await sleep(5);
+  check('mute: a syllable or word tapped now makes no sound at all, neither a clip nor the browser voice', m.audioCalls.length === c1 && (m.w.__tts || []).length === t1);
+  const c2 = m.audioCalls.length; m.$('hint').click(); await sleep(5);
+  check('mute: Lumi still speaks his sentence when tapped (it is not a reading sound)', m.audioCalls.length === c2 + 1);
+  m.w.__osc = 0; m.w.AudioContext = class { constructor() { this.currentTime = 0; this.state = 'running'; this.destination = {}; } createOscillator() { m.w.__osc++; return { frequency: {}, connect() {}, start() {}, stop() {} }; } createGain() { return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; } resume() {} };
+  m.$('soundBtn').click(); m.$('soundBtn').click(); await sleep(5);
+  check('mute: the bell and its effects are untouched', m.w.__osc > 0, String(m.w.__osc));
+  m.$('muteBtn').click(); await sleep(5);
+  const c3 = m.audioCalls.length, t3 = (m.w.__tts || []).length; tile().click();
+  check('mute: tapping it again brings the reading sounds back and forgets the choice', m.$('muteBtn').getAttribute('aria-pressed') === 'false' && m.w.localStorage.getItem('leemos-mute') === null && (m.audioCalls.length > c3 || (m.w.__tts || []).length > t3));
+  check('mute: no errors', m.errors.length === 0, m.errors.join(' | '));
+  // saved on this device, and the game-mode copy keeps the same state
+  const g = await boot({ storage: { ...ELSA, 'leemos-mute': '1', 'leemos-game': '1' }, manifest: ANYC }); g.w.__audioMode = 'auto';
+  check('mute: a saved mute is on after a reload, in both buttons', g.$('muteBtn').getAttribute('aria-pressed') === 'true' && g.$('muteGame').getAttribute('aria-pressed') === 'true' && g.$('muteGame').textContent === '🔇');
+  g.$('muteGame').click(); await sleep(5);
+  check('mute: the game-mode button toggles the same setting and the header one follows', g.$('muteBtn').getAttribute('aria-pressed') === 'false' && g.w.localStorage.getItem('leemos-mute') === null);
+  const ca = await boot({ lang: 'ca-ES', storage: ELSA }); 
+  check('mute (ca): the label is in Catalan', ca.$('muteBtn').getAttribute('aria-label') === 'Silenciar paraules, síl·labes i lletres', ca.$('muteBtn').getAttribute('aria-label'));
+  // Cierra and Busca: their syllables and letter sounds are muted, the instruction by Lumi is not
+  const cman = { generated: 'test', clips: { es: new Proxy({}, { get: (_, k) => (typeof k === 'string' ? 'c' + k + '.mp3' : undefined) }), ca: {} } };
+  const cx = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 3, pathCa: 12, world: 0 }, 'leemos-mute': '1' }, manifest: cman }); cx.w.__audioMode = 'auto'; cx.w.__leemosRescueMs = 9000;
+  cx.$('mClose').click(); await until(() => !cx.$('closeRoom').hidden);
+  const intro = cx.audioCalls.length;
+  cx.d.querySelector('.close-tile.base').click(); const cd = cx.d.querySelector('.close-coda'); cd.click(); await sleep(30);
+  check('mute (Cierra): the base, the coda sound and the stretched syllable are silent, and the syllable still closes and the screen goes on', cx.audioCalls.length === intro && cx.d.querySelectorAll('.close-dots i.on').length === 1 && cx.errors.length === 0, `${cx.audioCalls.length - intro} extra, dots=${cx.d.querySelectorAll('.close-dots i.on').length} ${cx.errors.join('|')}`);
+  const bx = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 3, pathCa: 12, world: 0 }, 'leemos-mute': '1' }, manifest: ANYC }); bx.w.__audioMode = 'auto';
+  bx.$('mFind').click(); await until(() => !bx.$('findRoom').hidden);
+  const bi = bx.audioCalls.length, tg = bx.d.querySelector('.find-target').textContent;
+  [...bx.d.querySelectorAll('.find-tile')].find((b) => b.textContent === tg).click(); bx.d.querySelector('.find-target').click(); await sleep(5);
+  check('mute (Busca): a tapped word is silent', bx.audioCalls.length === bi && bx.errors.length === 0);
+  // Leo is never muted (his whole game is the letter sounds, and he has no button to undo it)
+  const lx = await boot({ storage: { ...LEO, 'leemos-v1:leo': { name: 'Leo', stats: Object.fromEntries(['a', 'e', 'i', 'o', 'u'].map((l) => ['snd:' + l, { ok: 3, fail: 0 }])) }, 'leemos-mute': '1' }, manifest: ANYC }); lx.w.__audioMode = 'auto'; await until(() => lx.$('prePlay'));
+  const l0 = lx.audioCalls.length; lx.$('prePlay').click(); await sleep(20);
+  check('mute (Leo): a saved mute does not silence his letter sounds', lx.audioCalls.length > l0 && lx.errors.length === 0);
+  const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
+  check('mute (Leo): the buttons are not shown on his screen', /html\.pre #muteBtn[^{]*\{[^}]*display:none/.test(css) || /html\.pre [^{]*#muteBtn[^{]*\{[^}]*display:none/.test(css));
+}
+
 // ---------- 43b. iPad: the praise that starts from a timer (the sticker after Busca, the answer's praise) still plays ----------
 {
   const ipad = (w) => { Object.defineProperty(w.navigator, 'platform', { value: 'MacIntel' }); Object.defineProperty(w.navigator, 'maxTouchPoints', { value: 5 }); };

@@ -330,3 +330,5 @@ html.game main{max-width:none;zoom:var(--gz,1);min-height:calc(100dvh / var(--gz
 .game-off{position:fixed;top:max(8px,env(safe-area-inset-top));right:max(8px,env(safe-area-inset-right));z-index:40;width:44px;height:44px;min-width:44px;min-height:44px;padding:0;
   border:2px solid var(--line);border-radius:50%;background:color-mix(in srgb,var(--panel) 85%,transparent);color:var(--muted);font:700 20px/1 system-ui,sans-serif;cursor:pointer}
 html:not(.game) .game-off{display:none}
+.mute-game{right:calc(max(8px,env(safe-area-inset-right)) + 52px);font-size:18px} /* next to the exit X */
+html.pre #muteBtn,html.pre #muteGame{display:none!important} /* Leo's whole game is the letter sounds: no mute for him */

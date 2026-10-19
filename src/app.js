@@ -174,6 +174,11 @@ let curAudio=null;
 // browser refuses (NotAllowedError...), the sound setting, language, name and the caches in use. Off by default: nothing is added to the page.
 if(/[?&]debug=1/.test(location.search)){try{localStorage.setItem('leemos-debug','1')}catch(e){}}
 if(/[?&]debug=0/.test(location.search)){try{localStorage.removeItem('leemos-debug')}catch(e){}}
+// Mute of the READING sounds (words, syllables, letter sounds and Cierra's stretched syllables) for the reader profile: Lumi's voice (hints, praise, rewards) and the effects keep
+// their own switch (the bell). A setting of this device (its own key, not in the profile, not synced). Leo is never muted: his whole game is the letter sounds.
+const MUTE_KEY='leemos-mute';
+let MUTED=false;try{MUTED=!!localStorage.getItem(MUTE_KEY)}catch(e){}
+const readingMuted=()=>MUTED&&PROFILE.kind!=='pre';
 let DEBUG=false;try{DEBUG=!!localStorage.getItem('leemos-debug')}catch(e){}
 function dbg(m){const b=$('dbg');if(!b)return;b._l=(b._l||[]).concat(m).slice(-12);b.textContent=b._l.join('\n')}
 if(DEBUG){
@@ -232,6 +237,7 @@ function playGen(t){
 // Priority: parent's recording (IndexedDB) > generated clip > browser voice.
 function say(t){
   try{if(hasTTS)speechSynthesis.cancel()}catch(e){}
+  if(readingMuted())return; // words, syllables and letters: silent (the browser voice too)
   if(playClip(ck(t)))return;
   if(playGen(t))return;
   ttsSpeak(t);
@@ -439,6 +445,7 @@ function hear(t,done){
 }
 // Plays a clip or recording of `x` with Lumi talking (big = he comes to the middle of the screen). False if there is neither.
 function lumiPlay(x,big){
+  if(String(x).charAt(0)==='~'&&readingMuted())return false; // Cierra's stretched syllable is a reading sound
   const u=hintURL(x);if(!u)return false;
   try{
     const au=newAudio(u);
@@ -456,7 +463,7 @@ function lumiPlay(x,big){
 // when there is no clip, so whatever follows (the stretched syllable) never waits for nothing. Resolves false when nothing played.
 function letterSound(l){
   return new Promise(res=>{
-    const u=hintURL(l);if(!u){res(false);return}
+    const u=readingMuted()?null:hintURL(l);if(!u){res(false);return}
     let over=false,guard=0;
     const fin=v=>{if(!over){over=true;clearTimeout(guard);res(v)}};
     try{
@@ -1256,6 +1263,19 @@ $('wordStyleSel').value=S.wordStyle;
 $('wordStyleSel').onchange=e=>{S.wordStyle=e.target.value;save();if(!resting&&!pre)next()}; // acts at once: the next word is shown in the chosen style
 // Game mode: only the game on screen (no header buttons, levels, modes or parents' panel), and full screen where the browser allows it. It is a setting of
 // this device (not synced) and is left with the small X in the corner. The page may already carry the class (the inline script in <head> sets it before painting).
+const applyMute=()=>{
+  ['muteBtn','muteGame'].forEach(id=>{const b=$(id);b.setAttribute('aria-pressed',MUTED);b.textContent=MUTED?'🔇':'🔊'});
+  dbg('reading sounds muted='+MUTED);
+};
+function setMute(on){
+  MUTED=on;
+  try{on?localStorage.setItem(MUTE_KEY,'1'):localStorage.removeItem(MUTE_KEY)}catch(e){}
+  try{if(MUTED&&hasTTS)speechSynthesis.cancel()}catch(e){}
+  applyMute();
+}
+$('muteBtn').onclick=()=>setMute(!MUTED);
+$('muteGame').onclick=()=>setMute(!MUTED);
+applyMute();
 const GAME_KEY='leemos-game';
 // A big screen is used: the game is zoomed to fit the viewport (CSS `zoom` on main keeps layout and taps right), never below 1 so phones stay as they were.
 // The height term uses the real height of the card at zoom 1 (Busca's 12 tiles are taller than a syllable), so no screen scrolls in game mode; it is refitted when the content changes.
