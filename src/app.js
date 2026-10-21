@@ -483,7 +483,7 @@ function partSound(keys){
     const fin=v=>{if(!over){over=true;clearTimeout(guard);res(v)}};
     try{
       const a=newAudio(u);if(curAudio&&curAudio!==a)curAudio.pause();curAudio=a;
-      guard=setTimeout(()=>fin(true),1800);
+      guard=setTimeout(()=>fin(true),3500);
       a.onended=()=>fin(true);a.onerror=()=>fin(false);
       const p=a.play();if(p&&p.catch)p.catch(()=>fin(false));
     }catch(e){fin(false)}
@@ -1040,7 +1040,7 @@ function loadGame(name){
       const load=Promise.all([imp('./'+def.file),def.data?Promise.all(['es','ca'].map(l=>loadJSON('src/data/'+def.data+'.'+l+'.json').then(d=>{(GDATA[name]=GDATA[name]||{})[l]=d}).catch(()=>{}))):null]).then(r=>r[0]);
       // (one language failing to load only locks that language)
       const mod=await Promise.race([load,new Promise((_,no)=>setTimeout(()=>no(new Error('timeout')),window[def.ms]||5000))]); // a stalled network must not hold the first screen
-      G[name]=mod[def.create]({doc:document,$,S,t,fmt,rnd,nm,say,letter:letterSound,part:partSound,lumiPlay,sayLumi,sfx,poke,sparkle:sparkleBurst,later:(f,ms)=>setTimeout(f,ms),
+      G[name]=mod[def.create]({doc:document,$,S,t,fmt,rnd,nm,say,letter:letterSound,part:partSound,silence:()=>{try{if(curAudio)curAudio.pause()}catch(e){}},lumiPlay,sayLumi,sfx,poke,sparkle:sparkleBurst,later:(f,ms)=>setTimeout(f,ms),
         earnSticker,showReward,refresh:()=>{renderLevels();renderHard();renderAlbum()},pathPos,levels:()=>LEVELS,data:()=>(GDATA[name]||{})[S.lang],save});
       return G[name];
     }catch(e){GP[name]=null;return null}

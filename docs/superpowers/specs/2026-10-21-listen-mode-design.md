@@ -29,7 +29,7 @@ Two short exercises in one mode, aimed at what Elsa finds hardest: blending syll
 
 ## 1. Pure logic (`src/listen.js`, testable)
 
-- `openWords(words, pos)`: words with an emoji whose `stepOf` ≤ the current Camino step (cumulative levels 1..level, the rule Palabras uses). Needs **≥ 4** to unlock, otherwise the button dims with `listenLocked`.
+- `openWords(words, pos)`: words with an emoji whose `stepOf` ≤ the current Camino step (cumulative levels 1..level, the rule Palabras uses). Needs **≥ 4** to unlock, otherwise the tap on the button shows `listenLocked` in the hint (the button does not dim: like Busca and Cierra, a play mode's lock is only known once its module is loaded).
 - `makeRobot(words, rng, exclude)`: picks a target (2–3 syllables) not in `exclude`, then the 2 open words most similar to it (`similarity`), never the same text, never the same emoji. Returns `{kind:'robot', target, cards}` with 3 shuffled cards.
 - `sayParts(parts)`: the clip sequence for a word, one entry per syllable; a closed syllable with a `~` clip uses it.
 - `makePair(pairs, pos, rng, exclude)`: from the curated list, pairs whose two words are both open. Returns `{kind:'pair', printed, cards:[a,b], answer}`; which twin is printed and the card order are random.

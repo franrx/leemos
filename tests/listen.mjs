@@ -69,5 +69,11 @@ for (const lang of ['es', 'ca']) {
   const bad = listenWords(readJSON(`src/data/levels.${lang}.json`)).flatMap((w) => w.parts.map((p, i) => [p, w.parts[i + 1], w.text])).filter(([p, n]) => partKeys(p, n)[0].startsWith('~') && n && n[0] === p[p.length - 1]);
   check(`[${lang}] partKeys: no word of the real data stretches a coda that starts the next syllable`, bad.length === 0, bad.map((b) => b[2]).join(','));
 }
+{
+  const pairs = openPairs(readJSON('src/data/pairs.es.json'), 12);
+  const words = openWords(listenWords(readJSON('src/data/levels.es.json')), 12);
+  let clash = 0; for (let sd = 1; sd <= 150; sd++) { const ses = makeSession(words, mulberry(sd), pairs), pw = new Set(ses.filter((x) => x.kind === 'pair').flatMap((x) => [x.pair.a.text, x.pair.b.text])); for (const sc of ses) if (sc.kind === 'robot' && pw.has(sc.target.text)) clash++; }
+  check('makeSession: a word of the pair screens is never also a robot target in the same session', clash === 0, 'clashes=' + clash);
+}
 console.log(failures ? `\n${failures} FAILED` : '\nall listen tests passed');
 process.exit(failures ? 1 : 0);

@@ -2450,6 +2450,43 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('listen: the robot only uses words of the levels up to the one she is on (level 1 here)', cards(tx).length === 3 && cards(tx).every((c) => lv0.has(c.dataset.w)), cards(tx).map((c) => c.dataset.w).join(','));
   }
 
+  // deferred minors of the final review
+  const reachPairs0 = async (y) => { for (let i = 0; i < 8 && !y.d.querySelector('.listen-word'); i++) { const r = right(y); if (!r) break; r.click(); await sleep(30); } return !!y.d.querySelector('.listen-word'); };
+  {
+    // the cards appear after the sounding-out (the spec), not before she has heard the word
+    const hx = await boot({ storage: LR(), manifest: lman }); hx.w.__audioMode = 'auto'; hx.w.__leemosRescueMs = 9000;
+    let seenHidden = null;
+    new hx.w.MutationObserver(() => { const g = hx.d.querySelector('.listen-cards'); if (g && seenHidden === null) seenHidden = g.hidden; }).observe(lroom(hx), { childList: true });
+    hx.$('mListen').click(); await until(() => !lroom(hx).hidden); await sleep(80);
+    check('listen: the picture cards are hidden while the robot is still to speak and shown once it has said the word', seenHidden === true && hx.d.querySelector('.listen-cards').hidden === false, 'hiddenAtBuild=' + seenHidden);
+    // leaving stops the syllable that is playing
+    hx.d.querySelector('.listen-robot').click(); const la = lastAudio(hx); hx.$('mSyl').click(); await sleep(5);
+    check('listen: leaving the mode pauses the clip that is playing', la.paused === true);
+    // the syllable guard is longer than the longest stretched clip (1.53 s)
+    const gms = []; const gst = hx.w.setTimeout; hx.w.setTimeout = (f, m, ...a) => { gms.push(m); return gst(f, m, ...a); };
+    hx.$('mListen').click(); await until(() => !lroom(hx).hidden); await sleep(60);
+    check('listen: the guard that frees a syllable that never ends is 3.5 s (the longest stretched clip lasts 1.53 s)', gms.includes(3500) && !gms.includes(1800), gms.join(','));
+  }
+  {
+    // Lumi on a pair screen says the pair sentence; the Aa switch changes the printed word at once; the end gives a sticker
+    const px = await lstart({ pathEs: 12 });
+    const st0 = lsaved(px).stickers || 0;
+    await reachPairs0(px);
+    const c0 = px.audioCalls.length; px.$('hint').click(); await sleep(5);
+    check('listen pairs: tapping Lumi on a pair screen says the pair sentence, not the robot one', px.audioCalls.slice(c0).some((u) => decodeURIComponent(u).includes('lee la palabra')) && !px.audioCalls.slice(c0).some((u) => decodeURIComponent(u).includes('escucha al robot')));
+    const up0 = lroom(px).classList.contains('upper'); px.$('caseBtn').click();
+    check('listen pairs: the Aa switch changes the case of the printed word at once', lroom(px).classList.contains('upper') === !up0);
+    for (let i = 0; i < 6 && !px.d.getElementById('listenAgain'); i++) { await sleep(60); const r = right(px); if (r) { r.click(); await sleep(30); } }
+    check('listen: finishing a session gives a sticker', !!px.d.getElementById('listenAgain') && (lsaved(px).stickers || 0) === st0 + 1, `stickers ${st0} -> ${lsaved(px).stickers}`);
+  }
+  {
+    // a saved listen mode that cannot open (too few words) falls back to the reading screen and keeps the preference
+    const fx = await boot({ storage: LR({ pathEs: 1, mode: 'listen' }), manifest: lman }); await sleep(60);
+    check('listen: a saved mode that cannot open falls back to the reading screen and the saved preference stays', lroom(fx).hidden && !fx.d.documentElement.classList.contains('listen') && lsaved(fx).mode === 'listen');
+    const css2 = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
+    check('listen: game mode hides the reading chrome for the room (same rule as Busca and Cierra)', /html\.listen \.session[^{]*\{display:none!important\}/.test(css2) && /\.listen-room\{[^}]*width:100%/.test(css2));
+  }
+
   // pair screens: after the robot screens, read the printed word and pick its picture
   const reachPairs = async (y) => { for (let i = 0; i < 8 && !y.d.querySelector('.listen-word'); i++) { const r = right(y); if (!r) break; r.click(); await sleep(30); } return !!y.d.querySelector('.listen-word'); };
   x = await lstart({ pathEs: 12 });

@@ -50,24 +50,24 @@ export function makePair(pairs, rng, exclude = new Set()) {
 
 // 4 robot screens then 2 pair screens (6 robot when fewer than 2 pairs are open). Targets and pairs are distinct.
 export function makeSession(words, rng, pairs = []) {
-  const nPairs = pairs.length >= 2 ? 2 : 0, used = new Set(), screens = [];
+  const nPairs = pairs.length >= 2 ? 2 : 0, used = new Set(), screens = [], picked = [];
+  const usedPairs = new Set();
+  for (let i = 0; i < nPairs; i++) { // the pair screens are chosen first: their words must not also be robot targets in this session
+    const q = makePair(pairs, rng, usedPairs);
+    if (!q) break;
+    usedPairs.add(q.pair.id); picked.push(q); used.add(q.pair.a.text); used.add(q.pair.b.text);
+  }
   while (screens.length < SCREENS - nPairs) {
     const r = makeRobot(words, rng, used);
     if (!r) break;
     used.add(r.target.text); screens.push(r);
   }
-  const usedPairs = new Set();
-  for (let i = 0; i < nPairs; i++) {
-    const q = makePair(pairs, rng, usedPairs);
-    if (!q) break;
-    usedPairs.add(q.pair.id); screens.push(q);
-  }
-  return screens;
+  return [...screens, ...picked];
 }
 
-// The screen. ctx: { doc, $, S, t, fmt, rnd, nm, say, part, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, data, save, rng }
+// The screen. ctx: { doc, $, S, t, fmt, rnd, nm, say, part, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, data, silence, save, rng }
 export function createListen(ctx) {
-  const { doc, $, S, t, fmt, rnd, nm, say, part, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, data = () => null, save, rng = Math.random } = ctx;
+  const { doc, $, S, t, fmt, rnd, nm, say, part, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, data = () => null, silence = () => {}, save, rng = Math.random } = ctx;
   const room = $('listenRoom'), html = doc.documentElement;
   let plan = null, idx = 0, over = false, gen = 0, advancing = false, talking = 0, idleT = 0, repeated = false, pairHinted = false;
   const idleMs = () => doc.defaultView.__leemosRescueMs || 3000;
@@ -76,7 +76,8 @@ export function createListen(ctx) {
   const pairs = () => { const d = data(); return openPairs(Array.isArray(d) ? d : [], pathPos()); };
   const canPlay = () => { const o = open(); return o.length >= MIN_OPEN && robotTargets(o).length >= MIN_OPEN; };
 
-  function leave() { gen++; talking++; clearTimeout(idleT); plan = null; room.hidden = true; room.innerHTML = ''; html.classList.remove('listen'); }
+  function leave() { const was = !!plan; gen++; talking++; clearTimeout(idleT); plan = null; if (was) silence(); // a syllable still playing must not sound into the next mode (leave() also runs on every next(): only a session that was on screen stops the audio)
+    room.hidden = true; room.innerHTML = ''; html.classList.remove('listen'); }
 
   function begin() {
     gen++;
@@ -96,14 +97,14 @@ export function createListen(ctx) {
       if (my !== talking || g !== gen) return false;
       robot.classList.add('say');
       await part(partKeys(parts[i], parts[i + 1]));
+      if (my !== talking || g !== gen) return false; // a stale sequence must not take the pulse off the new one
       robot.classList.remove('say');
-      if (my !== talking || g !== gen) return false;
       await new Promise((r) => later(r, GAP));
     }
     return my === talking && g === gen; // true: she heard the whole word and the idle clock may start
   }
   // Says the word and only then starts the 3 s of inactivity (a long word must not be repeated on top of itself).
-  const say3 = (parts, robot) => sound(parts, robot).then((done) => { if (done) armIdle(robot, parts); });
+  const say3 = (parts, robot, grid) => sound(parts, robot).then((done) => { if (grid) grid.hidden = false; if (done) armIdle(robot, parts); }); // the cards appear once she has heard the word (also if the sounding-out was cut: they must never stay hidden)
 
   function armIdle(robot, parts) { // 3 s with no tap: the robot says it once more (once per screen, nothing recorded)
     clearTimeout(idleT);
@@ -120,7 +121,7 @@ export function createListen(ctx) {
     for (let i = 0; i < plan.length; i++) dots.appendChild(el('i', i < idx ? 'on' : ''));
     if (p.kind === 'pair') { room.append(dots); pairScreen(p); return; }
     const robot = el('button', 'listen-robot', '🤖'); robot.setAttribute('aria-label', t('listenRobot'));
-    const grid = el('div', 'listen-cards');
+    const grid = el('div', 'listen-cards'); grid.hidden = true;
     p.cards.forEach((w) => {
       const b = el('button', 'listen-card', w.emoji);
       b.dataset.w = w.text; b.dataset.parts = w.parts.join('-'); b.dataset.answer = String(w === p.target);
@@ -129,11 +130,11 @@ export function createListen(ctx) {
     });
     room.append(dots, robot, grid);
     $('hint').textContent = t('listenIntro');
-    robot.onclick = () => { clearTimeout(idleT); say3(p.target.parts, robot); };
+    robot.onclick = () => { clearTimeout(idleT); say3(p.target.parts, robot, grid); };
     const spoke = first && S.sound && lumiPlay(t('listenIntro'), false); // only a clip: without one it is silent
     const g = gen;
-    if (spoke) later(() => { if (g === gen) say3(p.target.parts, robot); }, INTRO_MS); // the first screen plays Lumi's instruction: the robot waits for it to end
-    else say3(p.target.parts, robot);
+    if (spoke) later(() => { if (g === gen) say3(p.target.parts, robot, grid); }, INTRO_MS); // the first screen plays Lumi's instruction: the robot waits for it to end
+    else say3(p.target.parts, robot, grid);
   }
 
   // A pair screen: the printed word and two pictures; she reads it, taps the picture, then the word is said. A wrong picture only wobbles.
@@ -180,13 +181,18 @@ export function createListen(ctx) {
     const again = el('button', 'btn primary', t('listenAgain')); again.id = 'listenAgain'; again.onclick = () => begin();
     room.append(el('p', 'listen-done', msg), again);
     $('hint').textContent = msg;
-    if (reward) later(() => showReward(reward), 500);
+    const g = gen;
+    if (reward) later(() => { if (g === gen) showReward(reward); }, 500); // she may have left in the meantime
     else { again.focus(); sfx.win(); if (S.sound) sayLumi(msg); }
   }
 
+  // The Aa switch changes the printed word at once; a tap on Lumi (or his bubble) while the robot speaks cuts the sounding-out (he would be cut by the next syllable).
+  $('caseBtn').addEventListener('click', () => room.classList.toggle('upper', !!S.upper));
+  ['hint', 'mascot'].forEach((id) => $(id).addEventListener('click', () => { talking++; const r = room.querySelector('.listen-robot'); if (r) r.classList.remove('say'); }));
+
   $('rewardOk').addEventListener('click', () => { if (!over) return; const g = gen; later(() => { const a = $('listenAgain'); if (g === gen && a) a.focus(); }, 0); }); // the reward closes: focus goes to "again"
 
-  return { canPlay, begin, leave, active: () => !!plan, intro: 'listenIntro' };
+  return { canPlay, begin, leave, active: () => !!plan, get intro() { return plan && plan[idx] && plan[idx].kind === 'pair' ? 'listenPairHint' : 'listenIntro'; } }; // Lumi's tap says the sentence of the screen on view
 }
 
 // The problems of a pair {a, ea, b, eb} (hyphenated words and their pictures); an empty list means it can be used.
