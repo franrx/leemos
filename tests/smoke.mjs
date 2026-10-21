@@ -2439,6 +2439,25 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   const r0 = sylCalls(x).length; x.d.querySelector('.listen-robot').click(); x.d.querySelector('.listen-robot').click(); await sleep(60);
   check('listen: tapping the robot again restarts the sounding-out once, never two at the same time', sylCalls(x).length - r0 <= right(x).dataset.parts.split('-').length * 2);
 
+  // pair screens: after the robot screens, read the printed word and pick its picture
+  const reachPairs = async (y) => { for (let i = 0; i < 8 && !y.d.querySelector('.listen-word'); i++) { const r = right(y); if (!r) break; r.click(); await sleep(30); } return !!y.d.querySelector('.listen-word'); };
+  x = await lstart({ pathEs: 12 });
+  check('listen pairs: at Camino step 12 the session reaches pair screens', await reachPairs(x));
+  const pword = x.d.querySelector('.listen-word').textContent;
+  check('listen pairs: the printed word is shown, with two picture cards, and the card of the printed word is the right one', cards(x).length === 2 && !x.d.querySelector('.listen-robot') && right(x).dataset.w === pword && wrong(x).dataset.w !== pword && x.$('hint').textContent === 'Lee la palabra y toca su dibujo.');
+  const pst = JSON.stringify(lsaved(x).stats), wcp = wrong(x), rcp = right(x); wcp.click(); const pw = wcp.classList.contains('wobble');
+  check('listen pairs: a wrong picture only wobbles, nothing is recorded, and she may try the other', pw && x.d.contains(rcp) && !rcp.classList.contains('found') && JSON.stringify(lsaved(x).stats) === pst);
+  const pc = x.audioCalls.length; rcp.click(); const plit = rcp.classList.contains('found'); await sleep(20);
+  check('listen pairs: the right picture lights up and the printed word is said', plit && x.audioCalls.slice(pc).some((u) => u.includes('audio/es/c' + pword + '.mp3')));
+  for (let i = 0; i < 6 && !x.d.getElementById('listenAgain'); i++) { await sleep(60); const r = right(x); if (r) { r.click(); await sleep(30); } }
+  check('listen pairs: the session ends with "again" after the pair screens', !!x.d.getElementById('listenAgain') && JSON.stringify(lsaved(x).stats) === pst);
+  // one open pair is not enough: all robot
+  x = await lstart({ pathEs: 6 });
+  check('listen pairs: with fewer than 2 pairs open (step 6) every screen is a robot screen', !(await reachPairs(x)) && !x.d.querySelector('.listen-word'));
+  x = await boot({ storage: LR({ lang: 'ca' }), manifest: lman }); x.w.__audioMode = 'auto'; x.w.__leemosRescueMs = 9000; x.$('mListen').click(); await until(() => !lroom(x).hidden);
+  check('listen pairs: Catalan has one pair, so its session is all robot screens', !(await reachPairs(x)) && !x.d.querySelector('.listen-word'));
+  check('listen pairs: no errors', x.errors.length === 0, x.errors.join(' | '));
+
   // Leo never gets the mode
   x = await bootLeo();
   check('listen: Leo is on his own screen where the modes row is hidden', x.d.documentElement.classList.contains('pre'));

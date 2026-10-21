@@ -129,9 +129,9 @@ LEVELS=LV[S.lang]||LV_ES;
 if(!(S.level>=0&&S.level<LEVELS.length)){S.level=0;lastFp=fpOf()} // a correction, not a progress change: no modAt stamp // a saved level that does not exist (newer app version, bad data) falls back to the first
 let cur=null,last=null,phase='read',resetArmed=false;
 let pre=null;
-const GAMEDEF={find:{file:'find.js',create:'createFind',ms:'__leemosFindTimeout',lock:'findLocked'},close:{file:'close.js',create:'createClose',ms:'__leemosCloseTimeout',lock:'closeLocked',data:'closed'},listen:{file:'listen.js',create:'createListen',ms:'__leemosListenTimeout',lock:'listenLocked'}}; // play modes loaded the first time they are used
+const GAMEDEF={find:{file:'find.js',create:'createFind',ms:'__leemosFindTimeout',lock:'findLocked'},close:{file:'close.js',create:'createClose',ms:'__leemosCloseTimeout',lock:'closeLocked',data:'closed'},listen:{file:'listen.js',create:'createListen',ms:'__leemosListenTimeout',lock:'listenLocked',data:'pairs'}}; // play modes loaded the first time they are used
 const G={},GP={}; // loaded modules and pending loads, by game name
-const CLOSED={}; // closed.<lang>.json, loaded with the close module
+const GDATA={}; // <data>.<lang>.json of each play mode that has one, by game name
 const activeGame=()=>Object.values(G).find(g=>g&&g.active())||null;
 const isGame=m=>Object.prototype.hasOwnProperty.call(GAMEDEF,m)&&PROFILE.kind!=='pre'; // Leo never gets a reader play mode, whatever his saved state says
 let curWorld=Math.floor(Math.random()*WORLDS.length);
@@ -1037,11 +1037,11 @@ function loadGame(name){
   return GP[name]||(GP[name]=(async()=>{
     try{
       const imp=window.__leemosImport||(p=>import(p));
-      const load=Promise.all([imp('./'+def.file),def.data?Promise.all(['es','ca'].map(l=>loadJSON('src/data/'+def.data+'.'+l+'.json').then(d=>{CLOSED[l]=d}).catch(()=>{}))):null]).then(r=>r[0]);
+      const load=Promise.all([imp('./'+def.file),def.data?Promise.all(['es','ca'].map(l=>loadJSON('src/data/'+def.data+'.'+l+'.json').then(d=>{(GDATA[name]=GDATA[name]||{})[l]=d}).catch(()=>{}))):null]).then(r=>r[0]);
       // (one language failing to load only locks that language)
       const mod=await Promise.race([load,new Promise((_,no)=>setTimeout(()=>no(new Error('timeout')),window[def.ms]||5000))]); // a stalled network must not hold the first screen
       G[name]=mod[def.create]({doc:document,$,S,t,fmt,rnd,nm,say,letter:letterSound,part:partSound,lumiPlay,sayLumi,sfx,poke,sparkle:sparkleBurst,later:(f,ms)=>setTimeout(f,ms),
-        earnSticker,showReward,refresh:()=>{renderLevels();renderHard();renderAlbum()},pathPos,levels:()=>LEVELS,data:()=>CLOSED[S.lang],save});
+        earnSticker,showReward,refresh:()=>{renderLevels();renderHard();renderAlbum()},pathPos,levels:()=>LEVELS,data:()=>(GDATA[name]||{})[S.lang],save});
       return G[name];
     }catch(e){GP[name]=null;return null}
   })());

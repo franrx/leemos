@@ -38,25 +38,41 @@ export function makeRobot(words, rng, exclude = new Set()) {
   return { kind: 'robot', target, cards: shuffle([target, ...picked], rng) };
 }
 
-// Up to 6 robot screens with distinct targets (fewer when the open words run out).
-export function makeSession(words, rng) {
-  const used = new Set(), screens = [];
-  while (screens.length < SCREENS) {
+// One pair screen: a pair not in `exclude`, one twin printed at random, the two pictures in random order. null when no pair is free.
+export function makePair(pairs, rng, exclude = new Set()) {
+  const free = pairs.filter((p) => !exclude.has(p.id));
+  if (!free.length) return null;
+  const pair = free[Math.floor(rng() * free.length)];
+  const printed = rng() < 0.5 ? pair.a : pair.b;
+  return { kind: 'pair', pair, printed, cards: shuffle([pair.a, pair.b], rng), answer: printed };
+}
+
+// 4 robot screens then 2 pair screens (6 robot when fewer than 2 pairs are open). Targets and pairs are distinct.
+export function makeSession(words, rng, pairs = []) {
+  const nPairs = pairs.length >= 2 ? 2 : 0, used = new Set(), screens = [];
+  while (screens.length < SCREENS - nPairs) {
     const r = makeRobot(words, rng, used);
     if (!r) break;
     used.add(r.target.text); screens.push(r);
   }
+  const usedPairs = new Set();
+  for (let i = 0; i < nPairs; i++) {
+    const q = makePair(pairs, rng, usedPairs);
+    if (!q) break;
+    usedPairs.add(q.pair.id); screens.push(q);
+  }
   return screens;
 }
 
-// The screen. ctx: { doc, $, S, t, fmt, rnd, nm, say, part, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, save, rng }
+// The screen. ctx: { doc, $, S, t, fmt, rnd, nm, say, part, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, data, save, rng }
 export function createListen(ctx) {
-  const { doc, $, S, t, fmt, rnd, nm, say, part, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, save, rng = Math.random } = ctx;
+  const { doc, $, S, t, fmt, rnd, nm, say, part, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, data = () => null, save, rng = Math.random } = ctx;
   const room = $('listenRoom'), html = doc.documentElement;
-  let plan = null, idx = 0, over = false, gen = 0, advancing = false, talking = 0, idleT = 0, repeated = false;
+  let plan = null, idx = 0, over = false, gen = 0, advancing = false, talking = 0, idleT = 0, repeated = false, pairHinted = false;
   const idleMs = () => doc.defaultView.__leemosRescueMs || 3000;
   const el = (tag, cls, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
   const open = () => openWords(listenWords(levels()), pathPos());
+  const pairs = () => { const d = data(); return openPairs(Array.isArray(d) ? d : [], pathPos()); };
   const canPlay = () => { const o = open(); return o.length >= MIN_OPEN && robotTargets(o).length >= MIN_OPEN; };
 
   function leave() { gen++; talking++; clearTimeout(idleT); plan = null; room.hidden = true; room.innerHTML = ''; html.classList.remove('listen'); }
@@ -64,7 +80,7 @@ export function createListen(ctx) {
   function begin() {
     gen++;
     if (!canPlay()) { leave(); return false; }
-    plan = makeSession(open(), rng);
+    plan = makeSession(open(), rng, pairs()); pairHinted = false;
     if (!plan.length) { leave(); return false; }
     idx = 0; over = false;
     html.classList.add('listen'); room.hidden = false; room.classList.toggle('upper', !!S.upper);
@@ -98,6 +114,7 @@ export function createListen(ctx) {
     room.innerHTML = '';
     const dots = el('div', 'listen-dots'); dots.setAttribute('role', 'img'); dots.setAttribute('aria-label', t('listenGoal', { i: idx + 1, n: plan.length }));
     for (let i = 0; i < plan.length; i++) dots.appendChild(el('i', i < idx ? 'on' : ''));
+    if (p.kind === 'pair') { room.append(dots); pairScreen(p); return; }
     const robot = el('button', 'listen-robot', '🤖'); robot.setAttribute('aria-label', t('listenRobot'));
     const grid = el('div', 'listen-cards');
     p.cards.forEach((w) => {
@@ -112,6 +129,28 @@ export function createListen(ctx) {
     if (first && S.sound) lumiPlay(t('listenIntro'), false); // only a clip: without one it is silent
     sound(p.target.parts, robot);
     armIdle(robot, p.target.parts);
+  }
+
+  // A pair screen: the printed word and two pictures; she reads it, taps the picture, then the word is said. A wrong picture only wobbles.
+  function pairScreen(p) {
+    const word = el('div', 'listen-word', p.printed.text);
+    const grid = el('div', 'listen-cards two');
+    p.cards.forEach((w) => {
+      const b = el('button', 'listen-card', w.emoji);
+      b.dataset.w = w.text; b.dataset.answer = String(w === p.answer);
+      b.onclick = () => {
+        if (!plan || over || advancing || b.classList.contains('found')) return;
+        if (w === p.answer) {
+          advancing = true; b.classList.add('found'); sfx.ok(); say(p.printed.text); poke('cheer', 900); sparkle(b, 10);
+          $('hint').textContent = fmt(rnd(t('oks')));
+          const g = gen; later(() => { if (g !== gen) return; idx++; idx < plan.length ? screen(false) : finishSession(); }, 1600);
+        } else { b.classList.add('wobble'); later(() => b.classList.remove('wobble'), 500); }
+      };
+      grid.appendChild(b);
+    });
+    room.append(word, grid);
+    $('hint').textContent = t('listenPairHint');
+    if (S.sound && !pairHinted) { pairHinted = true; lumiPlay(t('listenPairHint'), false); } // only a clip: without one it is silent
   }
 
   function tap(b, w, p, robot) {

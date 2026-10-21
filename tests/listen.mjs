@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildClipList } from '../scripts/lib/clips.mjs';
-import { MIN_OPEN, SCREENS, GAP, listenWords, openWords, robotTargets, makeRobot, partKeys, makeSession, validPair, openPairs } from '../src/listen.js';
+import { MIN_OPEN, SCREENS, GAP, listenWords, openWords, robotTargets, makeRobot, partKeys, makeSession, validPair, openPairs, makePair } from '../src/listen.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readJSON = (p) => JSON.parse(readFileSync(join(ROOT, p), 'utf8'));
@@ -50,6 +50,19 @@ for (const lang of ['es', 'ca']) {
   check(`[${lang}] clip list: every pair word and syllable has a clip`, need.every((k) => keys.has(k.toLowerCase())), need.filter((k) => !keys.has(k.toLowerCase())).join(','));
   const i18n = readJSON(`src/data/i18n.${lang}.json`);
   check(`[${lang}] clip list: Lumi's listen sentences are clips`, ['listenIntro', 'listenPairHint'].every((k) => i18n[k] && keys.has(i18n[k].toLowerCase())));
+}
+{
+  const pairs = openPairs(readJSON('src/data/pairs.es.json'), 12);
+  const words = openWords(listenWords(readJSON('src/data/levels.es.json')), 12);
+  let ok = true;
+  for (let s = 1; s <= 100 && ok; s++) { const r = makePair(pairs, mulberry(s), new Set()); ok = !!r && r.cards.length === 2 && r.cards.every((c) => c.emoji) && r.cards[0].emoji !== r.cards[1].emoji && r.cards.some((c) => c.text === r.printed.text) && r.answer.text === r.printed.text; }
+  check('makePair: two pictures, one of them is the printed word, never the same picture', ok);
+  const sides = new Set(), printed = new Set(); for (let s = 1; s <= 60; s++) { const r = makePair(pairs, mulberry(s), new Set()); sides.add(r.cards[0].text); printed.add(r.printed.text); }
+  check('makePair: which twin is printed and which side it is on both vary', sides.size > 1 && printed.size > 1);
+  check('makePair: null when every pair is excluded', makePair(pairs, mulberry(1), new Set(pairs.map((p) => p.id))) === null);
+  const full = makeSession(words, mulberry(2), pairs);
+  check('makeSession: with 2+ open pairs, 4 robot then 2 pair screens (distinct pairs)', full.length === 6 && full.slice(0, 4).every((s) => s.kind === 'robot') && full.slice(4).every((s) => s.kind === 'pair') && new Set(full.slice(4).map((s) => s.pair.id)).size === 2);
+  check('makeSession: with fewer than 2 open pairs, all robot', makeSession(words, mulberry(2), pairs.slice(0, 1)).every((s) => s.kind === 'robot') && makeSession(words, mulberry(2)).every((s) => s.kind === 'robot'));
 }
 console.log(failures ? `\n${failures} FAILED` : '\nall listen tests passed');
 process.exit(failures ? 1 : 0);

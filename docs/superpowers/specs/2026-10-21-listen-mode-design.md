@@ -1,6 +1,6 @@
 # "Escucha / Escolta" mode (robot blending + minimal pairs) — design
 
-Date: 2026-10-21. Status: draft for review. Adds a fifth play mode. Builds on `2026-10-18-closed-syllables-design.md` (stretched clips, the parked robot-mode and minimal-pairs ideas) and `2026-10-18-busca-la-paraula-design.md` (the mode registry, `similarity`).
+Date: 2026-10-21. Status: implemented (B in v23, C in v24). Adds a fifth play mode. Builds on `2026-10-18-closed-syllables-design.md` (stretched clips, the parked robot-mode and minimal-pairs ideas) and `2026-10-18-busca-la-paraula-design.md` (the mode registry, `similarity`).
 
 ## Goal
 

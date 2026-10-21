@@ -298,6 +298,9 @@ html.listen .session,html.listen #goal,html.listen #tiles,html.listen #pic,html.
 .listen-card:focus-visible,.listen-robot:focus-visible{outline:3px solid var(--c1);outline-offset:3px}
 .listen-card.found{border-color:var(--c1);box-shadow:0 0 0 4px color-mix(in srgb,var(--c1) 35%,transparent)}
 .listen-card.wobble{animation:findWobble .4s ease-in-out}
+.listen-word{font-size:3rem;font-weight:700;letter-spacing:.02em;text-indent:.02em;text-align:center}
+.listen-room.upper .listen-word{text-transform:uppercase}
+.listen-cards.two{grid-template-columns:repeat(2,1fr)}
 .listen-done{font-size:1.3rem;font-weight:700;text-align:center}
 @keyframes listenPulse{0%{transform:scale(1)}50%{transform:scale(1.12)}100%{transform:scale(1)}}
 @keyframes closePop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
