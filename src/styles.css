@@ -36,8 +36,8 @@ h1{margin:0;font-size:1.5rem;letter-spacing:.01em}
 .level .bar i{display:block;height:100%;background:var(--ok);width:0;transition:width .4s}
 .level[aria-pressed="true"]{border-color:var(--c2);box-shadow:0 0 0 3px color-mix(in srgb,var(--c2) 30%,transparent)}
 
-.modes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:6px 0 14px}
-@media (max-width:480px){.modes{grid-template-columns:1fr 1fr}}
+.modes{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:6px 0 14px}
+@media (max-width:480px){.modes{grid-template-columns:repeat(3,1fr)}}
 .mode{border:2px solid var(--line);background:var(--panel);border-radius:14px;padding:12px;font-weight:700;min-height:48px;transition:opacity .2s ease-out}
 .mode[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 
@@ -286,10 +286,25 @@ html.close .session,html.close #goal,html.close #tiles,html.close #pic,html.clos
 .close-tile:focus-visible,.close-coda:focus-visible,.close-card:focus-visible,.close-chip:focus-visible{outline:3px solid var(--c1);outline-offset:3px}
 .close-room.upper .close-tile,.close-room.upper .close-coda,.close-room.upper .close-card,.close-room.upper .close-chip{text-transform:uppercase}
 .close-done{font-size:1.3rem;font-weight:700;text-align:center}
+html.listen .session,html.listen #goal,html.listen #tiles,html.listen #pic,html.listen #stage .actions{display:none!important}
+.listen-room{display:flex;flex-direction:column;align-items:center;gap:18px;width:100%}
+.listen-dots{display:flex;gap:7px}
+.listen-dots i{width:16px;height:16px;border-radius:50%;background:color-mix(in srgb,var(--ink) 14%,transparent)}
+.listen-dots i.on{background:var(--c1)}
+.listen-robot{font-size:64px;line-height:1;min-width:88px;min-height:88px;border-radius:24px;border:2px solid color-mix(in srgb,var(--ink) 18%,transparent);background:transparent;cursor:pointer}
+.listen-robot.say{animation:listenPulse .5s ease-in-out}
+.listen-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;width:100%;max-width:520px}
+.listen-card{font-size:56px;min-height:96px;border-radius:20px;border:2px solid color-mix(in srgb,var(--ink) 18%,transparent);background:transparent;cursor:pointer}
+.listen-card:focus-visible,.listen-robot:focus-visible{outline:3px solid var(--c1);outline-offset:3px}
+.listen-card.found{border-color:var(--c1);box-shadow:0 0 0 4px color-mix(in srgb,var(--c1) 35%,transparent)}
+.listen-card.wobble{animation:findWobble .4s ease-in-out}
+.listen-done{font-size:1.3rem;font-weight:700;text-align:center}
+@keyframes listenPulse{0%{transform:scale(1)}50%{transform:scale(1.12)}100%{transform:scale(1)}}
 @keyframes closePop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
 @keyframes closeGlow{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c1) 0%,transparent)}50%{box-shadow:0 0 0 8px color-mix(in srgb,var(--c1) 55%,transparent)}}
 @media (prefers-reduced-motion: reduce){
   .find-tile.wobble{animation:none}
+  .listen-robot.say,.listen-card.wobble{animation:none}
   .close-coda.glow,.close-card,.close-coda.rescue,.close-card.rescue,.close-tile.rescue,#closeJoin.rescue{animation:none}.close-arc{transition:none}.close-pic.pop{animation:none}.close-anchors{transition:none}
   .newletter,.newletter::after,.sticker.fresh{animation:none}
   .newletter::after{opacity:0}

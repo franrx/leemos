@@ -129,7 +129,7 @@ LEVELS=LV[S.lang]||LV_ES;
 if(!(S.level>=0&&S.level<LEVELS.length)){S.level=0;lastFp=fpOf()} // a correction, not a progress change: no modAt stamp // a saved level that does not exist (newer app version, bad data) falls back to the first
 let cur=null,last=null,phase='read',resetArmed=false;
 let pre=null;
-const GAMEDEF={find:{file:'find.js',create:'createFind',ms:'__leemosFindTimeout',lock:'findLocked'},close:{file:'close.js',create:'createClose',ms:'__leemosCloseTimeout',lock:'closeLocked',data:'closed'}}; // play modes loaded the first time they are used
+const GAMEDEF={find:{file:'find.js',create:'createFind',ms:'__leemosFindTimeout',lock:'findLocked'},close:{file:'close.js',create:'createClose',ms:'__leemosCloseTimeout',lock:'closeLocked',data:'closed'},listen:{file:'listen.js',create:'createListen',ms:'__leemosListenTimeout',lock:'listenLocked'}}; // play modes loaded the first time they are used
 const G={},GP={}; // loaded modules and pending loads, by game name
 const CLOSED={}; // closed.<lang>.json, loaded with the close module
 const activeGame=()=>Object.values(G).find(g=>g&&g.active())||null;
@@ -1056,6 +1056,7 @@ async function openGame(name){
 }
 $('mFind').onclick=()=>openGame('find');
 $('mClose').onclick=()=>openGame('close');
+$('mListen').onclick=()=>openGame('listen');
 function setMode(m){
   if(m==='word'&&openItems('word').length<MIN_WORDS){$('hint').textContent=t('wordsLocked');return} // dimmed: not enough words are open yet, and say so
   S.mode=m;save();

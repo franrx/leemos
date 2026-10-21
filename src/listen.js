@@ -48,3 +48,99 @@ export function makeSession(words, rng) {
   }
   return screens;
 }
+
+// The screen. ctx: { doc, $, S, t, fmt, rnd, nm, say, part, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, save, rng }
+export function createListen(ctx) {
+  const { doc, $, S, t, fmt, rnd, nm, say, part, lumiPlay, sayLumi, sfx, poke, sparkle, later, earnSticker, showReward, refresh, pathPos, levels, save, rng = Math.random } = ctx;
+  const room = $('listenRoom'), html = doc.documentElement;
+  let plan = null, idx = 0, over = false, gen = 0, advancing = false, talking = 0, idleT = 0, repeated = false;
+  const idleMs = () => doc.defaultView.__leemosRescueMs || 3000;
+  const el = (tag, cls, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  const open = () => openWords(listenWords(levels()), pathPos());
+  const canPlay = () => { const o = open(); return o.length >= MIN_OPEN && robotTargets(o).length >= MIN_OPEN; };
+
+  function leave() { gen++; talking++; clearTimeout(idleT); plan = null; room.hidden = true; room.innerHTML = ''; html.classList.remove('listen'); }
+
+  function begin() {
+    gen++;
+    if (!canPlay()) { leave(); return false; }
+    plan = makeSession(open(), rng);
+    if (!plan.length) { leave(); return false; }
+    idx = 0; over = false;
+    html.classList.add('listen'); room.hidden = false; room.classList.toggle('upper', !!S.upper);
+    screen(true);
+    return true;
+  }
+
+  // The robot says the syllables one after the other with a pause. Each call starts a new sounding-out and cancels the one still running (`talking` is its token).
+  async function sound(parts, robot) {
+    const my = ++talking, g = gen;
+    for (let i = 0; i < parts.length; i++) {
+      if (my !== talking || g !== gen) return;
+      robot.classList.add('say');
+      await part(partKeys(parts[i]));
+      robot.classList.remove('say');
+      if (my !== talking || g !== gen) return;
+      await new Promise((r) => later(r, GAP));
+    }
+  }
+
+  function armIdle(robot, parts) { // 3 s with no tap: the robot says it once more (once per screen, nothing recorded)
+    clearTimeout(idleT);
+    if (repeated || advancing || over) return;
+    const g = gen;
+    idleT = later(() => { if (g !== gen || repeated || advancing || over) return; repeated = true; sound(parts, robot); }, idleMs());
+  }
+
+  function screen(first) {
+    gen++; advancing = false; repeated = false; clearTimeout(idleT);
+    const p = plan[idx];
+    room.innerHTML = '';
+    const dots = el('div', 'listen-dots'); dots.setAttribute('role', 'img'); dots.setAttribute('aria-label', t('listenGoal', { i: idx + 1, n: plan.length }));
+    for (let i = 0; i < plan.length; i++) dots.appendChild(el('i', i < idx ? 'on' : ''));
+    const robot = el('button', 'listen-robot', '🤖'); robot.setAttribute('aria-label', t('listenRobot'));
+    const grid = el('div', 'listen-cards');
+    p.cards.forEach((w) => {
+      const b = el('button', 'listen-card', w.emoji);
+      b.dataset.w = w.text; b.dataset.parts = w.parts.join('-'); b.dataset.answer = String(w === p.target);
+      b.onclick = () => tap(b, w, p, robot);
+      grid.appendChild(b);
+    });
+    room.append(dots, robot, grid);
+    $('hint').textContent = t('listenIntro');
+    robot.onclick = () => { sound(p.target.parts, robot); armIdle(robot, p.target.parts); };
+    if (first && S.sound) lumiPlay(t('listenIntro'), false); // only a clip: without one it is silent
+    sound(p.target.parts, robot);
+    armIdle(robot, p.target.parts);
+  }
+
+  function tap(b, w, p, robot) {
+    if (!plan || over || advancing || b.classList.contains('found')) return;
+    armIdle(robot, p.target.parts);
+    if (w === p.target) {
+      advancing = true; clearTimeout(idleT); talking++;
+      b.classList.add('found'); sfx.ok(); say(w.text); poke('cheer', 900); sparkle(b, 10);
+      $('hint').textContent = fmt(rnd(t('oks')));
+      const g = gen;
+      later(() => { if (g !== gen) return; idx++; idx < plan.length ? screen(false) : finishSession(); }, 1600);
+    } else {
+      b.classList.add('wobble'); later(() => b.classList.remove('wobble'), 500);
+    }
+  }
+
+  function finishSession() {
+    over = true; clearTimeout(idleT);
+    const reward = earnSticker(); save(); refresh();
+    const msg = t('listenDone', { n: nm() });
+    room.innerHTML = '';
+    const again = el('button', 'btn primary', t('listenAgain')); again.id = 'listenAgain'; again.onclick = () => begin();
+    room.append(el('p', 'listen-done', msg), again);
+    $('hint').textContent = msg;
+    if (reward) later(() => showReward(reward), 500);
+    else { again.focus(); sfx.win(); if (S.sound) sayLumi(msg); }
+  }
+
+  $('rewardOk').addEventListener('click', () => { if (!over) return; const g = gen; later(() => { const a = $('listenAgain'); if (g === gen && a) a.focus(); }, 0); }); // the reward closes: focus goes to "again"
+
+  return { canPlay, begin, leave, active: () => !!plan, intro: 'listenIntro' };
+}

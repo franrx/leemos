@@ -45,7 +45,7 @@ export function buildClipList({ name = 'Elsa', langs = ['es', 'ca'] } = {}) {
     // the stretched clips: every bank syllable, and the closed syllable of every word screen (src/close.js decides which words qualify)
     [...new Set([...closed.syl, ...wordsFrom(readJSON(`src/data/levels.${lang}.json`)).map((w) => w.closed)])].forEach((s) => { const key = '~' + s; if (!out.has(lang + ':' + key)) out.set(lang + ':' + key, { lang, text: s, key, kind: 'stretch', file: slug(key) + '.mp3' }); });
     const fill = (s) => s.split('{n}').join(name);
-    [...i18n.oks, ...i18n.nos, i18n.rewardTitle, i18n.endTitle, i18n.hintSyl, i18n.hintWord, i18n.hintWhole, i18n.hintJudge, i18n.findIntro, i18n.closeIntro].forEach((s) => add(lang, fill(s), 'phrase'));
+    [...i18n.oks, ...i18n.nos, i18n.rewardTitle, i18n.endTitle, i18n.hintSyl, i18n.hintWord, i18n.hintWhole, i18n.hintJudge, i18n.findIntro, i18n.closeIntro, i18n.listenIntro].forEach((s) => add(lang, fill(s), 'phrase'));
     // Leo's own lines (pre-reader screen), said by Lumi when a tap on him or the bubble asks for the sentence on screen
     [i18n.preIntroHint, i18n.preGameHint, i18n.preRest, ...i18n.preNos, ...i18n.preOks].forEach((s) => add(lang, fill(s), 'phrase'));
     add(lang, i18n.sample, 'word');

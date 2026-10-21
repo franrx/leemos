@@ -2383,10 +2383,66 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
 
 // ---------- 45. Escucha / Escolta: a robot sounds a word out and she picks the picture ----------
 {
-  let x;
+  const LR = (extra = {}) => ({ 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12, world: 0, ...extra } });
+  const lman = { generated: 'test', clips: { es: new Proxy({}, { get: (_, k) => (typeof k === 'string' ? 'c' + k + '.mp3' : undefined) }), ca: {} } };
+  const lroom = (y) => y.$('listenRoom');
+  const cards = (y) => [...y.d.querySelectorAll('.listen-card')];
+  const right = (y) => cards(y).find((c) => c.dataset.answer === 'true');
+  const wrong = (y) => cards(y).find((c) => c.dataset.answer !== 'true');
+  const lsaved = (y) => JSON.parse(y.w.localStorage.getItem('leemos-v1'));
+  const lstart = async (extra, opts = {}) => { const y = await boot({ storage: LR(extra), manifest: lman, ...opts }); y.w.__audioMode = 'auto'; y.w.__leemosRescueMs = 9000; y.$('mListen').click(); await until(() => !lroom(y).hidden); return y; };
+  const sylCalls = (y) => y.audioCalls.filter((u) => /audio\/es\/c/.test(u)).map((u) => decodeURIComponent(u.split('/').pop()).replace(/^c|\.mp3.*$/g, '').replace('~', ''));
   check('listen: the game ctx has a syllable player (part)', /part:\s*partSound/.test(appJs));
-}
 
+  let x = await lstart();
+  check('listen: the fifth button opens the room, hides the reading screen and is pressed; the mode is saved', !lroom(x).hidden && x.d.documentElement.classList.contains('listen') && x.$('mListen').getAttribute('aria-pressed') === 'true' && lsaved(x).mode === 'listen');
+  check('listen: the robot screen shows the robot and 3 picture cards, and never prints the word', !!x.d.querySelector('.listen-robot') && cards(x).length === 3 && !!right(x) && !lroom(x).textContent.includes(right(x).dataset.w));
+  check('listen: the hint says the instruction', x.$('hint').textContent === 'Escucha al robot y toca el dibujo.');
+  await sleep(50);
+  const wordParts = right(x).dataset.parts.split('-');
+  const order = sylCalls(x);
+  check('listen: the robot says the syllables of the word in order', order.indexOf(wordParts[0]) >= 0 && wordParts.every((p, i) => order[order.indexOf(wordParts[0]) + i] === p), order.join(',') + ' / ' + wordParts.join('-'));
+  const before = lsaved(x).total, st = JSON.stringify(lsaved(x).stats);
+  const wc = wrong(x), rc0 = right(x); wc.click(); const wobbled = wc.classList.contains('wobble'); await sleep(20);
+  check('listen: a wrong tap only wobbles: the screen stays and nothing is recorded', wobbled && x.d.contains(rc0) && !rc0.classList.contains('found') && lsaved(x).total === before && JSON.stringify(lsaved(x).stats) === st);
+  const rc = right(x), rw = rc.dataset.w;
+  rc.click(); const lit = rc.classList.contains('found'); await sleep(20);
+  check('listen: the right card lights up and the whole word is said', lit && x.audioCalls.some((u) => u.includes('audio/es/c' + rw + '.mp3')));
+  for (let i = 0; i < 12 && !x.d.getElementById('listenAgain'); i++) { await sleep(1700); const r = right(x); if (r) { r.click(); await sleep(20); } }
+  await sleep(2000);
+  check('listen: finishing the session shows "again" and touches no stats', !!x.d.getElementById('listenAgain') && JSON.stringify(lsaved(x).stats) === st);
+  check('listen: no errors', x.errors.length === 0, x.errors.join(' | '));
+
+  // locked while too few words are open
+  x = await boot({ storage: LR({ pathEs: 1 }), manifest: lman });
+  x.$('mListen').click(); await sleep(30);
+  check('listen: with too few words open the button says so, the room stays closed and the saved mode does not change', lroom(x).hidden && x.$('hint').textContent === 'Escucha se abre con más palabras.' && (lsaved(x).mode || 'syl') === 'syl');
+
+  // muted device: silent robot, but the screen works
+  x = await boot({ storage: LR(), manifest: lman }); x.w.__audioMode = 'auto'; x.w.__leemosRescueMs = 9000;
+  x.$('muteBtn').click(); await sleep(5);
+  const c0 = x.audioCalls.length; x.$('mListen').click(); await until(() => !lroom(x).hidden); await sleep(60);
+  const mparts = right(x).dataset.parts.split('-');
+  check('listen: muted, the robot says no syllable, the cards are there and a right tap still advances', sylCalls(x).filter((p) => mparts.includes(p)).length === 0 && cards(x).length === 3 && x.audioCalls.length >= c0);
+  const dotOn = () => x.d.querySelectorAll('.listen-dots i.on').length;
+  right(x).click(); await sleep(1800);
+  check('listen: muted, the right tap goes to the next screen', dotOn() === 1);
+
+  // leaving mid-sequence: the sounding-out stops
+  x = await lstart();
+  x.$('mSyl').click(); await sleep(3000);
+  const n1 = x.audioCalls.length; await sleep(3000);
+  check('listen: leaving the mode stops the sounding-out and the idle repeat', x.audioCalls.length === n1 && lroom(x).hidden && !x.d.documentElement.classList.contains('listen'));
+
+  // tapping the robot twice quickly: one sequence, the first is cancelled
+  x = await lstart(); await sleep(60);
+  const r0 = sylCalls(x).length; x.d.querySelector('.listen-robot').click(); x.d.querySelector('.listen-robot').click(); await sleep(60);
+  check('listen: tapping the robot again restarts the sounding-out once, never two at the same time', sylCalls(x).length - r0 <= right(x).dataset.parts.split('-').length * 2);
+
+  // Leo never gets the mode
+  x = await bootLeo();
+  check('listen: Leo is on his own screen where the modes row is hidden', x.d.documentElement.classList.contains('pre'));
+}
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
