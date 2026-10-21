@@ -2561,5 +2561,49 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('listen: Leo is on his own screen where the modes row is hidden', x.d.documentElement.classList.contains('pre'));
 }
 
+// ---------- 46. Lumi: the 2.5D owl and his idle life ----------
+{
+  const LUM = () => ({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, world: 0 } }, manifest: { generated: 'test', clips: { es: new Proxy({}, { get: (_, k) => (typeof k === 'string' ? 'c' + k + '.mp3' : undefined) }), ca: {} } } });
+  const lx = await boot(LUM()); await sleep(80); // manual audio: the clip never ends by itself, so his big copy stays open to inspect
+  const m = lx.$('mascot');
+  check('lumi art: the small Lumi has the layers the animations use (rig, head, ears, eyes with lids, brows, beak with jaw and mouth, wings, belly star, shadow)', ['.rig', '.head-lag .head', '.ear.el', '.ear.er', '.eyes .eye-open', '.lid', '.eye-happy', '.brow.bl', '.beak .jaw', '.beak .mouth', '.wing.wl', '.wing.wr', '.bstar', '.shadow'].every((s) => m.querySelector(s)), ['.rig', '.head-lag .head', '.ear.el', '.eyes .eye-open', '.lid', '.beak .jaw', '.beak .mouth', '.wing.wl', '.bstar', '.shadow'].filter((s) => !m.querySelector(s)).join(','));
+  const ids = [...m.outerHTML.matchAll(/url\(#([A-Za-z]+)\)/g)].map((x) => x[1]);
+  check('lumi art: every gradient he uses is defined once, in a shared svg that is hidden by size (display:none would drop the gradients in Safari)', ids.length > 5 && ids.every((id) => lx.d.querySelectorAll(`[id="${id}"]`).length === 1) && !!lx.$('lumiDefs') && lx.$('lumiDefs').getAttribute('aria-hidden') === 'true' && lx.$('lumiDefs').getAttribute('width') === '0' && !/display:\s*none/.test(lx.$('lumiDefs').getAttribute('style') || ''), ids.join(','));
+  check('lumi art: he keeps his name for screen readers', m.getAttribute('role') === 'img' && m.getAttribute('aria-label') === 'Lumi, el búho');
+  // the big copy has no duplicate ids anywhere and still finds the gradients
+  m.dispatchEvent(new lx.w.MouseEvent('click', { bubbles: true })); await sleep(40);
+  const all = [...lx.d.querySelectorAll('[id]')].map((e) => e.id), dup = all.filter((x, i) => all.indexOf(x) !== i);
+  check('lumi art: the big copy opens without duplicating any id, and its gradients are the shared ones', !lx.$('lumiBig').hidden && !!lx.$('lumiBigArt').querySelector('svg .rig') && dup.length === 0, dup.join(','));
+  lx.d.dispatchEvent(new lx.w.MouseEvent('click', { bubbles: true })); await sleep(20);
+
+  // life: a tap on him makes him giggle; a tap anywhere is glanced at; nothing breaks if the module cannot load
+  const gx = await boot(LUM()); gx.w.__audioMode = 'auto'; await sleep(80);
+  gx.d.dispatchEvent(new gx.w.MouseEvent('pointerdown', { clientX: 300, clientY: 0, bubbles: true }));
+  check('lumi life: a tap anywhere makes him look towards it (his gaze custom property is set)', gx.$('mascot').style.getPropertyValue('--lx') !== '' && Number(gx.$('mascot').style.getPropertyValue('--lx')) > 0.5, gx.$('mascot').style.getPropertyValue('--lx'));
+  gx.$('mascot').dispatchEvent(new gx.w.MouseEvent('click', { bubbles: true }));
+  check('lumi life: a tap on him makes him giggle', gx.$('mascot').classList.contains('act-giggle'));
+  const rx = await boot({ ...LUM(), reduced: true }); await sleep(80);
+  rx.$('mascot').dispatchEvent(new rx.w.MouseEvent('click', { bubbles: true }));
+  check('lumi life: with reduced motion he does not giggle or act', ![...rx.$('mascot').classList].some((c) => c.startsWith('act-')));
+  const fx = await boot({ ...LUM(), importFails: true }); await sleep(80);
+  fx.$('mascot').dispatchEvent(new fx.w.MouseEvent('click', { bubbles: true })); await sleep(20);
+  check('lumi life: if the module cannot load he still shows and works, just without the idle acts', !!fx.$('mascot') && ![...fx.$('mascot').classList].some((c) => c.startsWith('act-')) && fx.errors.length === 0, fx.errors.join(' | '));
+
+  // calm: no acts while she is tapping, while he talks, or while a screen is over him
+  const calm = () => gx.w.__leemosCalm();
+  check('lumi calm: right after a tap he stays calm (she is playing)', calm() === false);
+  await sleep(2600);
+  check('lumi calm: after 2.5 s without a tap he may act', calm() === true);
+  gx.$('mascot').classList.add('talking'); const talk = calm(); gx.$('mascot').classList.remove('talking');
+  gx.$('reward').hidden = false; const rew = calm(); gx.$('reward').hidden = true;
+  gx.$('end').hidden = false; const end = calm(); gx.$('end').hidden = true;
+  gx.$('lumiBig').hidden = false; const big = calm(); gx.$('lumiBig').hidden = true;
+  check('lumi calm: not while he talks, nor with the reward, the end screen or his big copy on screen', talk === false && rew === false && end === false && big === false && calm() === true, `${talk} ${rew} ${end} ${big}`);
+  // the old three-move antics are gone, and the module is cached for offline
+  const swJs = readFileSync(join(ROOT, 'sw.js'), 'utf8'), cssL = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
+  check('lumi: the old antics are gone (code and css) and src/lumi.js is cached for offline', !/antic-/.test(appJs) && !/antic/.test(cssL) && /'src\/lumi\.js'/.test(swJs));
+  check('lumi: no errors anywhere', lx.errors.length === 0 && gx.errors.length === 0 && rx.errors.length === 0, [...lx.errors, ...gx.errors, ...rx.errors].join(' | '));
+}
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

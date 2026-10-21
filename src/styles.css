@@ -82,10 +82,6 @@ h1{margin:0;font-size:1.5rem;letter-spacing:.01em}
 .mascot.dance{animation:dance 1.3s ease-in-out}
 .mascot.dance .wl{animation:flapl .3s 4}
 .mascot.dance .wr{animation:flapr .3s 4}
-.mascot.antic-look{animation:lookaround 1.1s ease-in-out}
-.mascot.antic-stretch{animation:stretch 1s ease-in-out}
-.mascot.antic-wave{animation:sway 2.6s ease-in-out infinite}
-.mascot.antic-wave .wl{animation:flapl .3s 3}
 @keyframes sway{0%,100%{transform:translateY(0) rotate(-6deg)}50%{transform:translateY(-12px) rotate(6deg)}}
 @keyframes hop{
   0%,100%{transform:translateY(0) rotate(0)}
@@ -104,8 +100,6 @@ h1{margin:0;font-size:1.5rem;letter-spacing:.01em}
   80%{transform:translateY(-4px) rotate(8deg)}
   90%{transform:translateY(-14px) rotate(-4deg)}
 }
-@keyframes lookaround{0%,100%{transform:rotate(0)}25%{transform:rotate(-18deg)}75%{transform:rotate(18deg)}}
-@keyframes stretch{0%,100%{transform:scale(1,1)}50%{transform:scale(.82,1.28)}}
 @keyframes flapl{50%{transform:rotate(-42deg)}}
 @keyframes flapr{50%{transform:rotate(42deg)}}
 .goal{display:flex;gap:7px}
@@ -305,7 +299,78 @@ html.listen .session,html.listen #goal,html.listen #tiles,html.listen #pic,html.
 @keyframes listenPulse{0%{transform:scale(1)}50%{transform:scale(1.12)}100%{transform:scale(1)}}
 @keyframes closePop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
 @keyframes closeGlow{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c1) 0%,transparent)}50%{box-shadow:0 0 0 8px color-mix(in srgb,var(--c1) 55%,transparent)}}
+/* Lumi 2.5D: the gradients live in one shared <svg id="lumiDefs"> so the big copy of him finds them too. Moods are m-* classes, or the poke classes (cheer = happy, tilt = thinking). */
+.lumi-defs{position:absolute;width:0;height:0;overflow:hidden}
+.mascot .body{transform-origin:60px 104px;animation:breathe 3.4s ease-in-out infinite}
+@keyframes breathe{50%{transform:scale(1.012,1.022)}}
+.mascot .head{transform-origin:60px 70px;transform:translate(calc(var(--lx,0)*1.4px),calc(var(--ly,0)*.8px)) rotate(calc(var(--lx,0)*2.2deg))}
+.mascot .face{transform:translate(calc(var(--lx,0)*1.6px),calc(var(--ly,0)*1px))}
+.mascot .gaze{animation:glance 9s ease-in-out infinite}
+@keyframes glance{0%,40%,100%{transform:translate(0,0)}46%,60%{transform:translate(-1.8px,.4px)}70%,86%{transform:translate(1.8px,-.4px)}}
+.mascot .pupil{transform:translate(calc(var(--lx,0)*2.4px),calc(var(--ly,0)*1.8px));transition:transform .35s}
+.mascot .mouth{transform-box:fill-box;transform-origin:50% 0;transform:scaleY(calc(.12 + var(--jaw,0)*.88))} /* the dark mouth stretches down to meet the lower beak as the jaw opens */
+.mascot .pdot{transform-box:fill-box;transform-origin:50% 50%;transition:transform .25s}
+.mascot .lid{fill:#8668F7;transform-box:fill-box;transform-origin:50% 0;transform:scaleY(0);transition:transform .3s}
+.mascot .eye-happy{opacity:0;transition:opacity .2s}
+.mascot .brow{transform-box:fill-box;transform-origin:50% 100%;transition:transform .3s}
+.mascot.m-happy .eye-open,.mascot.cheer .eye-open,.mascot.act-giggle .eye-open{opacity:0}
+.mascot.m-happy .eye-happy,.mascot.cheer .eye-happy,.mascot.act-giggle .eye-happy{opacity:1}
+.mascot.m-happy .brow.bl,.mascot.cheer .brow.bl{transform:translateY(-2px) rotate(-6deg)}
+.mascot.m-happy .brow.br,.mascot.cheer .brow.br{transform:translateY(-2px) rotate(6deg)}
+.mascot.m-think,.mascot.tilt{--lx:.9;--ly:-1}
+.mascot.m-think .brow.br,.mascot.tilt .brow.br,.mascot.act-tilt .brow.br{transform:translateY(-3px) rotate(8deg)}
+.mascot.m-think .brow.bl,.mascot.tilt .brow.bl{transform:translateY(1px) rotate(5deg)}
+.mascot.m-wow .pdot,.mascot.act-wow .pdot{transform:scale(.7)}
+.mascot.m-wow .brow,.mascot.act-wow .brow{transform:translateY(-3px)}
+.mascot.m-sleepy .lid{transform:scaleY(.62)}
+.mascot.m-sleepy .eyes{animation:none}
+.mascot.m-sleepy .pupil{transform:translate(0,2px)}
+/* idle acts (src/lumi.js adds one class at a time); the custom properties are registered so the gaze and the yawn can be animated and eased */
+@property --lx{syntax:'<number>';inherits:true;initial-value:0}
+@property --ly{syntax:'<number>';inherits:true;initial-value:0}
+@property --jaw{syntax:'<number>';inherits:true;initial-value:0}
+.mascot{transition:transform .25s,--lx .5s ease-out,--ly .5s ease-out}
+.mascot .rig{transform-origin:60px 104px}
+.mascot .head-lag{transform-origin:60px 80px;animation:headlag 3.6s ease-in-out -.5s infinite} /* the head trails the body's sway a little: secondary motion */
+@keyframes headlag{0%,100%{transform:rotate(2.5deg)}50%{transform:rotate(-2.5deg)}}
+.mascot .ear.el{transform-origin:44px 30px}.mascot .ear.er{transform-origin:76px 30px}
+.mascot .shadow{transform-box:fill-box;transform-origin:50% 50%}
+@keyframes twitch{0%,100%{transform:rotate(0)}25%{transform:rotate(-16deg)}50%{transform:rotate(3deg)}75%{transform:rotate(-9deg)}}
+@keyframes actLook{0%,100%{--lx:0;--ly:0}22%,38%{--lx:-1;--ly:.15}62%,78%{--lx:1;--ly:-.15}}
+@keyframes actTilt{0%,100%{transform:rotate(0)}25%,75%{transform:rotate(9deg) translate(1px,1px)}}
+@keyframes actShake{0%,100%{transform:rotate(0)}15%{transform:rotate(-3.5deg)}35%{transform:rotate(3.5deg)}55%{transform:rotate(-2.5deg)}75%{transform:rotate(2deg)}}
+@keyframes actHop{0%{transform:translateY(0) scale(1,1)}12%{transform:translateY(0) scale(1.06,.92)}40%{transform:translateY(-18px) scale(.95,1.08)}70%{transform:translateY(0) scale(1.05,.94)}85%{transform:translateY(-3px) scale(1,1)}100%{transform:translateY(0) scale(1,1)}}
+@keyframes actShadow{40%{transform:scale(.72);opacity:.55}}
+@keyframes actYawn{0%,100%{--jaw:0;transform:scale(1,1)}25%,65%{--jaw:1.7;transform:scale(1.03,1.06)}}
+@keyframes actGiggle{0%{transform:scale(1)}15%{transform:scale(1.08,.88)}30%{transform:scale(.94,1.1) rotate(-4deg)}50%{transform:scale(1.04,.96) rotate(4deg)}70%{transform:rotate(-3deg)}100%{transform:none}}
+.mascot.act-look .rig{animation:actLook 2.4s ease-in-out}
+.mascot.act-tilt .head-lag{animation:actTilt 2s ease-in-out}
+.mascot.act-twitch .ear.el{animation:twitch .6s ease-in-out}
+.mascot.act-wing .wl{animation:flapl .37s 3}
+.mascot.act-shake .rig{animation:actShake .65s}
+.mascot.act-hop .rig,.mascot.act-wow .rig{animation:actHop .85s}
+.mascot.act-hop .shadow,.mascot.act-wow .shadow{animation:actShadow .85s}
+.mascot.act-yawn .rig{animation:actYawn 2.5s ease-in-out}
+.mascot.act-yawn .lid{transform:scaleY(.85)}
+.mascot.act-yawn .eyes{animation:none}
+.mascot.act-yawn .wl{animation:flapl 2.5s ease-in-out}.mascot.act-yawn .wr{animation:flapr 2.5s ease-in-out}
+.mascot.act-giggle .rig{animation:actGiggle .95s}
+@keyframes actBounce{0%{transform:translateY(0) scale(1,1)}12%{transform:translateY(0) scale(1.06,.92)}28%{transform:translateY(-18px) scale(.95,1.08)}44%{transform:translateY(0) scale(1.06,.92)}58%{transform:translateY(-11px) scale(.97,1.05)}74%{transform:translateY(0) scale(1.04,.95)}100%{transform:translateY(0) scale(1,1)}}
+@keyframes actShadow2{28%,58%{transform:scale(.74);opacity:.55}}
+@keyframes actWiggle{0%,100%{transform:rotate(0) translateX(0)}20%{transform:rotate(-5deg) translateX(-2px)}40%{transform:rotate(5deg) translateX(2px)}60%{transform:rotate(-5deg) translateX(-2px)}80%{transform:rotate(5deg) translateX(2px)}}
+@keyframes twinkle{0%,100%{transform:scale(1) rotate(0);opacity:1}35%{transform:scale(1.4) rotate(18deg);opacity:1}60%{transform:scale(.9) rotate(-8deg);opacity:.85}}
+@keyframes actPeek{0%,100%{--lx:0;transform:rotate(0) translateX(0)}25%{--lx:-1;transform:rotate(-8deg) translateX(-2px)}60%{--lx:1;transform:rotate(8deg) translateX(2px)}}
+.mascot .bstar{transform-box:fill-box;transform-origin:50% 50%}
+.mascot.act-bounce .rig{animation:actBounce 1.4s}
+.mascot.act-bounce .shadow{animation:actShadow2 1.4s}
+.mascot.act-wiggle .rig{animation:actWiggle .9s ease-in-out}
+.mascot.act-wiggle .wl{animation:flapl .3s 3}.mascot.act-wiggle .wr{animation:flapr .3s 3}
+.mascot.act-twinkle .bstar{animation:twinkle 1.2s ease-in-out}
+.mascot.act-peek .head-lag{animation:actPeek 1.8s ease-in-out}
 @media (prefers-reduced-motion: reduce){
+  .mascot .rig,.mascot .head-lag,.mascot .ear,.mascot .shadow,.mascot .wing,.mascot .bstar{animation:none!important}
+  .mascot .body,.mascot .gaze{animation:none}
+  .mascot .pupil,.mascot .pdot,.mascot .lid,.mascot .brow,.mascot .eye-happy{transition:none}
   .find-tile.wobble{animation:none}
   .listen-robot.say,.listen-card.wobble{animation:none}
   .close-coda.glow,.close-card,.close-coda.rescue,.close-card.rescue,.close-tile.rescue,#closeJoin.rescue{animation:none}.close-arc{transition:none}.close-pic.pop{animation:none}.close-anchors{transition:none}
@@ -317,7 +382,6 @@ html.listen .session,html.listen #goal,html.listen #tiles,html.listen #pic,html.
   .pic.on,.star,.eyes,.big,
   .mascot,.mascot.cheer,.mascot.cheer .wl,.mascot.cheer .wr,
   .mascot.dance,.mascot.dance .wl,.mascot.dance .wr,
-  .mascot.antic-look,.mascot.antic-stretch,.mascot.antic-wave,.mascot.antic-wave .wl,
   .spark,.flash,.tiles.win .tile,.rec-dot{animation:none}
   .lumi-big.talking .mascot,.lumi-big.talking .wl,.lumi-big.talking .wr{animation:none}
   .lumi-art,.lumi-big{transition:none}

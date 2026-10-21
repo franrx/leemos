@@ -846,7 +846,7 @@ async function afterSignIn(user){
 try{if(localStorage.getItem('leemos-auth'))syncInit().then(sy=>{if(sy){renderAcct();syncAll()}})}catch(e){}
 
 // ---------- mascot, sound, rewards ----------
-const MASCOT_STATES=['cheer','tilt','dance','antic-look','antic-stretch','antic-wave'];
+const MASCOT_STATES=['cheer','tilt','dance'];
 let lastActivity=Date.now();
 function markActivity(){lastActivity=Date.now()}
 function poke(cls,ms){
@@ -859,16 +859,22 @@ function poke(cls,ms){
 }
 document.addEventListener('pointerdown',markActivity,{passive:true});
 document.addEventListener('keydown',markActivity);
-setInterval(()=>{
-  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
-  if(document.hidden)return;
+// Lumi's idle life (src/lumi.js, loaded after the first screen): small acts at random while he is calm, a glance at every tap, a giggle when he is tapped.
+// Calm = she is not tapping right now, he is not talking or reacting, and no screen is over him: an act must never pull her eyes off the word.
+const lumiCalm=()=>{
   const m=$('mascot');
-  if(!m||MASCOT_STATES.some(c=>m.classList.contains(c)))return;
-  if(!$('reward').hidden||!$('end').hidden||!$('album').hidden||!$('worlds').hidden)return;
-  if(Date.now()-lastActivity<7000+Math.random()*6000)return;
-  const antics=['antic-look','antic-stretch','antic-wave'];
-  poke(antics[Math.floor(Math.random()*antics.length)],1100);
-},4000);
+  if(!m||document.hidden||Date.now()-lastActivity<2500)return false;
+  if(m.classList.contains('talking')||MASCOT_STATES.some(c=>m.classList.contains(c)))return false;
+  return $('lumiBig').hidden&&$('reward').hidden&&$('end').hidden&&$('album').hidden&&$('worlds').hidden;
+};
+window.__leemosCalm=lumiCalm; // for the tests
+let lumiLifeObj=null;
+(async()=>{try{
+  const L=await (window.__leemosImport||(p=>import(p)))('./lumi.js'),m=$('mascot');
+  lumiLifeObj=L.lumiLife(m,{canAct:lumiCalm,reduced:()=>matchMedia('(prefers-reduced-motion: reduce)').matches});
+  L.followPointer(document,m,lumiLifeObj);lumiLifeObj.start();
+}catch(e){}})(); // without the module he is still there, just without the acts
+
 let AC=null;
 function tone(freqs,dur,type,vol){
   if(!S.sound)return;
@@ -1272,7 +1278,7 @@ $('voiceSel').onchange=e=>{S.voiceURIs[S.lang]=e.target.value;save();pickVoice()
 $('sessionSel').value=String(S.sessionLen);
 $('hint').onclick=()=>sayHint(true);
 $('hint').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();sayHint(true)}};
-$('mascot').onclick=()=>sayHint(true);
+$('mascot').onclick=()=>{if(lumiLifeObj)lumiLifeObj.act('giggle');sayHint(true)};
 $('lumiBig').onclick=()=>{if(curAudio)curAudio.pause();talkStop()};
 $('sessionSel').onchange=e=>{S.sessionLen=parseInt(e.target.value,10);save();renderSession()};
 $('wordStyleSel').value=S.wordStyle;
