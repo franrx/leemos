@@ -29,7 +29,7 @@ export function editDistance(a, b) {
 
 // Higher = easier to confuse with `a`. Compared lexicographically: same first syllable, same length, then the fewest letter differences.
 export const similarity = (a, b) => [a.parts[0] === b.parts[0] ? 1 : 0, a.text.length === b.text.length ? 1 : 0, -editDistance(a.text, b.text)];
-const closer = (x, y) => { for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return y[i] - x[i]; return 0; };
+export const closer = (x, y) => { for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return y[i] - x[i]; return 0; };
 
 export function shuffle(arr, rng) {
   const a = arr.slice();
