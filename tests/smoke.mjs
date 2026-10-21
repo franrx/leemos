@@ -2506,6 +2506,56 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('listen pairs: Catalan has one pair, so its session is all robot screens', !(await reachPairs(x)) && !x.d.querySelector('.listen-word'));
   check('listen pairs: no errors', x.errors.length === 0, x.errors.join(' | '));
 
+  // test gaps of the review: a clip held open mid-play (manual audio mode), a held 500 ms timer, and the room in the game-mode fit
+  {
+    const sylOf = (u) => decodeURIComponent(String(u).split('/').pop()).replace(/^c|\.mp3.*$/g, '').replace('~', '');
+    const startManual = async () => { const y = await boot({ storage: LR(), manifest: lman }); y.w.__leemosRescueMs = 9000; const stg = y.w.setTimeout; y.w.setTimeout = (fn, m, ...r) => (m === 3500 ? 0 : stg(fn, m, ...r)); /* the harness runs 100-4000 ms timers at once: hold the syllable guard so a clip really stays open */ y.$('mListen').click(); await until(() => !lroom(y).hidden); await sleep(40); return y; };
+    const sylAudios = (y) => { const ps = right(y).dataset.parts.split('-'); return (y.w.__audios || []).filter((a) => ps.includes(sylOf(a.src))); };
+
+    // a tap on Lumi while the robot speaks cuts the sounding-out, and the cards are never left hidden
+    let y = await startManual();
+    const first = sylAudios(y)[0];
+    check('listen gaps: with a clip held open the robot is on its first syllable and the cards are still hidden', !!first && y.d.querySelector('.listen-cards').hidden === true && y.d.querySelector('.listen-robot').classList.contains('say'));
+    y.$('hint').click(); first.onended(); await sleep(30);
+    check('listen gaps: a tap on Lumi cuts the sounding-out (no second syllable), clears the pulse and shows the cards', sylAudios(y).length === 1 && !y.d.querySelector('.listen-robot').classList.contains('say') && y.d.querySelector('.listen-cards').hidden === false, 'syllable clips=' + sylAudios(y).length);
+
+    // a sequence that was replaced must not take the pulse off the one that replaced it
+    y = await startManual();
+    const a1 = sylAudios(y)[0], n1 = sylAudios(y).length;
+    y.d.querySelector('.listen-robot').click(); await sleep(5);
+    check('listen gaps: tapping the robot while it speaks starts a new sounding-out (a second first-syllable clip)', sylAudios(y).length === n1 + 1 && y.d.querySelector('.listen-robot').classList.contains('say'));
+    a1.onended(); await sleep(20);
+    check('listen gaps: the replaced sounding-out ending late leaves the pulse of the new one on', y.d.querySelector('.listen-robot').classList.contains('say'));
+
+    // the sticker overlay must not open over another mode when she leaves before its 500 ms timer
+    const rx = await boot({ storage: LR(), manifest: lman }); rx.w.__audioMode = 'auto'; rx.w.__leemosRescueMs = 9000;
+    const held = []; const st1 = rx.w.setTimeout; rx.w.setTimeout = (f, m, ...a) => (m === 500 ? (held.push(f), 0) : st1(f, m, ...a));
+    rx.$('mListen').click(); await until(() => !lroom(rx).hidden);
+    for (let i = 0; i < 12 && !rx.d.getElementById('listenAgain'); i++) { await sleep(40); const r = right(rx); if (r) { r.click(); await sleep(20); } }
+    check('listen gaps: the end of the session holds a 500 ms reward timer', !!rx.d.getElementById('listenAgain') && held.length >= 1, 'held=' + held.length);
+    rx.$('mSyl').click(); await sleep(10); held.forEach((f) => f()); await sleep(10);
+    check('listen gaps: the sticker overlay does not open over the reading screen when she left before the timer', rx.$('reward').hidden === true && rx.errors.length === 0, rx.errors.join(' | '));
+
+    // the pairs file fails to load (offline, 404): the session is still 6 robot screens and nothing breaks
+    const fx = await boot({ storage: LR({ pathEs: 12 }), manifest: lman, onDom: (w) => { const f0 = w.fetch; w.fetch = (u, ...r) => (/pairs\.es\.json$/.test(String(u)) ? Promise.resolve({ ok: false, status: 404, json: async () => ({}) }) : f0(u, ...r)); } });
+    fx.w.__audioMode = 'auto'; fx.w.__leemosRescueMs = 9000; fx.$('mListen').click(); await until(() => !lroom(fx).hidden);
+    let sawPair = false, screens = 0;
+    for (let i = 0; i < 8 && !fx.d.getElementById('listenAgain'); i++) { if (fx.d.querySelector('.listen-word')) sawPair = true; const r = right(fx); if (!r) break; screens++; r.click(); await sleep(30); }
+    check('listen gaps: with the pairs file failing to load the session is robot-only and ends normally', !sawPair && screens === 6 && !!fx.d.getElementById('listenAgain') && fx.errors.length === 0, `pair=${sawPair} screens=${screens} ${fx.errors.join('|')}`);
+
+    // the room is part of the game-mode fit: a taller card lowers the zoom, and leaving the mode gives it back
+    const lx = await boot({ storage: { 'leemos-v1': { name: 'Elsa', pathEs: 12, pathCa: 12, world: 0 }, 'leemos-game': '1' }, manifest: lman }); lx.w.__audioMode = 'auto'; lx.w.__leemosRescueMs = 9000;
+    lx.w.Element.prototype.getBoundingClientRect = function () { const z = 1; return { width: 0, height: this.classList && this.classList.contains('stage') ? (lroom(lx).hidden ? 430 : 700) * z : 0, top: 0, left: 0, right: 0, bottom: 0 }; };
+    const gz = (z) => Number(z.d.documentElement.style.getPropertyValue('--gz') || 0), air = (h) => h * 1.03 + 2;
+    const pad = (() => { const cs = lx.w.getComputedStyle(lx.d.querySelector('main')); return (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0); })();
+    Object.defineProperty(lx.w, 'innerWidth', { value: 1194, configurable: true }); Object.defineProperty(lx.w, 'innerHeight', { value: 834, configurable: true }); lx.w.dispatchEvent(new lx.w.Event('resize'));
+    const z0 = gz(lx);
+    lx.$('mListen').click(); await until(() => !lroom(lx).hidden); await sleep(80);
+    check('listen gaps: in game mode the room takes part in the fit: a taller card lowers the zoom so it still fits the height', Math.abs(z0 - Math.min(1194 / 560, 834 / air(430 + pad))) < 0.01 && Math.abs(gz(lx) - 834 / air(700 + pad)) < 0.01 && gz(lx) < z0, `${z0} -> ${gz(lx)}`);
+    lx.$('mSyl').click(); await sleep(80);
+    check('listen gaps: and leaving the room gives the zoom back', Math.abs(gz(lx) - z0) < 0.01 && lx.errors.length === 0, `${gz(lx)} ${lx.errors.join('|')}`);
+  }
+
   // Leo never gets the mode
   x = await bootLeo();
   check('listen: Leo is on his own screen where the modes row is hidden', x.d.documentElement.classList.contains('pre'));
