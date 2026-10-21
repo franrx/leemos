@@ -2381,5 +2381,12 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('close: Leo is on his own screen where the modes row is hidden', x.d.documentElement.classList.contains('pre'));
 }
 
+// ---------- 45. Escucha / Escolta: a robot sounds a word out and she picks the picture ----------
+{
+  let x;
+  check('listen: the game ctx has a syllable player (part)', /part:\s*partSound/.test(appJs));
+}
+
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

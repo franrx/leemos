@@ -474,6 +474,21 @@ function letterSound(l){
     }catch(e){fin(false)}
   });
 }
+// One syllable of the robot's sounding-out: the first of `keys` that has a clip (a closed syllable tries its stretched clip first). Resolves true when it has ended, and false at once
+// when muted or when no key has a clip, so the sequence never waits for nothing.
+function partSound(keys){
+  return new Promise(res=>{
+    const u=readingMuted()?null:keys.map(hintURL).find(Boolean);if(!u){res(false);return}
+    let over=false,guard=0;
+    const fin=v=>{if(!over){over=true;clearTimeout(guard);res(v)}};
+    try{
+      const a=newAudio(u);if(curAudio&&curAudio!==a)curAudio.pause();curAudio=a;
+      guard=setTimeout(()=>fin(true),1800);
+      a.onended=()=>fin(true);a.onerror=()=>fin(false);
+      const p=a.play();if(p&&p.catch)p.catch(()=>fin(false));
+    }catch(e){fin(false)}
+  });
+}
 function sayHint(big){
   // Leo: the sentence on screen (a clip, never the browser voice), but never over the letter sound he has to hear first. The speaker emoji is not spoken.
   if(PROFILE.kind==='pre')return hearing?false:lumiPlay($('hint').textContent.replace(/\s*🔊\s*/g,' ').trim(),big);
@@ -1025,7 +1040,7 @@ function loadGame(name){
       const load=Promise.all([imp('./'+def.file),def.data?Promise.all(['es','ca'].map(l=>loadJSON('src/data/'+def.data+'.'+l+'.json').then(d=>{CLOSED[l]=d}).catch(()=>{}))):null]).then(r=>r[0]);
       // (one language failing to load only locks that language)
       const mod=await Promise.race([load,new Promise((_,no)=>setTimeout(()=>no(new Error('timeout')),window[def.ms]||5000))]); // a stalled network must not hold the first screen
-      G[name]=mod[def.create]({doc:document,$,S,t,fmt,rnd,nm,say,letter:letterSound,lumiPlay,sayLumi,sfx,poke,sparkle:sparkleBurst,later:(f,ms)=>setTimeout(f,ms),
+      G[name]=mod[def.create]({doc:document,$,S,t,fmt,rnd,nm,say,letter:letterSound,part:partSound,lumiPlay,sayLumi,sfx,poke,sparkle:sparkleBurst,later:(f,ms)=>setTimeout(f,ms),
         earnSticker,showReward,refresh:()=>{renderLevels();renderHard();renderAlbum()},pathPos,levels:()=>LEVELS,data:()=>CLOSED[S.lang],save});
       return G[name];
     }catch(e){GP[name]=null;return null}
