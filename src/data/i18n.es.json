@@ -65,6 +65,7 @@
   "mListen": "Escucha",
   "listenLocked": "Escucha se abre con más palabras.",
   "listenIntro": "Escucha al robot y toca el dibujo.",
+  "listenPairHint": "Lee la palabra y toca su dibujo.",
   "listenGoal": "Pantalla {i} de {n}",
   "listenRobot": "Oír otra vez",
   "listenAgain": "Otra vez",

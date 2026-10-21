@@ -65,6 +65,7 @@
   "mListen": "Escolta",
   "listenLocked": "Escolta s'obre amb més paraules.",
   "listenIntro": "Escolta el robot i toca el dibuix.",
+  "listenPairHint": "Llegeix la paraula i toca el seu dibuix.",
   "listenGoal": "Pantalla {i} de {n}",
   "listenRobot": "Torna a escoltar",
   "listenAgain": "Una altra vegada",

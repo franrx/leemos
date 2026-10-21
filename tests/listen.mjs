@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildClipList } from '../scripts/lib/clips.mjs';
 import { MIN_OPEN, SCREENS, GAP, listenWords, openWords, robotTargets, makeRobot, partKeys, makeSession, validPair, openPairs } from '../src/listen.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -42,6 +43,13 @@ for (const lang of ['es', 'ca']) {
   const pairs = readJSON(`src/data/pairs.${lang}.json`);
   check(`[${lang}] pairs file: every pair is valid`, Array.isArray(pairs) && pairs.length >= 1 && pairs.every((p) => validPair(p).length === 0), pairs.map((p) => validPair(p).join(';')).join('|'));
   check(`[${lang}] openPairs: none open at step 1, all of them at step 12`, openPairs(pairs, 1).length === 0 && openPairs(pairs, 12).length === pairs.length);
+}
+for (const lang of ['es', 'ca']) {
+  const keys = new Set(buildClipList({ langs: [lang] }).map((c) => c.key));
+  const need = readJSON(`src/data/pairs.${lang}.json`).flatMap((p) => [p.a, p.b]).flatMap((h) => [h.replace(/-/g, ''), ...h.split('-')]);
+  check(`[${lang}] clip list: every pair word and syllable has a clip`, need.every((k) => keys.has(k.toLowerCase())), need.filter((k) => !keys.has(k.toLowerCase())).join(','));
+  const i18n = readJSON(`src/data/i18n.${lang}.json`);
+  check(`[${lang}] clip list: Lumi's listen sentences are clips`, ['listenIntro', 'listenPairHint'].every((k) => i18n[k] && keys.has(i18n[k].toLowerCase())));
 }
 console.log(failures ? `\n${failures} FAILED` : '\nall listen tests passed');
 process.exit(failures ? 1 : 0);

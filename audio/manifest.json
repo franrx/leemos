@@ -574,7 +574,13 @@
    "¡hasta mañana, leo! si quieres seguir, toca jugar.": "_a1hasta_20ma_f1ana_2c_20leo_21_20si_20quieres_20seguir_2c_20toca_20jugar_2e.mp3",
    "casi. escucha con atención, leo.": "casi_2e_20escucha_20con_20atenci_f3n_2c_20leo_2e.mp3",
    "poco a poco, leo. escucha otra vez.": "poco_20a_20poco_2c_20leo_2e_20escucha_20otra_20vez_2e.mp3",
-   "escucha al robot y toca el dibujo.": "escucha_20al_20robot_20y_20toca_20el_20dibujo_2e.mp3"
+   "escucha al robot y toca el dibujo.": "escucha_20al_20robot_20y_20toca_20el_20dibujo_2e.mp3",
+   "pasta": "pasta.mp3",
+   "pata": "pata.mp3",
+   "pas": "pas.mp3",
+   "dar": "dar.mp3",
+   "dardo": "dardo.mp3",
+   "lee la palabra y toca su dibujo.": "lee_20la_20palabra_20y_20toca_20su_20dibujo_2e.mp3"
   },
   "ca": {
    "me": "me.mp3",
@@ -1203,10 +1209,11 @@
    "leo, llegeix cada síl·laba i uneix-les. toca'n una per sentir-la.": "leo_2c_20llegeix_20cada_20s_edl_b7laba_20i_20uneix_2dles_2e_20toca_27n_20una_20per_20sentir_2dla_2e.mp3",
    "gairebé. escolta amb atenció, leo.": "gaireb_e9_2e_20escolta_20amb_20atenci_f3_2c_20leo_2e.mp3",
    "poc a poc, leo. escolta un altre cop.": "poc_20a_20poc_2c_20leo_2e_20escolta_20un_20altre_20cop_2e.mp3",
-   "escolta el robot i toca el dibuix.": "escolta_20el_20robot_20i_20toca_20el_20dibuix_2e.mp3"
+   "escolta el robot i toca el dibuix.": "escolta_20el_20robot_20i_20toca_20el_20dibuix_2e.mp3",
+   "llegeix la paraula i toca el seu dibuix.": "llegeix_20la_20paraula_20i_20toca_20el_20seu_20dibuix_2e.mp3"
   }
  },
- "generated": "2026-10-21T09:18:24.752Z",
+ "generated": "2026-10-21T09:20:51.433Z",
  "provider": "azure",
  "name": "Elsa",
  "rev": {
@@ -1380,7 +1387,13 @@
    "¡hasta mañana, leo! si quieres seguir, toca jugar.": 1792350387906,
    "casi. escucha con atención, leo.": 1792350388329,
    "poco a poco, leo. escucha otra vez.": 1792350394563,
-   "escucha al robot y toca el dibujo.": 1792574304752
+   "escucha al robot y toca el dibujo.": 1792574304752,
+   "pasta": 1792574448685,
+   "pata": 1792574448733,
+   "pas": 1792574448778,
+   "dar": 1792574449182,
+   "dardo": 1792574449532,
+   "lee la palabra y toca su dibujo.": 1792574450251
   },
   "ca": {
    "niu": 1792227124940,
@@ -1621,7 +1634,8 @@
    "leo, llegeix cada síl·laba i uneix-les. toca'n una per sentir-la.": 1792350394847,
    "gairebé. escolta amb atenció, leo.": 1792350395221,
    "poc a poc, leo. escolta un altre cop.": 1792350396159,
-   "escolta el robot i toca el dibuix.": 1792574304708
+   "escolta el robot i toca el dibuix.": 1792574304708,
+   "llegeix la paraula i toca el seu dibuix.": 1792574451433
   }
  }
 }
