@@ -2439,6 +2439,17 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   const r0 = sylCalls(x).length; x.d.querySelector('.listen-robot').click(); x.d.querySelector('.listen-robot').click(); await sleep(60);
   check('listen: tapping the robot again restarts the sounding-out once, never two at the same time', sylCalls(x).length - r0 <= right(x).dataset.parts.split('-').length * 2);
 
+  // final review: Lumi's intro is not cut off, the idle repeat waits for the end of the sounding-out, and the words follow the level ceiling
+  {
+    const tx = await boot({ storage: LR(), manifest: lman }); tx.w.__audioMode = 'auto'; tx.w.__leemosRescueMs = 9000;
+    const ms = []; const st0 = tx.w.setTimeout; tx.w.setTimeout = (f, m, ...a) => { ms.push(m); return st0(f, m, ...a); };
+    tx.$('mListen').click(); await until(() => !lroom(tx).hidden); await sleep(60);
+    check('listen: on the first screen the sounding-out waits for Lumi\'s intro (a 2-3 s pause before the first syllable)', ms.some((m) => m >= 2000 && m <= 3000), ms.join(','));
+    check('listen: the idle repeat is armed after the last syllable and its pause, not at the start of the screen', ms.includes(9000) && ms.indexOf(9000) > ms.lastIndexOf(600), ms.join(','));
+    const lv0 = new Set(JSON.parse(readFileSync(join(ROOT, 'src/data/levels.es.json'), 'utf8'))[0].words.map((w) => w.w.replace(/-/g, '').toLowerCase()));
+    check('listen: the robot only uses words of the levels up to the one she is on (level 1 here)', cards(tx).length === 3 && cards(tx).every((c) => lv0.has(c.dataset.w)), cards(tx).map((c) => c.dataset.w).join(','));
+  }
+
   // pair screens: after the robot screens, read the printed word and pick its picture
   const reachPairs = async (y) => { for (let i = 0; i < 8 && !y.d.querySelector('.listen-word'); i++) { const r = right(y); if (!r) break; r.click(); await sleep(30); } return !!y.d.querySelector('.listen-word'); };
   x = await lstart({ pathEs: 12 });

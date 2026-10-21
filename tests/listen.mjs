@@ -64,5 +64,10 @@ for (const lang of ['es', 'ca']) {
   check('makeSession: with 2+ open pairs, 4 robot then 2 pair screens (distinct pairs)', full.length === 6 && full.slice(0, 4).every((s) => s.kind === 'robot') && full.slice(4).every((s) => s.kind === 'pair') && new Set(full.slice(4).map((s) => s.pair.id)).size === 2);
   check('makeSession: with fewer than 2 open pairs, all robot', makeSession(words, mulberry(2), pairs.slice(0, 1)).every((s) => s.kind === 'robot') && makeSession(words, mulberry(2)).every((s) => s.kind === 'robot'));
 }
+check('partKeys: a closed syllable followed by its own coda letter (a trill or a geminate) is not stretched: bar-ret, tas-sa, tor-re', JSON.stringify(partKeys('bar', 'ret')) === '["bar"]' && JSON.stringify(partKeys('tas', 'sa')) === '["tas"]' && JSON.stringify(partKeys('tor', 're')) === '["tor"]' && JSON.stringify(partKeys('pas', 'ta')) === '["~pas","pas"]');
+for (const lang of ['es', 'ca']) {
+  const bad = listenWords(readJSON(`src/data/levels.${lang}.json`)).flatMap((w) => w.parts.map((p, i) => [p, w.parts[i + 1], w.text])).filter(([p, n]) => partKeys(p, n)[0].startsWith('~') && n && n[0] === p[p.length - 1]);
+  check(`[${lang}] partKeys: no word of the real data stretches a coda that starts the next syllable`, bad.length === 0, bad.map((b) => b[2]).join(','));
+}
 console.log(failures ? `\n${failures} FAILED` : '\nall listen tests passed');
 process.exit(failures ? 1 : 0);

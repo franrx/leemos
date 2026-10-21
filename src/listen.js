@@ -4,7 +4,7 @@ import { stepOf } from './levelrule.js';
 import { similarity, shuffle, closer } from './find.js';
 import { splitClosed } from './close.js';
 
-export const MIN_OPEN = 4, SCREENS = 6, GAP = 600; // GAP: milliseconds between two syllables
+export const MIN_OPEN = 4, SCREENS = 6, GAP = 600, INTRO_MS = 2300; // GAP: milliseconds between two syllables; INTRO_MS: Lumi's intro plays before the first sounding-out
 
 // Every word with a picture, once per text, with the Camino step it needs.
 export function listenWords(levels) {
@@ -22,8 +22,9 @@ export function listenWords(levels) {
 export const openWords = (words, pos) => words.filter((w) => w.step <= pos);
 export const robotTargets = (words) => words.filter((w) => w.parts.length >= 2 && w.parts.length <= 3); // one syllable has nothing to blend
 
-// The clip keys to try, in order, for one syllable: a closed syllable has a stretched clip ("~pas") for some words.
-export const partKeys = (part) => (splitClosed(part) ? ['~' + part, part] : [part]);
+// The clip keys to try, in order, for one syllable: a closed syllable has a stretched clip ("~pas") for some words. Not when the next syllable starts with the same letter
+// (bar-ret, tas-sa, tor-re): stretching that coda would teach a false sound (the same rule as Cierra's `qualifies`).
+export const partKeys = (part, next) => { const c = splitClosed(part); return c && !(next && next[0] === c.coda) ? ['~' + part, part] : [part]; };
 
 // One robot screen: a target not in `exclude` and the 2 open words most like it, never the same text or picture. null when there is no free target or fewer than 3 pictures.
 export function makeRobot(words, rng, exclude = new Set()) {
@@ -71,7 +72,7 @@ export function createListen(ctx) {
   let plan = null, idx = 0, over = false, gen = 0, advancing = false, talking = 0, idleT = 0, repeated = false, pairHinted = false;
   const idleMs = () => doc.defaultView.__leemosRescueMs || 3000;
   const el = (tag, cls, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-  const open = () => openWords(listenWords(levels()), pathPos());
+  const open = () => openWords(listenWords(levels().slice(0, S.level + 1)), pathPos()); // the levels up to hers, like Palabras: the Camino opens letters, the level caps the structure
   const pairs = () => { const d = data(); return openPairs(Array.isArray(d) ? d : [], pathPos()); };
   const canPlay = () => { const o = open(); return o.length >= MIN_OPEN && robotTargets(o).length >= MIN_OPEN; };
 
@@ -92,14 +93,17 @@ export function createListen(ctx) {
   async function sound(parts, robot) {
     const my = ++talking, g = gen;
     for (let i = 0; i < parts.length; i++) {
-      if (my !== talking || g !== gen) return;
+      if (my !== talking || g !== gen) return false;
       robot.classList.add('say');
-      await part(partKeys(parts[i]));
+      await part(partKeys(parts[i], parts[i + 1]));
       robot.classList.remove('say');
-      if (my !== talking || g !== gen) return;
+      if (my !== talking || g !== gen) return false;
       await new Promise((r) => later(r, GAP));
     }
+    return my === talking && g === gen; // true: she heard the whole word and the idle clock may start
   }
+  // Says the word and only then starts the 3 s of inactivity (a long word must not be repeated on top of itself).
+  const say3 = (parts, robot) => sound(parts, robot).then((done) => { if (done) armIdle(robot, parts); });
 
   function armIdle(robot, parts) { // 3 s with no tap: the robot says it once more (once per screen, nothing recorded)
     clearTimeout(idleT);
@@ -125,10 +129,11 @@ export function createListen(ctx) {
     });
     room.append(dots, robot, grid);
     $('hint').textContent = t('listenIntro');
-    robot.onclick = () => { sound(p.target.parts, robot); armIdle(robot, p.target.parts); };
-    if (first && S.sound) lumiPlay(t('listenIntro'), false); // only a clip: without one it is silent
-    sound(p.target.parts, robot);
-    armIdle(robot, p.target.parts);
+    robot.onclick = () => { clearTimeout(idleT); say3(p.target.parts, robot); };
+    const spoke = first && S.sound && lumiPlay(t('listenIntro'), false); // only a clip: without one it is silent
+    const g = gen;
+    if (spoke) later(() => { if (g === gen) say3(p.target.parts, robot); }, INTRO_MS); // the first screen plays Lumi's instruction: the robot waits for it to end
+    else say3(p.target.parts, robot);
   }
 
   // A pair screen: the printed word and two pictures; she reads it, taps the picture, then the word is said. A wrong picture only wobbles.
