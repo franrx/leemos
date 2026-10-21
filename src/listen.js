@@ -144,3 +144,25 @@ export function createListen(ctx) {
 
   return { canPlay, begin, leave, active: () => !!plan, intro: 'listenIntro' };
 }
+
+// The problems of a pair {a, ea, b, eb} (hyphenated words and their pictures); an empty list means it can be used.
+export function validPair(p) {
+  const bad = [];
+  const a = String(p.a || '').toLowerCase().split('-'), b = String(p.b || '').toLowerCase().split('-');
+  if (!p.ea || !p.eb) bad.push('missing picture');
+  if (p.ea && p.ea === p.eb) bad.push('same picture');
+  const closed = b.filter((x) => splitClosed(x));
+  if (closed.length !== 1) bad.push('b needs exactly one closed syllable');
+  else {
+    const c = splitClosed(closed[0]), i = b.indexOf(closed[0]);
+    if (b[i + 1] && b[i + 1][0] === c.coda) bad.push('coda starts a trill or geminate');
+    if (b.map((x, j) => (j === i ? c.base : x)).join('-') !== a.join('-')) bad.push('removing the coda does not give a');
+  }
+  return bad;
+}
+
+// Pairs whose two words are both open at Camino step `pos`, as {id, a, b} with a = the open twin.
+export function openPairs(pairs, pos) {
+  const mk = (h, e) => { const parts = h.toLowerCase().split('-'); return { text: parts.join(''), parts, emoji: e, step: stepOf(parts.join('-')) }; };
+  return pairs.filter((p) => validPair(p).length === 0).map((p) => ({ id: p.a, a: mk(p.a, p.ea), b: mk(p.b, p.eb) })).filter((p) => p.a.step <= pos && p.b.step <= pos);
+}

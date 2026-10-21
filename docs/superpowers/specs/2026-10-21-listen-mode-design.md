@@ -45,8 +45,8 @@ Shared visual rules: touch targets ≥ 44 px, `prefers-reduced-motion` keeps eve
 
 ## 3. Data and audio
 
-- `src/data/pairs.{es,ca}.json`: `[{"a":"pa-ta","ea":"🐾","b":"pas-ta","eb":"🍝"}]`, `a` the open twin, `b` the closed one. A test checks: each word has an emoji, `b` differs from `a` by exactly one s/r/l coda, no rr/geminate/diphthong (same exclusions as Cierra), and the two emoji differ.
-- Starting candidates (es): *pata/pasta, capa/carpa, pala/palma, sala/salsa*. The final list per language is chosen in the plan after checking that each word reads clearly with a single emoji. Catalan gets its own list.
+- `src/data/pairs.{es,ca}.json`: `[{"a":"pa-ta","ea":"🐾","b":"pas-ta","eb":"🍝"}]`, `a` the open twin, `b` the closed one. **Rule (checked by `validPair`):** `b` has exactly one closed syllable `x` (`splitClosed`) and replacing `x` by its base in `b` gives exactly `a` (*pas-ta* → *pa-ta*). So *pala/palma* and *sala/salsa* are NOT pairs (dropping the coda gives *pama*, *sasa*). Also: both words have an emoji, the emoji differ, and the coda does not start a trill or geminate.
+- Starting data: es *pata/pasta, capa/carpa, dado/dardo*; ca *capa/carpa*. The list grows only with words Fran has approved; Catalan needs a native check, and until it has 2 open pairs a Catalan session is robot-only.
 - `scripts/lib/clips.mjs` lists the new words and any new syllables, plus Lumi's phrases `listenIntro` and `listenPairHint`. Generate with Azure; the new words and syllables **must be listened to** in `/tools/review.html`.
 - i18n (es and ca, same keys): `mListen`, `listenLocked`, `listenIntro`, `listenPairHint`; the end of session reuses the shared sticker message.
 

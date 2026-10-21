@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIN_OPEN, SCREENS, GAP, listenWords, openWords, robotTargets, makeRobot, partKeys, makeSession } from '../src/listen.js';
+import { MIN_OPEN, SCREENS, GAP, listenWords, openWords, robotTargets, makeRobot, partKeys, makeSession, validPair, openPairs } from '../src/listen.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readJSON = (p) => JSON.parse(readFileSync(join(ROOT, p), 'utf8'));
@@ -35,6 +35,13 @@ for (const lang of ['es', 'ca']) {
   const open3 = openWords(words, 3);
   const ses = makeSession(open3, mulberry(5));
   check(`[${lang}] makeSession: up to 6 robot screens with distinct targets`, ses.length >= 1 && ses.length <= SCREENS && ses.every((s) => s.kind === 'robot') && new Set(ses.map((s) => s.target.text)).size === ses.length);
+}
+check('validPair: pata/pasta is a pair; pala/palma and sala/salsa are not (no coda to drop)', validPair({ a: 'pa-ta', ea: '🐾', b: 'pas-ta', eb: '🍝' }).length === 0 && validPair({ a: 'pa-la', ea: '🪏', b: 'pal-ma', eb: '🌴' }).length > 0 && validPair({ a: 'sa-la', ea: '🏠', b: 'sal-sa', eb: '🥫' }).length > 0);
+check('validPair: same picture twice, a missing picture, or a trill/geminate coda is rejected', validPair({ a: 'pa-ta', ea: '🐾', b: 'pas-ta', eb: '🐾' }).length > 0 && validPair({ a: 'pa-ta', ea: '', b: 'pas-ta', eb: '🍝' }).length > 0 && validPair({ a: 'go-ro', ea: '🧢', b: 'gor-ro', eb: '👒' }).length > 0);
+for (const lang of ['es', 'ca']) {
+  const pairs = readJSON(`src/data/pairs.${lang}.json`);
+  check(`[${lang}] pairs file: every pair is valid`, Array.isArray(pairs) && pairs.length >= 1 && pairs.every((p) => validPair(p).length === 0), pairs.map((p) => validPair(p).join(';')).join('|'));
+  check(`[${lang}] openPairs: none open at step 1, all of them at step 12`, openPairs(pairs, 1).length === 0 && openPairs(pairs, 12).length === pairs.length);
 }
 console.log(failures ? `\n${failures} FAILED` : '\nall listen tests passed');
 process.exit(failures ? 1 : 0);
