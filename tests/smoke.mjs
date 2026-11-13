@@ -607,6 +607,10 @@ const savedList = JSON.parse(a.w.localStorage.getItem('leemos-profiles')).list;
 check('sync state: a valid rid survives loading and saving the profile list', savedList.find((p) => p.id === 'elsa').rid === RID1, JSON.stringify(savedList));
 check('sync state: an invalid rid is dropped', !savedList.some((p) => p.rid === 'not-a-uuid') && !('rid' in savedList.find((p) => p.id === 'leo')), JSON.stringify(savedList));
 
+a = await boot({ storage: { 'leemos-profiles': { active: 'leo', list: [{ id: 'leo', name: 'Leo', kind: 'pre' }] } } });
+a.$('profileOpen').click(); a.$('pfSwitch').click();
+check('profiles: a sounds-only child can be switched to reader (and back)', JSON.parse(a.w.localStorage.getItem('leemos-profiles')).list[0].kind === 'reader');
+
 a = await boot();
 a.$('joinBtn').click(); a.$('okBtn').click();
 const st1 = JSON.parse(a.w.localStorage.getItem('leemos-v1'));

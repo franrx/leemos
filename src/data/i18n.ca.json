@@ -135,6 +135,8 @@
   "pfKindReader": "Ja llegeix síl·labes",
   "pfKindPre": "Aprèn lletres i sons",
   "pfAdd": "Afegir",
+  "pfToReader": "Aquest infant ja llegeix: passar a síl·labes",
+  "pfToPre": "Passar a lletres i sons",
   "prePlay": "Jugar",
   "preHello": "Hola, {n}! Juguem amb els sons?",
   "preGroupDone": "{d} de {n}",

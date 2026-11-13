@@ -1148,7 +1148,9 @@ function renderProfiles(){
     g.appendChild(b);
   });
 }
-function openProfiles(){renderProfiles();$('profiles').hidden=false;$('profilesClose').focus()}
+function renderSwitch(){$('pfSwitch').textContent=t(PROFILE.kind==='pre'?'pfToReader':'pfToPre')}
+$('pfSwitch').onclick=()=>{PROFILE.kind=PROFILE.kind==='pre'?'reader':'pre';switchProfile(PROFILE.id)}; // same progress, other screen; kind goes to the account on the next sync
+function openProfiles(){renderProfiles();renderSwitch();$('profiles').hidden=false;$('profilesClose').focus()}
 $('profileBtn').onclick=openProfiles;
 $('profileOpen').onclick=openProfiles;
 $('profilesClose').onclick=closeOverlays;

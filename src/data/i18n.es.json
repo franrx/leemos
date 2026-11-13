@@ -135,6 +135,8 @@
   "pfKindReader": "Ya lee sílabas",
   "pfKindPre": "Aprende letras y sonidos",
   "pfAdd": "Añadir",
+  "pfToReader": "Este niño ya lee: pasar a sílabas",
+  "pfToPre": "Pasar a letras y sonidos",
   "prePlay": "Jugar",
   "preHello": "¡Hola, {n}! ¿Jugamos con los sonidos?",
   "preGroupDone": "{d} de {n}",
