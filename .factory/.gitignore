@@ -1,0 +1,8 @@
+# Runtime state of the Agent Factory
+runs
+bin
+current
+events.jsonl
+codex-install.json
+gemini-install.json
+agent-telemetry.lock*

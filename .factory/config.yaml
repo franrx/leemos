@@ -1,0 +1,263 @@
+# Agent Factory configuration for this repo (created by `.factory/bin/factory init`).
+# Review every section marked ADJUST before the first run. Risk can only go UP from the
+# deterministic floor the CLI computes from the diff.
+version: 1
+project: leemos
+
+risk:
+  # ADJUST. Any changed file matching these globs forces L3 (human spec, plan and merge).
+  sensitive_paths:
+    - "**/migrations/**"
+    - "**/*auth*/**"
+    - "**/.env*"
+    - Dockerfile
+    - .github/workflows/**
+    - .factory/config.yaml
+    - .claude/settings.json
+    - supabase/**
+    - src/sync.js
+    - src/data/sync.config.json
+    - scripts/check-rls.mjs
+  # ADJUST. Files other systems depend on (public API, generated clients, events). At least L2.
+  public_contract_paths:
+    - src/data/i18n.*.json
+    - manifest.webmanifest
+  # Files that never raise risk on their own (docs, copy).
+  low_risk_paths:
+    - "**/*.md"
+  thresholds:
+    l0_max_lines: 40
+    l1_max_lines: 300
+    l1_max_modules: 1
+
+# ADJUST. Where this repo keeps its knowledge. Paths that do not exist are treated as "not used".
+knowledge:
+  constitution: CLAUDE.md
+  glossary: docs/glossary.md
+  out_of_scope: docs/out-of-scope/
+  index: docs/index.md
+  features: docs/features
+  log: docs/log.md
+  decisions: docs/decisions
+  inbox: docs/inbox
+  integrations: docs/integrations
+
+# Optional design-token lint on added lines (`.factory/bin/factory token-lint`).
+# lint:
+#   tokens:
+#     scope: apps/frontend
+#     allowed: ["apps/frontend/src/styles/tokens.css"]
+#     forbid_imports: [styled-components, "@emotion/styled"]
+
+superpowers:
+  enabled: true
+  levels: [ L1, L2, L3 ]
+  docs_dir: default # `default` = where Superpowers saves (docs/superpowers/...); or a folder
+  brainstorm: { L1: short, default: full } # short = at most two questions
+  execution: { L1: native, default: subagent-driven }
+  # On `auto` gates the factory architect reviews Superpowers' spec and plan instead of a person.
+  # It approves or returns concrete changes; after max_rounds without approval the gate turns human.
+  auto_review: { reviewer: architect, max_rounds: 2 }
+
+# Jira: one issue per run, one sub-task per plan task, statuses follow the run.
+# Each repo sets its own project. Credentials come from JIRA_EMAIL and JIRA_API_TOKEN (env, never here).
+jira:
+  enabled: false # personal repo: no Jira project
+  site: https://civitatis.atlassian.net
+  project_key: "" # ADJUST: the Jira project of this repo, e.g. BRAIN
+  run_issue_type: Story
+  task_issue_type: auto # auto = the project's sub-task type (Subtask / Sub-task)
+  parent_issue: null # optional epic for every run, e.g. BRAIN-120
+  labels: [ agent-factory ]
+  assign_to_me: true
+  comment_on: [ gate, pr, merged ]
+
+# Gate modes: skip | auto | human | human+second
+gates:
+  L0: { spec: skip, plan: skip, merge: auto }
+  L1: { spec: auto, plan: auto, merge: human }
+  L2: { spec: human, plan: auto, merge: human }
+  L3: { spec: human, plan: human, merge: human } # one maintainer: no second approver
+
+# L0 auto-merge starts in shadow mode: the factory records that it would have auto-approved,
+# but a person still approves. Switch to false after 30 clean L0 runs.
+shadow_mode: true
+
+request_types:
+  ui-tweak: { max_level: L1, reviewers: [ ui, a11y ] }
+  copy: { max_level: L1, reviewers: [ ux ] }
+  docs: { max_level: L0, reviewers: [ spec ] }
+  bugfix: { reviewers: [ correctness, tests ] }
+  feature: { min_level: L2 }
+  refactor: { min_level: L1, reviewers: [ architecture ] }
+  migration: { min_level: L3, reviewers: [ data, security ] }
+  dependency: { min_level: L2, reviewers: [ security ] }
+
+review:
+  confidence_threshold: 80
+  max_fix_iterations: 3
+  always: [ correctness, spec, tests ]
+  # Globs that activate each conditional reviewer.
+  # ADJUST. Globs that activate each conditional reviewer.
+  triggers:
+    security:
+      [
+        "src/sync.js",
+        "src/merge.js",
+        "supabase/**",
+        "scripts/lib/clipapi.mjs",
+        "scripts/dev-server.mjs",
+        "**/package.json"
+      ]
+    architecture: [ "src/app.js" ]
+    performance: [ "src/app.js", "src/sw.js", "sw.js" ]
+    data: [ "supabase/**", "**/*.sql" ]
+    ui: [ "index.html", "src/styles.css", "src/app.js", "tools/*.html" ]
+    ux: [ "index.html", "src/data/i18n.*.json" ]
+    a11y: [ "index.html", "src/styles.css", "tools/*.html" ]
+  # Deterministic tools each reviewer runs before reading the diff (optional).
+  tools: {}
+  # Extra documents each reviewer reads, e.g. ui: [DESIGN.md] (optional).
+  docs: {}
+  # Levels where the person may skip the panel (always with a reason, confirmed in Claude Code).
+  allow_skip: [ L0 ]
+  # Confirmed minor/nit findings before the PR: ask (offer to fix them or ship them as known open
+  # findings), always (fix them, then verify) or never (list them in the PR body).
+  fix_minor_before_ship: ask
+
+# Local preview of a run: its own dev server inside the run's worktree, on its own port.
+# ADJUST. `{port}` is replaced by the run's port. The env file lives in the main folder and is never
+# copied into a worktree; with require_local_db the CLI refuses a DATABASE_URL that is not local.
+preview:
+  command: "npm run dev"
+  cwd: .
+  port_base: 3100
+  url_path: /
+  # env_file: .env.preview
+  # Owner checkout file, or an explicitly imported snapshot for this local clone.
+  # Check with `preview preflight`; authorize sharing with `preview env import`.
+  require_local_db: false # no local database: the app talks to Supabase only when sync.config.json is set
+  local_db_hosts: []
+  env: { PORT: "{port}" } # per-run overrides, `{port}` replaced, e.g. NEXTAUTH_URL: "http://localhost:{port}"
+  # Check an app-specific API/identity endpoint and required dependencies here.
+  # Generic health checks alone may accept another service on a reused port.
+  before: [] # commands run in the main folder first, e.g. start the local database
+  ready_timeout_s: 120
+  # Optional app-specific host identity and local app/API stack. See
+  # docs/factory-preview-services.md for literal argv, source scope and capabilities.
+  # ready: { path: /api/identity, json: { service: host } }
+  # Setup detects possible iframe hosts. Confirm this contract for integration QA:
+  # requires_iframe: true # requires at least one declared role: iframe service
+  # Local folders belong to each user: setup user --repositories-root <directory>.
+  # Portable declared service checkout: "{repositories.root}/<repo-directory>".
+  # For multiple apps, declare preview.profiles plus default_profile instead of global app services.
+  # Each profile can override services, url_path, ready and requires_iframe only.
+  # Select the task's reviewed profile with preview select <name> --run <id>.
+  services: []
+  requires_iframe: false
+
+# QA: the qa agent tests the run on its preview with Playwright and saves screenshots.
+qa:
+  enabled: true
+  # Required when the diff matches these globs (default: review.triggers.ui).
+  # required_paths: ["**/*.tsx"]
+  # Copy the screenshots here in the run branch so the PR can show them (optional).
+  # commit_evidence_to: docs/evidence
+
+build:
+  isolation: branch # branch = new branch in this checkout; worktree = .worktrees/<run-id>
+  base: main # PR target; worktrees start from origin/<base> when it exists
+  # Commands run inside a new worktree before the run starts (worktree isolation only).
+  # A setup that symlinks node_modules to the main checkout's is fast, but an install inside the
+  # worktree would then change the main checkout: the hooks block it until `factory deps detach`.
+  worktree_setup: [ "npm ci" ]
+  # Install command `factory deps detach` runs after removing the links (default: from the lockfile).
+  # worktree_install: "npm ci"
+  # Link .factory/runs, bin, current and events.jsonl into each worktree so agents there find them.
+  link_runtime: true
+
+# ADJUST. Deterministic checks; every command must exit 0 before the review panel runs.
+verify:
+  - npm test
+
+agents:
+  # Claude Code / Anthropic only. Codex never reads these model/effort defaults.
+  # Plugin agents are addressed as <plugin>:<agent>. Change if your Claude Code version differs.
+  type_prefix: "factory:"
+  defaults: { model: sonnet, effort: medium }
+  triage: { model: sonnet, effort: low }
+  qa: { model: sonnet, effort: medium }
+  spec-writer: { model: opus, effort: { L0: medium, L1: medium, default: high } }
+  architect: { model: opus, effort: { L0: medium, L1: medium, L2: high, L3: xhigh } }
+  builder:
+    {
+      model: { L0: sonnet, default: opus },
+      effort: { L0: medium, L1: medium, default: high }
+    }
+  review-router: { model: haiku, effort: low }
+  reviewer-correctness: { model: opus, effort: { L0: medium, L1: medium, L2: high, L3: xhigh } }
+  reviewer-spec: { model: sonnet, effort: { L0: low, L1: low, default: medium } }
+  reviewer-security:
+    model: opus
+    effort: { default: high, L3: max }
+    second_opinion: { L3: sonnet }
+  reviewer-architecture: { model: sonnet, effort: { L0: medium, L1: medium, default: high } }
+  reviewer-tests: { model: sonnet, effort: { L3: high, default: medium } }
+  reviewer-ui: { model: sonnet, effort: { L0: low, L1: low, default: medium } }
+  reviewer-ux: { model: sonnet, effort: { L0: low, L1: low, default: medium } }
+  reviewer-a11y: { model: sonnet, effort: { L3: medium, default: low } }
+  reviewer-performance: { model: sonnet, effort: { L0: medium, L1: medium, default: high } }
+  reviewer-data: { model: opus, effort: { L3: xhigh, default: high } }
+  finding-validator: { model: opus, effort: { L3: xhigh, default: high } }
+  risk-assessor: { model: opus, effort: { L0: medium, L1: medium, default: high } }
+  retro: { model: sonnet, effort: { L0: low, L1: low, default: medium } }
+
+codex:
+  # OpenAI / Codex only. Empty settings inherit the native session's model/effort.
+  # ADJUST with OpenAI model ids available in your Codex client; no alias translation.
+  # See codex/examples/openai-models.yaml in the installed Factory package for an
+  # explicit opt-in model profile. Do not copy Claude's opus/sonnet/haiku here.
+  agents:
+    defaults: {}
+    triage: {}
+    qa: {}
+    spec-writer: {}
+    architect: {}
+    builder: {}
+    review-router: {}
+    reviewer-correctness: {}
+    reviewer-spec: {}
+    # If agents.reviewer-security.second_opinion requires L3, configure a distinct
+    # OpenAI model here before L3. An empty value cannot disable that requirement.
+    reviewer-security: {}
+    reviewer-architecture: {}
+    reviewer-tests: {}
+    reviewer-ui: {}
+    reviewer-ux: {}
+    reviewer-a11y: {}
+    reviewer-performance: {}
+    reviewer-data: {}
+    finding-validator: {}
+    risk-assessor: {}
+    retro: {}
+
+budget:
+  # Starting points for the pilot, not measured values. The run stops and asks when exceeded.
+  max_usd_per_run: { L0: 1, L1: 5, L2: 15, L3: 40 }
+
+# Repo-specific steps /factory:ship must also follow (files with instructions), optional.
+ship:
+  follow: []
+
+owners:
+  second_approver: []
+
+dashboard:
+  port: 4545
+
+# Gemini CLI settings are separate from Claude and Codex. Omitted models inherit
+# the native Gemini session; effort overrides are not supported by this adapter.
+# Explicit models require a matching loaded native agent; no alias translation.
+gemini:
+  agents:
+    defaults: {}
