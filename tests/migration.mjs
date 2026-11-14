@@ -75,10 +75,15 @@ check('teachers: the select policy is link, class teacher, or just inserted thro
 check('teachers: the update policy uses the same rule in using and with check', (upd.match(new RegExp(access.source, 'g')) || []).length === 2, (upd.match(new RegExp(access.source, 'g')) || []).length === 2 ? '' : upd.trim());
 check('teachers: the insert policy is own owner, class-less or own class, and not tombstoned', /owner = \(select auth\.uid\(\)\)/.test(ins) && /class_id is null or private\.is_class_teacher\(class_id\)/.test(ins) && /not private\.is_tombstoned\(id\)/.test(ins));
 check('teachers: child_profiles has no delete policy', tc.length > 0 && !/create policy "[^"]+" on public\.child_profiles for delete/.test(tc));
-const rv = tc.indexOf('revoke update, delete on public.child_profiles from authenticated;'), gu = tc.indexOf('grant update (name, data, version, kind) on public.child_profiles to authenticated;');
-check('teachers: update and delete are revoked before the column update grant (name, data, version, kind)', rv >= 0 && gu > rv && /grant select, insert on public\.child_profiles to authenticated;/.test(tc));
+const rv = tc.indexOf('revoke all on public.child_profiles from authenticated;'), gu = tc.indexOf('grant update (name, data, version, kind) on public.child_profiles to authenticated;');
+check('teachers: child_profiles grants start from zero (revoke all) before select, insert and the column update grant (name, data, version, kind)', rv >= 0 && gu > rv && /grant select, insert on public\.child_profiles to authenticated;/.test(tc));
 check('teachers: no grant gives delete on child_profiles', tc.length > 0 && !/grant [^;]*\bdelete\b[^;]* on public\.child_profiles/i.test(tc));
 check('teachers: no update grant on child_profiles includes owner, id or class_id', grantsOn('child_profiles').every((g) => !/update/.test(g.privs) || !/\b(owner|id|class_id)\b/.test(g.privs)));
+const clr = fns.filter((f) => /update public\.child_profiles [\s\S]*set owner = null/.test(f.body));
+check('teachers: losing the last parent link clears owner (after delete on child_links, security definer, empty search_path)',
+  clr.length === 1 && definer(clr[0]) && /set search_path = ''/.test(clr[0].header) && /not exists \(select 1 from public\.child_links/.test(clr[0].body) &&
+  new RegExp(`after delete on public\\.child_links\\s+for each row execute function ${esc(clr[0].name)}\\(\\)`).test(tc));
+check('teachers: the classes policy lets only acknowledged teachers (is_class_teacher) see their class', /private\.is_class_teacher\(classes\.id\)/.test(policy('classes', 'select')) && !/public\.class_teachers/.test(policy('classes', 'select')));
 const lim = fns.filter((f) => /check_violation/.test(f.body));
 check('teachers: limit triggers are security definer (8 class-less per owner, 60 per class, 1 parent link)', lim.length >= 3 && lim.every(definer) && lim.some((f) => />= 8/.test(f.body) && /class_id is null/.test(f.body)) && lim.some((f) => />= 60/.test(f.body)) && lim.some((f) => /public\.child_links/.test(f.body) && /user_id <> new\.user_id/.test(f.body)));
 check('teachers: limit triggers take advisory locks (per owner, per class, per child)', lim.length >= 3 && lim.every((f) => /pg_advisory_xact_lock\(/.test(f.body)));

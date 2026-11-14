@@ -177,9 +177,9 @@ create policy "creator inserts" on public.child_profiles for insert to authentic
   with check (owner = (select auth.uid()) and (class_id is null or private.is_class_teacher(class_id)) and not private.is_tombstoned(id));
 -- No delete policy: a direct delete is revoked; deletion goes through delete_child, which writes the tombstone.
 
--- The previous migration's grants stay live unless revoked: drop update and delete first, then grant only what is allowed.
+-- The previous migration's grants stay live unless revoked: start from zero, then grant only what is allowed (no delete).
 -- Insert covers class_id (a teacher creates a child inside a class); class_id and owner are never client-updatable.
-revoke update, delete on public.child_profiles from authenticated;
+revoke all on public.child_profiles from authenticated;
 grant select, insert on public.child_profiles to authenticated;
 grant update (name, data, version, kind) on public.child_profiles to authenticated;
 
@@ -243,6 +243,21 @@ revoke execute on function private.child_links_limit() from public, anon;
 create trigger child_links_limit before insert on public.child_links
   for each row execute function private.child_links_limit();
 
+-- The creator's "just inserted" read is one-shot: once a child has no parent link left (unlink, a deleted parent account, a manual
+-- delete), its owner is cleared so the select/update clause cannot hand the row back to whoever created it. When the child itself is
+-- being deleted (links cascade), the update finds no row and does nothing.
+create function private.child_links_clear_owner() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  update public.child_profiles c set owner = null
+    where c.id = old.child_id and c.owner is not null
+      and not exists (select 1 from public.child_links l where l.child_id = old.child_id);
+  return null;
+end $$;
+revoke execute on function private.child_links_clear_owner() from public, anon;
+create trigger child_links_clear_owner after delete on public.child_links
+  for each row execute function private.child_links_clear_owner();
+
 -- Every new auth user gets an accounts row with role parent. security definer: auth inserts the user, not the account owner.
 create function private.accounts_for_new_user() returns trigger
 language plpgsql security definer set search_path = '' as $$
@@ -266,10 +281,10 @@ create policy "own account reads" on public.accounts for select to authenticated
 alter table public.classes enable row level security;
 revoke all on public.classes from anon, authenticated;
 grant select on public.classes to authenticated;
--- An admin, a teacher of the class, or anyone who can see a child in it (the subquery runs under the caller's child_profiles RLS).
+-- An admin, an acknowledged teacher of the class, or anyone who can see a child in it (the subquery runs under the caller's child_profiles RLS).
 create policy "admin, teacher or family reads" on public.classes for select to authenticated
   using (private.is_admin()
-    or exists (select 1 from public.class_teachers ct where ct.class_id = classes.id and ct.teacher_id = (select auth.uid()))
+    or private.is_class_teacher(classes.id)
     or exists (select 1 from public.child_profiles c where c.class_id = classes.id));
 
 alter table public.class_teachers enable row level security;

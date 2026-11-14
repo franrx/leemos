@@ -268,6 +268,15 @@ try {
     const row = ((await json(u)) || [])[0];
     return [p.status === 201 && u.status === 200 && row && row.name === 'Old2' && row.version === 2, `${p.status} ${u.status}`];
   });
+  await t("a creator does not get a child back after its last parent link is gone (the just-inserted read is one-shot)", async () => {
+    const PX = await mk('px'), kid = await mkKid(PX);
+    const patch = async () => (await json(await rest(PX, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ name: 'Mine' }) }))) || [];
+    const before = (await seen(PX, kid)) && (await patch()).length === 1; // positive control: the creator sees and edits it while linked
+    await svc(`child_links?child_id=eq.${kid}`, { method: 'DELETE' });
+    const after = !(await seen(PX, kid)) && (await patch()).length === 0;
+    const row = await one(await svc(`child_profiles?id=eq.${kid}&select=name,owner`));
+    return [before && after && !!row && row.owner === null && row.name === 'Mine', JSON.stringify(row)];
+  });
   await t('the helper functions are not exposed at /rest/v1/rpc (OpenAPI lists none; calls with their real signatures answer 404/403)', async () => {
     const helpers = { is_admin: {}, current_role: {}, is_class_teacher: { p_class: C1 }, has_link: { p_child: K1 }, has_any_link: { p_child: K1 }, is_tombstoned: { p_child: K1 } };
     const doc = await json(await fetch(`${url}/rest/v1/`, { headers: { apikey: anon, Authorization: 'Bearer ' + T1.token } }));
