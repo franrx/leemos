@@ -77,21 +77,21 @@ El adulto inicia sesión desde «Para papá y mamá → Guardar mi progreso» (e
 
 ## Profesores y clases: puesta en producción
 
-Orden obligatorio. La migración `supabase/migrations/20261113000000_teachers_classes.sql` cambia las políticas de `child_profiles`: no se aplica sin los pasos 1 a 3.
+Orden obligatorio. La migración `supabase/migrations/20261113000000_teachers_classes.sql` cambia las políticas de `child_profiles`: no se aplica sin los pasos 0 a 3.
 
+0. En Supabase Auth, activa **Confirm email** (en los ajustes del proveedor Email de Authentication). La invitación de un profesor casa con el email *verificado*: sin la confirmación, cualquiera puede registrarse con contraseña usando el email de un profesor invitado, quedar confirmado automáticamente y llevarse el rol de profesor (y con él el acceso a una clase). La app solo entra con código por email, así que conviene también **desactivar el registro con contraseña** si el panel lo permite.
 1. Con Docker en marcha, `npm run test:rls` levanta un Supabase local, aplica todas las migraciones y ejecuta `scripts/check-rls.mjs`. Tiene que acabar con `All RLS checks passed`. Las claves de producción no van en `.env` para esto: el script inyecta las locales.
 2. Repite el paso 1 después de cualquier cambio en la migración.
 3. En producción, haz copia de seguridad de `child_profiles`: en el editor SQL `select * from child_profiles` y descarga el CSV.
 4. Aplica la migración en producción (editor SQL, pegando el archivo). Es una sola transacción: si falla, no queda nada a medias.
 5. Nombra al primer admin por SQL: `update public.accounts set role='admin' where user_id=(select id from auth.users where email='tu@email');`
 6. Comprueba a mano con tu cuenta real que los perfiles de Elsa y Leo siguen sincronizando (entrar, cambiar algo en un dispositivo, verlo en otro). **No ejecutes `scripts/check-rls.mjs` contra producción** (crea y borra usuarios de prueba): la base de datos se prueba en local, en el paso 1.
-7. Solo entonces, fusiona y publica.
-
-Antes de empezar, en Supabase Auth debe estar activado **Confirm email**: la invitación de un profesor casa con el email verificado.
+7. Crea en producción, desde la app, una cuenta de usar y tirar (otro email tuyo) y bórrala con «Borrar mi cuenta». Es la única forma de comprobar que, en el proyecto alojado, una función `security definer` puede borrar de `auth.users`: la cuenta debe desaparecer de Authentication → Users. Si falla, la app dice que no se pudo y la cuenta sigue: no publiques hasta resolverlo (y, otra vez, nunca `check-rls` contra producción).
+8. Solo entonces, fusiona y publica.
 
 **Si el paso 6 falla (marcha atrás):** el archivo `supabase/rollback/20261113000000_teachers_classes.down.sql` deshace la migración y deja `child_profiles` como la dejó `20261017000000_child_profiles.sql` (está probado en local con `npm run test:rollback`, que no forma parte de `npm test` y solo habla con el Supabase local en Docker; nunca lo apliques contra producción desde un script). **No borra filas de `child_profiles`** (solo faltarán los niños que se borraron con `delete_child` después de publicar): no vacíes la tabla. Los niños con un padre vinculado vuelven a ser de ese padre. La copia del paso 3 es solo para una recuperación excepcional.
 
-**Se pierde por diseño:** las lápidas (un cliente antiguo que aún tenga en local un niño borrado puede volver a subirlo), el acceso de los profesores a sus clases, los vínculos de padres, los códigos y el registro del admin. Si haces la marcha atrás después del paso 7, retira antes de publicar el cliente nuevo (llama a `whoami` y a las demás funciones, que desaparecen).
+**Se pierde por diseño:** las lápidas (un cliente antiguo que aún tenga en local un niño borrado puede volver a subirlo), el acceso de los profesores a sus clases, los vínculos de padres, los códigos y el registro del admin. Si haces la marcha atrás después del paso 8, retira antes de publicar el cliente nuevo (llama a `whoami` y a las demás funciones, que desaparecen).
 
 1. Busca niños sin propietario ni vínculo de padre (el esquema antiguo exige propietario): `select id, name from public.child_profiles where owner is null and id not in (select child_id from public.child_links);`. Si no sale nada, sigue en el 2. Si salen filas, asigna a mano un propietario (`update public.child_profiles set owner = '<uuid del usuario>' where id = '<id>';`) o bórralas, ANTES de ejecutar el archivo. Si no lo haces, el archivo aborta diciendo cuántas faltan y no cambia nada.
 2. Pega el archivo en el editor SQL de producción y ejecútalo (una sola transacción).
@@ -102,7 +102,7 @@ Para quitar un usuario de prueba usa `delete_my_account`, no `delete from auth.u
 ### Pendiente de revisión humana
 
 - **Revisión legal de `privacy.html`**: es un borrador con marcas PENDIENTE (responsable, base legal, plazos, proveedores).
-- **Revisión por un nativo de las cadenas en catalán** (claves de `i18n.ca.json`): `teachShareAsk`, `teachLeaveAskParent`, `teachTakeAsk`, `teachDeleteAsk`, `teachOrphan`, `teachCodeTeacher`, `teachCodeParent`, `teachRedeem`, `teachHaveCode`, `teachAckText`, `teachHasParent`, `teachDelForbidden`, `teachLimit`, `acctExported`, `acctDelAsk1`, `acctDelAsk2`, `acctDelYes1`, `acctDelYes2`, `acctDelNo`, `acctDeleted`, `acctLastAdmin`, `teachWipe`, `teachWipeAsk`, `teachWipeAskClass`, `teachWipeYes`, `teachWiped`, `teachDownload`, `acctExport`, y la parte catalana de `privacy.html` (aviso de «esborrany», «enganxines», «sobrenom»). Dudas de vocabulario: «mestre» frente a «docent», «infant» frente a «nen/nena».
+- **Revisión por un nativo de las cadenas en catalán** (claves de `i18n.ca.json`): `teachShareAsk`, `teachLeaveAskParent`, `teachTakeAsk`, `teachDeleteAsk`, `teachOrphan`, `teachCodeTeacher`, `teachCodeParent`, `teachRedeem`, `teachHaveCode`, `teachAckText`, `teachHasParent`, `teachDelForbidden`, `teachLimit`, `acctExported`, `acctDelAsk1`, `acctDelAsk2`, `acctDelYes1`, `acctDelYes2`, `acctDelNo`, `acctDeleted`, `acctLastAdmin`, `teachWipe`, `teachWipeAsk`, `teachWipeAskClass`, `teachWipeYes`, `teachWiped`, `teachDownload`, `acctExport`, `acctUnsentAsk`, y la parte catalana de `privacy.html` (aviso de «esborrany», «enganxines», «sobrenom»). Dudas de vocabulario: «mestre» frente a «docent», «infant» frente a «nen/nena».
 - **Autohospedar la fuente Andika** (OFL): la política de privacidad menciona que hoy se pide a Google Fonts.
 
 ## Publicar e instalar en la tablet
