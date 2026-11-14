@@ -100,6 +100,7 @@ const RPCS = {
   admin_list_accounts: '', admin_list_classes: '', admin_invite_teacher: 'p_email text', admin_revoke_invite: 'p_email text',
   admin_demote_teacher: 'p_user uuid', admin_create_class: 'p_name text', admin_rename_class: 'p_class uuid, p_name text',
   admin_delete_class: 'p_class uuid', admin_assign_teacher: 'p_class uuid, p_user uuid', admin_unassign_teacher: 'p_class uuid, p_user uuid',
+  admin_drop_teacher_links: 'p_user uuid, p_class uuid default null',
 };
 const argsOf = (name) => { const m = new RegExp(`create function public\\.${esc(name)}\\(([^)]*)\\)`).exec(tc); return m ? m[1].replace(/\s+/g, ' ').trim() : null; };
 const bodyOf = (name) => (fn(name) || {}).body || '';
@@ -130,7 +131,33 @@ check('rpc: redeem_invite refuses a to_parent code that comes with a class, unif
 check('rpc: redeem_invite never generates codes; create_invite does, with extensions.gen_random_bytes', !/gen_random_bytes/.test(redeem) && /extensions\.gen_random_bytes\(/.test(create));
 const alpha = (/'([A-Za-z0-9]{20,})'/.exec(create) || [])[1] || '';
 check('rpc: the code alphabet has 32 distinct unambiguous characters (no 0 O 1 I l)', alpha.length === 32 && new Set(alpha).size === 32 && !/[0O1Il]/.test(alpha), alpha);
-check('rpc: codes are 8 characters, live 7 days and are stored only as a SHA-256 hash', /for i in 0\.\.7 loop/.test(create) && /interval '7 days'/.test(create) && /encode\(extensions\.digest\([^;]*'sha256'\), 'hex'\)/.test(create) && /encode\(extensions\.digest\([^;]*'sha256'\), 'hex'\)/.test(redeem) && !/insert into public\.invites \([^)]*\bcode\b(?!_hash)/.test(create));
+check('rpc: codes are 8 characters, live 7 days and are stored only as a keyed hash (private.invite_hash, never a plain digest)', /for i in 0\.\.7 loop/.test(create) && /interval '7 days'/.test(create) && /private\.invite_hash\(v_code\)/.test(create) && /private\.invite_hash\(/.test(redeem) && !/extensions\.digest\(/.test(create + redeem) && !/insert into public\.invites \([^)]*\bcode\b(?!_hash)/.test(create));
+{ // a 40-bit code space: an unkeyed SHA-256 is reversed by brute force from a copy of invites; an HMAC with a secret kept out of the public tables is not
+  const ih = fn('private.invite_hash'), b = (ih && ih.body) || '';
+  check('rpc: private.invite_hash is an HMAC-SHA256 keyed with the secret in private.secrets (security definer, empty search_path, no grant)',
+    definer(ih) && /set search_path = ''/.test(ih.header) && /extensions\.hmac\(convert_to\(p_code, 'UTF8'\), [^;]*'sha256'\)/.test(b) && /from private\.secrets/.test(b) && !/grant execute on function private\.invite_hash/.test(tc) && /revoke execute on function private\.invite_hash\(text\) from authenticated;/.test(tc));
+  check('migration: private.secrets holds a random 32-byte key, with RLS on and every privilege revoked',
+    /create table private\.secrets \(/.test(tc) && /alter table private\.secrets enable row level security;/.test(tc) && /revoke all on private\.secrets from public, anon, authenticated;/.test(tc)
+    && /insert into private\.secrets \(name, value\) values \('invite_hmac', extensions\.gen_random_bytes\(32\)\);/.test(tc) && !/grant [^;]* on (table )?private\.secrets/i.test(tc)); }
+{ // F004/F008: a child unlinked by an account deletion keeps no pending code that could re-parent it
+  const voids = (b, who) => { const v = b.search(new RegExp(`delete from public\\.invites i using public\\.child_links l where i\\.child_id = l\\.child_id and l\\.user_id = ${esc(who)} and i\\.used_at is null;`)); return v > 0 ? v : -1; };
+  const dm = bodyOf('public.delete_my_account'), del = (/before delete on auth\.users\s+for each row execute function (private\.\w+)\(\)/.exec(tc) || [])[1], dt = (del && bodyOf(del)) || '';
+  check('rpc: delete_my_account voids the pending codes of its linked children before deleting the links', voids(dm, 'v_uid') > 0 && voids(dm, 'v_uid') < dm.indexOf('delete from public.child_links l where l.user_id = v_uid'));
+  check('teachers: the deleted-user trigger voids the pending codes of the children it unlinks', voids(dt, 'old.id') > 0);
+  const link = redeem.indexOf('insert into public.child_links (child_id, user_id) values (v_child.id, v_uid);'), drop = redeem.search(/delete from public\.invites i where i\.child_id = v_child\.id and i\.kind = 'to_parent' and i\.used_at is null;/);
+  check("rpc: a to_parent redeem deletes the child's other pending to_parent codes once it links the child", link > 0 && drop > link); }
+{ // F007: a parent link from a teacher's code is logged and reversible by an admin
+  const b = redeem, log = b.search(/insert into public\.admin_log \(actor, action, detail\)\s+values \(v_uid, 'redeem_to_parent', jsonb_build_object\('child_id', v_child\.id, 'teacher', v_inv\.created_by, 'invite_id', v_inv\.id\)\);/);
+  check('rpc: every to_parent redeem is written to admin_log (redeemer, child, teacher who made the code)', log > b.indexOf('insert into public.child_links (child_id, user_id) values (v_child.id, v_uid);'));
+  const g = fn('private.granted_links');
+  check('teachers: private.granted_links lists the parent links that came from a teacher\'s redeemed to_parent codes (used_by = the linked user)',
+    !!g && /i\.kind = 'to_parent'/.test(g.body) && /i\.created_by = p_user/.test(g.body) && /i\.used_by = l\.user_id/.test(g.body) && /i\.used_at is not null/.test(g.body) && !/grant execute on function private\.granted_links/.test(tc));
+  for (const n of ['public.admin_demote_teacher', 'public.admin_unassign_teacher'])
+    check(`rpc: ${n} reports how many parent links came from that teacher's codes (parent_links, outside_class)`, /private\.granted_links\(p_user, /.test(bodyOf(n)) && /'parent_links'/.test(bodyOf(n)) && /'outside_class'/.test(bodyOf(n)));
+  const dl = bodyOf('public.admin_drop_teacher_links');
+  check('rpc: admin_drop_teacher_links drops only the links of children still in a class, locks them first, voids their pending codes and logs it',
+    /private\.granted_links\(p_user, p_class\)/.test(dl) && /class_id is not null/.test(dl) && /for update/.test(dl) && dl.indexOf('for update') < dl.indexOf('delete from public.child_links')
+    && /delete from public\.invites/.test(dl) && /'drop_teacher_links'/.test(dl)); }
 check('rpc: create_invite allows at most 5 pending codes per child (under a per-child lock)', />= 5/.test(create) && /pg_advisory_xact_lock\(hashtext\('invite:'/.test(create));
 check('rpc: delete_child and unlink_me write the tombstone before deleting', ['public.delete_child', 'public.unlink_me'].every((n) => { const b = bodyOf(n); return /insert into public\.deleted_children/.test(b) && b.indexOf('insert into public.deleted_children') < b.indexOf('delete from public.child_profiles'); }));
 check('rpc: delete_my_account writes tombstones, refuses the last admin and deletes the auth user', /insert into public\.deleted_children/.test(bodyOf('public.delete_my_account')) && /'last_admin'/.test(bodyOf('public.delete_my_account')) && /delete from auth\.users/.test(bodyOf('public.delete_my_account')));

@@ -168,6 +168,38 @@ $$;
 revoke execute on function private.is_tombstoned(uuid) from public, anon;
 grant execute on function private.is_tombstoned(uuid) to authenticated;
 
+-- Server secrets, outside the API's schemas and with every privilege revoked: only security definer functions read them.
+-- invite_hmac keys the stored hash of the invitation codes. 32^8 codes is about 2^40: an unkeyed SHA-256 of every code takes minutes on
+-- one GPU, so a copy of public.invites alone would give back every live code. With the key, that copy is useless without this row.
+create table private.secrets (
+  name   text primary key,
+  value  bytea not null
+);
+alter table private.secrets enable row level security;
+revoke all on private.secrets from public, anon, authenticated;
+insert into private.secrets (name, value) values ('invite_hmac', extensions.gen_random_bytes(32));
+
+-- The stored form of a code: HMAC-SHA256 with the secret above, hex. Used by create_invite and redeem_invite only (no grant).
+create function private.invite_hash(p_code text) returns text
+language sql stable security definer set search_path = '' as $$
+  select encode(extensions.hmac(convert_to(p_code, 'UTF8'), (select s.value from private.secrets s where s.name = 'invite_hmac'), 'sha256'), 'hex');
+$$;
+revoke execute on function private.invite_hash(text) from public, anon;
+revoke execute on function private.invite_hash(text) from authenticated;
+
+-- The parent links that came from p_user's redeemed to_parent codes (the code's used_by is the linked account), optionally only for
+-- the children now in p_class. A teacher chooses who receives a parent code, and a code cannot be tied to a person: this is what an
+-- admin reviews, and may drop, when that teacher is demoted or unassigned. Called only from the admin functions (no grant).
+create function private.granted_links(p_user uuid, p_class uuid) returns table (child_id uuid, user_id uuid, class_id uuid)
+language sql stable set search_path = '' as $$
+  select l.child_id, l.user_id, c.class_id from public.child_links l join public.child_profiles c on c.id = l.child_id
+  where (p_class is null or c.class_id = p_class)
+    and exists (select 1 from public.invites i where i.child_id = l.child_id and i.used_by = l.user_id and i.kind = 'to_parent'
+      and i.created_by = p_user and i.used_at is not null);
+$$;
+revoke execute on function private.granted_links(uuid, uuid) from public, anon;
+revoke execute on function private.granted_links(uuid, uuid) from authenticated;
+
 -- ---------------------------------------------------------------------------------------------------------------------------------
 -- child_profiles: link-based policies replace the owner-only ones.
 -- ---------------------------------------------------------------------------------------------------------------------------------
@@ -284,7 +316,8 @@ create trigger accounts_for_new_user after insert on auth.users
 
 -- A user deleted outside the app (the Supabase dashboard, the Auth admin API: the usual way to answer an emailed erasure request) gets
 -- what delete_my_account does: their linked children without a class are deleted with tombstones; classed ones stay in their class,
--- unlinked (the links cascade). Without it those children would be left with no owner, class or link, unreachable by anyone.
+-- unlinked (the links cascade), and their pending codes are voided. Without it those children would be left with no owner, class or
+-- link, unreachable by anyone.
 -- delete_my_account has already done this when it deletes the user, so there it finds nothing. security definer: auth deletes the user.
 create function private.children_of_deleted_user() returns trigger
 language plpgsql security definer set search_path = '' as $$
@@ -298,6 +331,8 @@ begin
   delete from public.child_profiles c using public.child_links l
     where l.child_id = c.id and l.user_id = old.id and c.class_id is null
       and not exists (select 1 from public.child_links o where o.child_id = c.id and o.user_id <> old.id);
+  -- The classed children lose their parent with the cascade below: no pending code of theirs may outlive it and claim them again.
+  delete from public.invites i using public.child_links l where i.child_id = l.child_id and l.user_id = old.id and i.used_at is null;
   return old;
 end $$;
 revoke execute on function private.children_of_deleted_user() from public, anon;
@@ -406,7 +441,7 @@ grant execute on function public.ack_teacher() to authenticated;
 
 -- An invitation code (section 4): to_class by the linked parent of a class-less child, to_parent by a teacher of the child's class for a
 -- child with no parent link. 8 characters from 32 unambiguous ones (256 is a multiple of 32: no bias), 7 days, at most 5 pending per
--- child. Only the SHA-256 hash is stored; the code is returned once.
+-- child. Only the keyed hash (private.invite_hash: HMAC-SHA256 with a server secret) is stored; the code is returned once.
 create function public.create_invite(p_child uuid, p_kind text) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
@@ -439,7 +474,7 @@ begin
       v_code := v_code || substr(v_alpha, (get_byte(v_bytes, i) % 32) + 1, 1);
     end loop;
     insert into public.invites (code_hash, kind, child_id, created_by, expires_at)
-      values (encode(extensions.digest(v_code, 'sha256'), 'hex'), p_kind, p_child, v_uid, v_exp)
+      values (private.invite_hash(v_code), p_kind, p_child, v_uid, v_exp)
       on conflict (code_hash) do nothing returning id into v_id;
     exit when v_id is not null;
   end loop;
@@ -471,7 +506,7 @@ begin
   <<checks>>
   begin
     select i.* into v_inv from public.invites i
-      where i.code_hash = encode(extensions.digest(upper(regexp_replace(coalesce(p_code, ''), '[^A-Za-z0-9]', '', 'g')), 'sha256'), 'hex')
+      where i.code_hash = private.invite_hash(upper(regexp_replace(coalesce(p_code, ''), '[^A-Za-z0-9]', '', 'g')))
         and i.used_at is null and i.expires_at > now();
     if v_inv.id is null or v_inv.created_by = v_uid then v_err := 'invalid'; exit checks; end if;
     select c.* into v_child from public.child_profiles c where c.id = v_inv.child_id for update;
@@ -519,6 +554,11 @@ begin
     update public.child_profiles c set class_id = p_class where c.id = v_child.id;
   else
     insert into public.child_links (child_id, user_id) values (v_child.id, v_uid);
+    -- The child has its parent now: the other parent codes would only answer has_parent, and would claim it again if that parent
+    -- ever went away (account deleted, unlinked). They go. A to_parent code is a grant the admin may need to review: log it.
+    delete from public.invites i where i.child_id = v_child.id and i.kind = 'to_parent' and i.used_at is null;
+    insert into public.admin_log (actor, action, detail)
+      values (v_uid, 'redeem_to_parent', jsonb_build_object('child_id', v_child.id, 'teacher', v_inv.created_by, 'invite_id', v_inv.id));
   end if;
   return jsonb_build_object('ok', true, 'child_id', v_child.id);
 end $$;
@@ -607,8 +647,9 @@ end $$;
 revoke execute on function public.export_my_data() from public, anon;
 grant execute on function public.export_my_data() to authenticated;
 
--- Deletes the caller's account (section 8.5). Refused for the last admin. Linked children in a class stay there, unlinked (the class
--- teachers can delete them under the no-parent rule); linked children without a class are deleted with tombstones. Children the
+-- Deletes the caller's account (section 8.5). Refused for the last admin. Linked children in a class stay there, unlinked, with their
+-- pending codes voided (the class teachers can delete them under the no-parent rule); linked children without a class are deleted with
+-- tombstones. Children the
 -- account only created keep going (owner is set null by the foreign key). Then the auth user goes, and its rows cascade.
 create function public.delete_my_account() returns jsonb
 language plpgsql security definer set search_path = '' as $$
@@ -630,6 +671,8 @@ begin
   delete from public.child_profiles c using public.child_links l
     where l.child_id = c.id and l.user_id = v_uid and c.class_id is null
       and not exists (select 1 from public.child_links o where o.child_id = c.id and o.user_id <> v_uid);
+  -- The classed children stay without a parent: no pending code of theirs may claim them again (as unlink_me does).
+  delete from public.invites i using public.child_links l where i.child_id = l.child_id and l.user_id = v_uid and i.used_at is null;
   delete from public.child_links l where l.user_id = v_uid;
   delete from auth.users u where u.id = v_uid;
   return jsonb_build_object('ok', true);
@@ -701,17 +744,25 @@ revoke execute on function public.admin_revoke_invite(text) from public, anon;
 grant execute on function public.admin_revoke_invite(text) to authenticated;
 
 -- Back to parent: loses every class and the acknowledgement; their pending to_parent codes go. Never refused because a class is left
--- without a teacher: the children stay, and the admin assigns a teacher.
+-- without a teacher: the children stay, and the admin assigns a teacher. The answer counts the parent links that came from this
+-- teacher's codes (parent_links: children still in a class, which admin_drop_teacher_links can undo; outside_class: children their
+-- parent has taken out of every class, which it cannot): a code is not tied to a person, so the admin decides whether they stay.
 create function public.admin_demote_teacher(p_user uuid) returns jsonb
 language plpgsql security definer set search_path = '' as $$
+declare
+  v_in int;
+  v_out int;
 begin
   if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
   update public.accounts a set role = 'parent', teacher_ack_at = null where a.user_id = p_user and a.role = 'teacher';
   if not found then return jsonb_build_object('error', 'not_found'); end if;
   delete from public.class_teachers ct where ct.teacher_id = p_user;
   delete from public.invites i where i.created_by = p_user and i.kind = 'to_parent' and i.used_at is null;
-  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'demote_teacher', jsonb_build_object('user_id', p_user));
-  return jsonb_build_object('ok', true);
+  select count(*) filter (where g.class_id is not null), count(*) filter (where g.class_id is null) into v_in, v_out
+    from private.granted_links(p_user, null) g;
+  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'demote_teacher',
+    jsonb_build_object('user_id', p_user, 'parent_links', v_in, 'outside_class', v_out));
+  return jsonb_build_object('ok', true, 'parent_links', v_in, 'outside_class', v_out);
 end $$;
 revoke execute on function public.admin_demote_teacher(uuid) from public, anon;
 grant execute on function public.admin_demote_teacher(uuid) to authenticated;
@@ -788,19 +839,50 @@ end $$;
 revoke execute on function public.admin_assign_teacher(uuid, uuid) from public, anon;
 grant execute on function public.admin_assign_teacher(uuid, uuid) to authenticated;
 
--- Removes a teacher from a class; their pending to_parent codes for that class's children go with it.
+-- Removes a teacher from a class; their pending to_parent codes for that class's children go with it. Like admin_demote_teacher, the
+-- answer counts the parent links of this class's children that came from this teacher's codes (outside_class is always 0 here: a child
+-- taken out of the class is no longer this class's).
 create function public.admin_unassign_teacher(p_class uuid, p_user uuid) returns jsonb
 language plpgsql security definer set search_path = '' as $$
+declare
+  v_in int;
 begin
   if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
   delete from public.class_teachers ct where ct.class_id = p_class and ct.teacher_id = p_user;
   if not found then return jsonb_build_object('error', 'not_found'); end if;
   delete from public.invites i using public.child_profiles c
     where i.child_id = c.id and c.class_id = p_class and i.created_by = p_user and i.kind = 'to_parent' and i.used_at is null;
-  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'unassign_teacher', jsonb_build_object('class_id', p_class, 'user_id', p_user));
-  return jsonb_build_object('ok', true);
+  select count(*) into v_in from private.granted_links(p_user, p_class) g;
+  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'unassign_teacher',
+    jsonb_build_object('class_id', p_class, 'user_id', p_user, 'parent_links', v_in));
+  return jsonb_build_object('ok', true, 'parent_links', v_in, 'outside_class', 0);
 end $$;
 revoke execute on function public.admin_unassign_teacher(uuid, uuid) from public, anon;
 grant execute on function public.admin_unassign_teacher(uuid, uuid) to authenticated;
+
+-- Undoes the parent links that came from p_user's to_parent codes (all, or only for the children now in p_class). Only children still
+-- in a class: they stay there, unclaimed, and a teacher of the class can give the right family a new code. A child its parent has taken
+-- out of every class is not touched (with no link and no class nobody could reach it). The children are locked first, then the links
+-- go (the owner is cleared by child_links_clear_owner) with the children's pending codes.
+create function public.admin_drop_teacher_links(p_user uuid, p_class uuid default null) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_kids uuid[];
+  v_n int;
+begin
+  if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
+  perform 1 from public.child_profiles c
+    where c.id in (select g.child_id from private.granted_links(p_user, p_class) g where g.class_id is not null) order by c.id for update;
+  select coalesce(array_agg(g.child_id), '{}') into v_kids from private.granted_links(p_user, p_class) g where g.class_id is not null;
+  delete from public.child_links l where l.child_id = any(v_kids)
+    and exists (select 1 from private.granted_links(p_user, p_class) g where g.child_id = l.child_id and g.user_id = l.user_id);
+  get diagnostics v_n = row_count;
+  delete from public.invites i where i.child_id = any(v_kids) and i.used_at is null;
+  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'drop_teacher_links',
+    jsonb_build_object('user_id', p_user, 'class_id', p_class, 'dropped', v_n));
+  return jsonb_build_object('ok', true, 'dropped', v_n);
+end $$;
+revoke execute on function public.admin_drop_teacher_links(uuid, uuid) from public, anon;
+grant execute on function public.admin_drop_teacher_links(uuid, uuid) to authenticated;
 
 commit;

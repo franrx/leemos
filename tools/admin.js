@@ -39,6 +39,14 @@ export const TEXT = {
   verify: 'Entrar',
   codeBad: 'Código incorrecto o caducado.',
   signOut: 'Salir',
+  done: 'Hecho.',
+  grantTitle: 'Vínculos de familia dados con códigos de este profesor',
+  grantIn: 'Familias vinculadas con un código de este profesor, con el niño aún en una clase. Cantidad:',
+  grantWhy: 'Un código no va unido a una persona: si no eran las familias correctas, quita esos vínculos. Los niños siguen en su clase, sin familia, y un profesor de la clase puede dar un código nuevo.',
+  grantOutside: 'Niños que su familia ya sacó de toda clase (no se pueden quitar desde aquí; se resuelve por SQL). Cantidad:',
+  dropLinks: 'Quitar esos vínculos',
+  keepLinks: 'Mantenerlos',
+  dropped: 'Vínculos quitados:',
 };
 export const t = (k) => TEXT[k] || k;
 
@@ -67,10 +75,29 @@ export async function mountAdmin(root, sync, tr = t) {
     let j;
     try { j = await sync.rpc(name, args); } catch (e) { status.textContent = tr('failed'); return false; }
     if (j && j.error) { status.textContent = msgFor(j); return false; }
-    status.textContent = '';
-    return true;
+    status.textContent = tr('done');
+    return j || true;
   }
-  const actAndRefresh = async (name, args) => { if (await act(name, args)) await load(); };
+  // Every action re-renders the page: the focus goes back to the control that was used (same accessible name) or, when that control
+  // is gone (a revoked invitation, a demoted teacher), to the heading of its section, so a keyboard user is never sent to the top.
+  let focusKey = null, focusSection = null;
+  const nameOf = (n) => n.getAttribute('aria-label') || n.textContent;
+  const remember = (e) => {
+    const n = e.target && e.target.closest && e.target.closest('button, input, select');
+    if (!n || !root.contains(n) || n.closest('[role=alertdialog]')) return;
+    focusKey = nameOf(n);
+    const sec = n.closest('section'), h = sec && sec.querySelector('h2');
+    focusSection = h ? h.textContent : null;
+  };
+  root.addEventListener('focusin', remember);
+  root.addEventListener('click', remember, true);
+  function restoreFocus() {
+    const same = focusKey && [...root.querySelectorAll('button, input, select')].find((n) => !n.closest('[role=alertdialog]') && nameOf(n) === focusKey);
+    if (same) { same.focus(); return; }
+    const h = [...root.querySelectorAll('h2')].find((x) => x.textContent === focusSection);
+    if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
+  }
+  const actAndRefresh = async (name, args) => { const j = await act(name, args); if (j) { await load(); restoreFocus(); } return j; };
 
   let who;
   try { who = await sync.me(); } catch (e) { who = null; }
@@ -86,22 +113,34 @@ export async function mountAdmin(root, sync, tr = t) {
   const closePanel = () => { if (panel) panel.remove(); panel = null; };
   // An in-page confirmation. The safe answer (Cancel) has the focus; Cancel or Escape give the focus back to the button that opened it.
   // The destructive answer closes it before the request, so a failure leaves only the status message.
-  function ask(id, label, kids, yesLabel, onYes, opener) {
+  function ask(id, label, kids, yesLabel, onYes, opener, noLabel = tr('cancel')) {
     closePanel();
-    const cancel = () => { closePanel(); if (opener && opener.isConnected) opener.focus(); };
-    const no = btn(tr('cancel'), cancel);
+    const cancel = () => { closePanel(); if (opener && opener.isConnected) opener.focus(); else restoreFocus(); };
+    const no = btn(noLabel, cancel);
     panel = el('div', { role: 'alertdialog', 'aria-label': label, class: 'warn', id }, ...kids,
       el('div', { class: 'row' }, btn(yesLabel, () => { closePanel(); onYes(); }, { cls: 'primary' }), no));
     panel.addEventListener('keydown', (e) => { if (e.key === 'Escape') cancel(); });
     root.append(panel);
     no.focus();
   }
+  // After a demotion or an unassignment: the parent links that came from this teacher's codes (a code is not tied to a person). The admin
+  // keeps them or drops the ones whose child is still in a class (admin_drop_teacher_links).
+  function grants(j, user, cls) {
+    if (!j || typeof j !== 'object' || !(j.parent_links > 0)) return;
+    const kids = [el('p', { text: `${tr('grantIn')} ${j.parent_links}` }), el('p', { text: tr('grantWhy') })];
+    if (j.outside_class > 0) kids.push(el('p', { text: `${tr('grantOutside')} ${j.outside_class}` }));
+    ask('grantWarn', tr('grantTitle'), kids, tr('dropLinks'), async () => {
+      const r = await actAndRefresh('admin_drop_teacher_links', cls ? { p_user: user, p_class: cls } : { p_user: user });
+      if (r && typeof r === 'object') status.textContent = `${tr('dropped')} ${r.dropped}`;
+    }, null, tr('keepLinks'));
+  }
+  const demoteNow = async (acc) => grants(await actAndRefresh('admin_demote_teacher', { p_user: acc.user_id }), acc.user_id, null);
   function demote(acc, classes, opener) {
     const left = classes.filter((k) => k.unclaimed > 0 && k.teachers.length === 1 && k.teachers[0].user_id === acc.user_id);
-    if (!left.length) { closePanel(); return actAndRefresh('admin_demote_teacher', { p_user: acc.user_id }); }
+    if (!left.length) { closePanel(); return demoteNow(acc); }
     const list = el('ul');
     for (const k of left) list.append(el('li', { text: `${k.name}: ${k.unclaimed} ${tr('unclaimed')}` }));
-    ask('demoteWarn', tr('warnDemote'), [el('p', { text: `${acc.email}. ${tr('warnDemote')}` }), list], tr('confirmDemote'), () => actAndRefresh('admin_demote_teacher', { p_user: acc.user_id }), opener);
+    ask('demoteWarn', tr('warnDemote'), [el('p', { text: `${acc.email}. ${tr('warnDemote')}` }), list], tr('confirmDemote'), () => demoteNow(acc), opener);
   }
   // Deleting a class takes its linked children out of it: their families must share them again (with a code) to put them in a class.
   const delClass = (k, opener) => ask('delWarn', `${tr('del')}: ${k.name}`, [el('p', { text: `${tr('askDel')} ${k.name}?` })], tr('confirmDel'), () => actAndRefresh('admin_delete_class', { p_class: k.id }), opener);
@@ -131,7 +170,7 @@ export async function mountAdmin(root, sync, tr = t) {
     for (const k of c.classes) {
       const rn = field(`${tr('renameLabel')}: ${k.name}`, tr('renameLabel')); // each field names its class for screen readers
       const tUl = el('ul');
-      for (const tt of k.teachers) tUl.append(el('li', {}, el('span', { text: tt.email + ' ' }), btn(tr('unassign'), () => actAndRefresh('admin_unassign_teacher', { p_class: k.id, p_user: tt.user_id }), { aria: `${tr('unassign')}: ${tt.email}` })));
+      for (const tt of k.teachers) tUl.append(el('li', {}, el('span', { text: tt.email + ' ' }), btn(tr('unassign'), async () => grants(await actAndRefresh('admin_unassign_teacher', { p_class: k.id, p_user: tt.user_id }), tt.user_id, k.id), { aria: `${tr('unassign')}: ${tt.email}` })));
       if (!k.teachers.length) tUl.append(el('li', { text: tr('none') }));
       const free = teachers.filter((x) => !k.teachers.some((y) => y.user_id === x.user_id));
       const sel = el('select', { 'aria-label': tr('assignLabel') });

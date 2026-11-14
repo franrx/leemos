@@ -1,0 +1,177 @@
+# Teachers, classes and shared children — design
+
+Date: 2026-11-13. Status: draft for Fran's review (spec gate). Request: `docs/inbox/teachers-classes-request.md`. Builds on `2026-10-17-accounts-sync-design.md` (accounts, sync, merge, which stay as they are).
+
+"**Mi llamada**" marks every decision I made that the request did not settle. "**Pregunta**" marks the ones I want Fran to confirm at this gate. "**Decidido con Fran**" marks what Fran settled in the brainstorming chat of this run (2026-11-13), which overrides any earlier draft of this document: tablet cleanup on sign-out (section 6), who may delete (section 5), teachers created by email invitation (sections 1 and 3), and the access model of section 2 and 3 (link tables plus `security definer` helper functions, `sync.js` keeps talking to PostgREST).
+
+## Goal
+
+Add teachers, named classes and children shared between teacher and parents. The one rule behind everything: **an account sees only the children it is linked to**, either as a parent (a link row) or as a teacher (the child is in one of their classes). The role grants no access by itself. The database enforces it (RLS and `security definer` functions), never the client. It is opened to schools, so the privacy minimum (section 8) is part of this work, not a follow-up.
+
+## 1. Roles
+
+| Role | Can | Cannot |
+|---|---|---|
+| `parent` (default) | create own children, see and edit linked children, generate/redeem codes | see anything else |
+| `teacher` | everything a parent can, plus: see/edit children of their classes, redeem a parent's code into a class, create children inside a class | see children of other classes |
+| `admin` | create classes, invite teachers by email, assign teachers to classes, demote a teacher, list teacher/admin accounts and pending invitations | read any child, any progress, any class roster, the list of parent accounts |
+
+- A new account is always `parent`: a trigger on `auth.users` inserts the `accounts` row. No client policy or grant can write `role`.
+- The first admin is set by hand: `update public.accounts set role='admin' where user_id=(select id from auth.users where email='…')`.
+- **Decidido con Fran: teachers are created by email invitation.** The admin types an email (`admin_invite_teacher(email)`) and a row is stored in `role_invites`. When that person signs in with their emailed code, the public RPC `whoami()` (**volatile**; the client calls it right after every sign-in and at app start) runs the claim step and then returns `{role, teacher_ack_at}`; the claim step (`private.claim_role()`, called only from `whoami()`): it matches the **verified** email of the JWT (lower-cased, compared with the stored lower-cased one) against a pending, unexpired invitation and, if found, sets the role to `teacher` and deletes the invitation, in one transaction. The account may already exist or not; the admin never sees which. An invitation can be revoked (`admin_revoke_invite`) and expires after 30 days (**Mi llamada**). Only the `teacher` role can be invited: admins are created by SQL (**Mi llamada**). The admin cannot promote an existing account by looking it up, so there is no list of parent accounts and no "does this email have an account" oracle.
+- An admin cannot change their own role (so the last admin cannot lock the project out). **Mi llamada.**
+- A teacher who is also a parent keeps one account; being a teacher only adds class access.
+
+## 2. Data model (new migration `supabase/migrations/20261113000000_teachers_classes.sql`; the existing one is not edited)
+
+```
+accounts        (user_id pk → auth.users on delete cascade, role text check in (admin,teacher,parent) default 'parent', created_at)
+classes         (id uuid pk default gen_random_uuid(), name text 1..40, created_at)
+class_teachers  (class_id → classes on delete cascade, teacher_id → auth.users on delete cascade, pk(class_id, teacher_id))
+child_links     (child_id → child_profiles on delete cascade, user_id → auth.users on delete cascade, pk(child_id, user_id))   -- parent links
+accounts        also: teacher_ack_at timestamptz null   -- set by the RPC `ack_teacher()`; the acknowledgement of section 8.2
+role_invites    (email text pk, lower-cased, check position('@' in email) > 1, created_by → auth.users on delete set null, created_at, expires_at)   -- teacher invitations, section 1
+admin_log       (id, at, actor → auth.users on delete set null, action text, detail jsonb)                                  -- section 3
+invites         (id, code_hash text unique, kind text in ('to_class','to_parent'), child_id → child_profiles on delete cascade,
+                 created_by → auth.users on delete cascade, expires_at, used_at, used_by → auth.users on delete set null)
+invite_attempts (user_id → auth.users on delete cascade, at)                                                               -- failed redeems, for the rate limit
+deleted_children(id uuid pk, deleted_at)                                                                                   -- tombstones, section 5
+child_profiles  + class_id uuid null → classes on delete set null   (a child is in one class or none)
+```
+
+- **Child ↔ class is a column, not a table. Mi llamada:** the request allows one class per child, and a column makes "two classes" impossible instead of merely unchecked. If many classes per child is ever wanted, it becomes a table in a later migration.
+- `child_profiles.owner` stays but becomes **informational: "who created the row"**. It carries no right except the "just inserted" clause of section 3, and it becomes nullable with `on delete set null` (deleting a teacher's account must not cascade-delete children other people use). Existing rows are migrated with `insert into child_links select id, owner from child_profiles`.
+- **Access = a link row for the caller, or the caller teaches the child's class.** Nothing else: a teacher who created a child inside a class has **no link row**, so removing them from the class removes their access. A child created without a class gets a link row for its creator (trigger).
+- **Decidido con Fran: who may delete depends on links, not on who created the row** (section 5). A child with a parent link can be deleted only by that parent; a child with no parent link only by the teachers of its class.
+- Limits, **Mi llamada** on the numbers: 8 children **without a class** per owner; 60 per class; **1 parent link per child in v1** (a second parent on the same child is out of scope: see section 11); 5 pending codes per child. `data` stays capped at 200 KB.
+  - The limit triggers are **new `security definer` functions** (`set search_path=''`): under the new RLS a creator may not see all their own rows, so a trigger running with the caller's rights could be bypassed. The old trigger is dropped and replaced; the old `migration.mjs` check on the old file stays as it is, and the new checks read the new file.
+  - The per-class limit is enforced in a `before insert or update of class_id` trigger (a code moves a child into a class with an UPDATE, not an INSERT), with an advisory lock per class.
+  - `leave_class` that would leave the creator with more than 8 class-less children is **allowed** (the limit is on creating, not on a withdrawal of consent). **Mi llamada.**
+
+## 3. Security model
+
+- Helper functions, all `security definer`, `set search_path = ''`, fully-qualified names, `stable`: `is_admin()`, `current_role()` (reads the caller's `accounts.role`; the private, `stable` twin of the public `whoami()`, which is volatile because it may claim an invitation), `is_class_teacher(class_id)` (also requires `role = 'teacher'` **and `teacher_ack_at is not null`** on the account, so a demoted teacher keeps nothing and a teacher who has not accepted the acknowledgement of section 8.2 reads no child: **Mi llamada**, enforced by the database, not only by the client), `has_link(child_id)` (reads only `child_links`), `is_tombstoned(id)`. They exist so policies on `child_profiles` can consult other tables without recursive RLS. They live in a **non-exposed schema `private`** (usage granted to `authenticated`, `execute` revoked from `public`/`anon`), so they are not reachable as `/rest/v1/rpc/*` probes. The client-callable RPCs are in `public`, with `execute` revoked from `public`/`anon` and granted to `authenticated` explicitly.
+- **Grants start from zero.** Supabase's default privileges give `anon` and `authenticated` ALL on new tables and EXECUTE on new functions. Every new table starts with `revoke all on <t> from anon, authenticated` and then grants only `select` on `accounts`, `classes`, `class_teachers`, `child_links` (no insert/update/delete: "no client writes" is a revoked grant, not just a missing policy). `invites`, `invite_attempts`, `deleted_children`, `role_invites`, `admin_log` keep no grant at all. Only the RPCs below write. `migration.mjs` checks this table by table.
+- `child_profiles`:
+  - select / update use **row columns, not an id lookup**: `has_link(id) or is_class_teacher(class_id) or (owner = auth.uid() and class_id is null and not exists (any link))`. The last clause is the creator's right to see a row they just inserted: `sync.js` sends `Prefer: return=representation`, so Postgres checks the select policy on the new row (INSERT … RETURNING) **before** the trigger that writes the creator's link row has run; without it every new child (from old cached clients too) would fail with 403. It stops applying as soon as the link exists or the child is in a class. Update grant stays `(name, data, version)` **plus `kind`**: `kind` already has a check constraint, so a client cannot store an invalid value (closes the "kind does not sync" gap). `class_id` and `owner` are never client-updatable.
+  - insert: `owner = auth.uid()` and (`class_id is null` or `is_class_teacher(class_id)`) and `not is_tombstoned(id)`. Insert grant adds `class_id`.
+  - delete: direct delete is **revoked**; deletion goes through `delete_child` (section 5) so the tombstone is always written.
+- `accounts`: select only own row. Admins get `admin_list_accounts()` as an RPC, never a table read; it lists **only teacher and admin accounts** (email + role) and the pending teacher invitations, never the parents' emails. Teachers are created by `admin_invite_teacher(email)` (section 1) and demoted by `admin_demote_teacher(user_id)` taken from that list; the demotion deletes their `class_teachers` rows and their pending `to_parent` codes. `admin_assign_teacher` refuses a target whose role is not `teacher`. There is no function that sets an arbitrary role on an arbitrary account. **Accepted residual risk (Pregunta):** the admin role is fully trusted: an admin can invite an email they control and assign that account to a class, reaching that class's children. The privacy draft says so. Every invitation, demotion and assignment is written to `admin_log` (who, what, when; no client grant, read by SQL) as the v1 safeguard. **Mi llamada.**
+- `classes`: select if admin, or teacher of it, or the caller has access to a child in it (so a parent sees the class name). No client writes.
+- `class_teachers`: select own rows; admins via RPC. No client writes.
+- `child_links`: select own rows. No client writes.
+- Every RPC checks the caller's role/link **inside the function** and fails closed. A child an account cannot see answers the same as a child that does not exist (no oracle).
+
+## 4. Invitation codes
+
+One mechanism, two directions. 8 characters from an unambiguous alphabet (no `0O1Il`), generated server-side with `gen_random_bytes`; **single use, expires in 7 days. Mi llamada / Pregunta** on the duration (7 days so a code handed over at school pick-up survives a weekend; the cost is a longer window for a lost code, which is bounded by single use, the rate limit and the void rules below).
+
+| | `to_class` (main flow) | `to_parent` |
+|---|---|---|
+| Created by | a parent linked to the child | a teacher of the child's class, **only for a child that has no parent link yet** (**Mi llamada**: a teacher can never add a second account to a child a parent already owns; otherwise the holder of the code would also get the right to delete it) |
+| Redeemed by | a teacher, who picks one of their classes | any account |
+| Effect | `child_profiles.class_id = chosen class`; the existing profile and its progress are untouched and **not duplicated** | a `child_links` row for the redeemer |
+| Consent | the parent generating it sees what the teacher will see and confirms | the parent redeeming it is the consent |
+
+- `create_invite(child_id, kind)`, `redeem_invite(code, class_id)`: the code is consumed with a single `update … where used_at is null and expires_at > now() returning` so two concurrent redeems cannot both win. Wrong, used and expired codes return the **same** error (no hint which).
+- Code generation uses `extensions.gen_random_bytes` (pgcrypto is in `extensions` on Supabase; the functions run with an empty search path) and retries on a unique collision.
+- **Void at redeem time.** `redeem_invite` re-checks the creator's right: a `to_class` code is void if its creator no longer has a link to the child; a `to_parent` code is void if its creator is no longer a teacher of the child's class (or the child left the class). A code **cannot be redeemed by the account that created it**, in either direction. For `to_parent` (else a teacher could give themselves a parent link that outlives their class access); for `to_class` (**Mi llamada**) a teacher who is also the linked parent of a child cannot move it into their own class with their own code: another teacher redeems it, so nobody ends up with both a parent link and class access through a single act. `leave_class`, class removal, `unlink_me` and demotion **explicitly delete** the affected pending codes (FK cascade only fires on delete of the child). So do `delete_my_account` and the deleted-user trigger (`children_of_deleted_user`) for the children they unlink, and a `to_parent` redeem deletes the child's other pending `to_parent` codes once it links the child: a code issued before the claim must never claim the child again after its parent goes.
+- **The teacher chooses who receives a parent code.** A code cannot be tied to a person: the own-code rule stops the creating account, not a second account of the same teacher or a colleague (the parent field passes no class). So the grant is made reversible instead: every `to_parent` redeem is written to `admin_log` (`redeem_to_parent`: redeemer, child, teacher who made the code); `admin_demote_teacher` and `admin_unassign_teacher` answer with `parent_links` (links that came from that teacher's codes, child still in a class; for unassign, in that class) and `outside_class` (the child's parent has taken it out of every class); and `admin_drop_teacher_links(user, class?)` drops the first kind: the children stay in their class, unclaimed, and a teacher of the class gives the right family a new code. A child already out of every class is not touched (with no link and no class nobody could reach it): that case is resolved by SQL. The admin page offers the drop right after the demotion or unassignment.
+- Brute force: 10 failed redeems per user per hour, then `rate limited`. A failed redeem **records the attempt and returns an error value** (`{error:'invalid'}`), it does not `RAISE`: a raised error rolls back the PostgREST transaction and the attempt record with it, and the limit would never trigger. The client maps the value to the `code` / `rate` `SyncError` kinds. 32^8 ≈ 10^12 codes and the 7-day life make guessing impractical on top of that.
+- `to_class` when the child is already in a class: error "already in a class" (one class per child). `to_parent` on a child that already has a parent link: error (also checked at redeem time, since a link may appear between creation and redemption). The code is shown once and stored as an **HMAC-SHA256 keyed with a random 32-byte secret** (`private.secrets`, created by the migration with `gen_random_bytes`, every privilege revoked, read only by the security definer `private.invite_hash`). An unkeyed SHA-256 is not enough: 32^8 ≈ 2^40 codes are brute-forced in minutes on one GPU, so a copy of `invites` alone would give back every live code. No Vault dependency. **Mi llamada.**
+
+## 5. Leaving, removing, deleting
+
+All are RPCs; none is a client table write.
+
+| Action | Who | Result |
+|---|---|---|
+| `leave_class(child)` | any parent linked to the child, or a teacher of the class | `class_id = null`. **Mi llamada:** a parent can always pull their child out of a class (withdrawing consent). The teacher loses access at once. |
+| `unlink_me(child)` | a linked parent | removes their own link. If it was the last link and the child has no class, the child is deleted. |
+| `delete_child(child)` | **Decidido con Fran:** if the child has a parent link, **only that parent**; if it has none (a teacher-created child nobody has claimed), a teacher of its class | deletes the row and writes the tombstone |
+
+- **Tombstone.** Sync today re-creates a profile that the server does not return. With sharing that would resurrect a child a teacher deleted, and would look like a conflict when RLS merely hides the row. So: `syncProfile` treats "row missing" as follows. The insert is refused for a tombstoned id or a hidden existing id (409/403), and the client maps that to a new `revoked` error: **keep the local data, drop the `rid`, show "this child is no longer shared with you"**. The device is never made to delete local progress on its own.
+- **No orphans.** A child a teacher created in a class has no parent link, so if it left its class nobody could see, export or delete it. Rule (**Mi llamada**): `leave_class` on a child **without any parent link is refused** ("link a parent first or delete the child"); deleting a class is refused while it holds such children; **demoting or deleting a teacher is never refused** (**Mi llamada**: demotion is the only safeguard against a bad teacher, so it must always work): if that leaves a class with unclaimed children and no teacher, the children are kept, unreachable until the admin assigns a teacher, and the admin UI warns about it before confirming; the admin UI shows which class and how many, and the teacher deletes or links them first. A class that holds only linked children can be deleted (children go class-less, parents keep them). Tested in `check-rls`.
+- **Consequences of that rule (Decidido con Fran):** a child a parent created is deleted only by the parent; a teacher can only take it out of the class (`leave_class`). Once a parent redeems a teacher's `to_parent` code the child is the parent's: the parent can delete it and the teacher is left with `leave_class` only. A parent therefore never needs the school to erase their child's data.
+- Teacher's choice between removing from class and deleting is explicit in the UI (two different buttons, with confirmation).
+
+## 6. Client
+
+### `src/sync.js`
+- Add `rpc(name, args)` (same auth, refresh and `SyncError` kinds as `api`).
+- `listProfiles` selects also `class_id`, `owner` and **`child_links(user_id)`** embedded (RLS returns only the caller's own link), giving each row a `linked` boolean; add `me()` (the `whoami()` RPC: it claims a pending teacher invitation and returns the role and the acknowledgement), `listClasses()`, and thin wrappers for the RPCs. `syncProfile`: the new `revoked` outcome, detected exactly as: POST answering 403 (insert policy refuses), or 409 followed by a re-read that still returns nothing; the early return compares `kind` too, so a locally changed kind is pushed; `kind` is pushed only when the adult changed it on this device (local flag) and adopted from the server otherwise. **Mi llamada** (no `kindAt` timestamp: kind changes are rare and a conflict is harmless).
+- `merge.js` is not touched: several writers on one child are already max-merged.
+
+### `app.js` (stays free of static `import`; the new UI code goes in `src/teach.js`, loaded with `import()` only when the account is a teacher or when a code is entered)
+- **First sign-in (`afterSignIn`)**: unchanged for the account's own children, with auto-add and the `askLink` candidates **limited to `linked` rows**. Children that reach the account **only through a class** are **not** auto-added to the device (a teacher with 30 children would otherwise get 30 local profiles). They appear in the teacher's list and are added on demand ("Open here" creates the local profile with its `rid`). **Mi llamada / Pregunta.**
+- The `rid` link and the "different account on this tablet drops every `rid`" rule stay.
+- **Decidido con Fran: a shared school tablet must not keep other families' children.** A local profile added on demand from a class, **or created on this device through "New child in this class"**, gets a local marker `via:'class'` (never synced). When the account **signs out**, or the session is found invalid (`auth` error: revoked or expired refresh token), the app first runs one last sync and then **deletes the local profiles marked `via:'class'`** together with their local state (`leemos-v1:<id>`) and stats; their progress lives on the server and comes back the next time the teacher opens them. Children the account is linked to as a parent are **not** purged (that is the parent's own device, as today), nor is a profile without the marker: a parent's phone keeps a child the teacher created and the parent later claimed. (**Mi llamada:** this is the reading of "delete the children this account did not create" that does not wipe a parent's own device.)
+  - If the last sync fails (offline) and a marked profile has progress not yet sent, the app does not purge silently: it asks the adult ("There is progress that has not been sent. Sign out anyway and lose it / Stay signed in"). With an `auth` error and no way to ask, it keeps the data hidden (the profiles disappear from the list and the app does not open them) until the next successful sign-in of the same account, which syncs and, if a different account signs in, purges. **Mi llamada**: this is the one case where unsent progress could be lost, and it only affects a session that expired while offline.
+  - The purge is part of `signOut` in the app layer, not of `sync.js`; `sync.js` stays unaware of local profiles.
+- **Parent panel** (inside the existing account block): per child, "Share with the teacher" → generates a `to_class` code, shows it large with its expiry and a copy button; a "I have a code" field (`to_parent` redeem); a note on the child saying "In class 3ºA" with a "Take out of the class" button.
+- **Teacher panel** (only when `role = teacher`): per class, the list of children with progress summary (the same bar the parent panel has) and buttons "Open here", "Generate parents' code", "Take out of the class", "Delete"; "Enter a code" (pick the class); "New child in this class": the row is created with `class_id` by an explicit insert **before** the ordinary sync (otherwise the create-on-missing POST would land it class-less, counted against the teacher's 8, with a link row for the teacher).
+- All text in `i18n.es.json` and `i18n.ca.json` (same keys); Leo's and Elsa's own screens are untouched, and none of this is shown with the sync config empty. `sw.js` `VERSION` is bumped if `SHELL` gains files (`src/teach.js`, `privacy.html`).
+
+### `tools/admin.html` + `tools/admin.js`
+Separate page, no build, reuses `createSync` and the stored session. It calls `whoami()` first and shows only "this account is not an admin" otherwise (the real protection is that every RPC re-checks `is_admin()`). Screens: teachers and admins (email, role) with pending invitations (invite by email, revoke, demote a teacher), classes (create, rename, delete, with the count of children per class and the count of unclaimed ones, never their names), teachers per class (assign/unassign). There is no "change role" control. The admin tells an invited teacher out of band (**Mi llamada**: the system sends no email, so there is no `service_role`, no Edge Function and no server component beyond SQL; the teacher just signs in with the usual emailed code). It has **no** child list and no query that can return one. The dev server serves `tools/`; on the published site the page is reachable but useless without an admin account.
+
+## 7. Migration of existing data and rollout
+
+- One transaction: create tables, backfill `accounts` for every existing `auth.users` row (role `parent`), backfill `child_links` from `owner`, then replace the policies. Existing clients (older cached app versions) keep working: they only use `select`, `insert`, `PATCH name/data/version`, which stay allowed. Their `DELETE` stops working (revoked): **accepted**, the app has no delete-remote button today (check at implementation; if one exists it is switched to `delete_child` in the same change).
+- No data is rewritten: `data`, `version`, ids are as they were.
+- Order for Fran: apply the migration, set himself admin by SQL, run `scripts/check-rls.mjs`, then use the admin page.
+
+## 8. Privacy, minimum viable (requirement)
+
+**Built here:**
+1. `privacy.html` (es + ca static page, linked from the sign-in consent line and the panel): what is stored (nickname, progress counters, stickers, class membership; no surname, no email of the child, no analytics), who sees it (the linked parents and the teachers of the child's class; admins see no child data), retention, rights and contact. **Draft text, flagged as such; it needs Fran's legal review.**
+2. **Consent** (the teacher acknowledgement is stored in `accounts.teacher_ack_at` via `ack_teacher()`): the existing sign-in checkbox stays; sharing a child is an explicit second step with its own confirmation text (section 4). A teacher accepts a short acknowledgement once, and until then the database gives them no class access (section 3) ("I am responsible for the children of my class and will only use them for teaching").
+3. **Export:** `export_my_data()` RPC returns JSON (account, classes, and every accessible child with `name, kind, data`); the panel offers "Download my data" for the account and "Download" per child. Pure client download, nothing leaves the browser.
+4. **Delete a child:** `delete_child` (section 5), with the tombstone: the child's parent, or the class teacher while no parent has claimed it.
+5. **Delete an account:** `delete_my_account()` RPC. The children the account is linked to as a parent: those in a class stay there, **unlinked** (the class teachers keep what they had and can delete them under the "no parent link" rule); those without a class are deleted with tombstones. Children the account only created in a class keep going (`owner` becomes null). Then the `auth.users` row goes. **Pregunta for the legal review:** whether deleting a parent's account should also erase the children it was linked to even when they are in a class. **To verify on a real project:** that a `security definer` function owned by `postgres` may delete from `auth.users` (it normally can on Supabase).
+6. Admins cannot delete accounts in v1. **Mi llamada.** `delete_my_account` is refused for the last admin, and a demoted/deleted teacher's classes follow the no-orphans rule.
+
+**Needs Fran's legal review (not decided by me):**
+- Who is the data controller (the school, Fran, or both) and whether the schools need a data-processing agreement with Fran; the legal basis when a **teacher creates a child**: parental consent is then the school's, collected outside the app.
+- Age-of-consent wording in Spain/Catalonia for under-14s, retention periods (the draft says "until the account or the child is deleted"), the contact address, a DPIA for children's data.
+- Supabase DPA and EU region, already accepted by Fran in the first spec.
+- Rate limits and custom email sender remain sub-project 3 (hosting and operations), unchanged.
+
+## 9. Tests
+
+- `tests/migration.mjs`: the new SQL parsed as text: no `service_role`; every new table has `enable row level security`; `invites`, `invite_attempts`, `deleted_children`, `role_invites`, `admin_log` have `revoke all` and no grant; no function can write `accounts.role` other than `claim_role`, `admin_demote_teacher` and the bootstrap SQL comment; no `service_role` anywhere; every `security definer` function has `set search_path`; `execute` revoked from public/anon; `child_profiles` update grant is exactly `(name, data, version, kind)` and no policy mentions `owner = ` for select; `accounts` has no insert/update grant.
+- `tests/lib/fake-supabase.mjs`: gains `accounts`, `classes`, `class_id`, the RPC endpoint with the code rules (single use, expiry, uniform error, rate limit) and a "hidden row" mode (403/409) for the revoked case.
+- `tests/sync.mjs`: a teacher signing in with a local profile is never offered a class child as a link candidate; revoked child keeps local data and drops `rid`; `kind` pushed only when changed locally and adopted from the server otherwise; class children not auto-added; role fetch; rpc error kinds (`auth`, `offline`, `code`, `rate`).
+- `tests/smoke.mjs` / `tests/sync.mjs` also cover the tablet cleanup: sign-out syncs and then removes only the `via:'class'` profiles and their local state, keeps linked and unmarked ones; offline with unsent progress asks instead of purging; an `auth` error hides the marked profiles; a different account signing in purges them.
+- `tests/merge.mjs`: unchanged and still green (proves the max-merge is untouched).
+- `tests/smoke.mjs`: panels hidden with an empty config and for non-teachers; code generation/redeem flow against the fake; i18n parity; no request to third parties with an empty config; `admin.html` shows "not an admin" for a parent session.
+- `scripts/check-rls.mjs` (Fran runs it against a real project, with throwaway users created via the service key in `.env`): a parent does not see another family's child; a teacher sees only the children of their classes; a teacher of another class sees nothing; a parent cannot make themselves teacher or admin (`update accounts`, any `admin_*` function, `claim_role` with no invitation or with another email's invitation or an expired one); an invited email becomes teacher on its first sign-in and the invitation is gone; `admin_list_accounts` never returns a parent's email; an admin cannot read any child; used and expired codes fail with the uniform error; a code cannot be redeemed twice concurrently; a removed teacher loses access; `leave_class` works for the parent; a parent and a teacher each create a child with `return=representation` and an old-client POST still works; the 11th wrong code in an hour gets `rate limited`; a code is void after its creator lost the link/class; a teacher cannot redeem their own `to_parent` code; a demoted teacher loses class access; `leave_class`/class deletion refuse orphans; the helper functions are not callable through `/rest/v1/rpc`; a tombstoned id cannot be re-inserted; direct `DELETE` on `child_profiles` is refused; delete rules: a teacher cannot delete a child that has a parent link, a parent can delete a teacher-created child once claimed, a teacher can delete an unclaimed one, a non-linked account cannot delete anything; a teacher cannot create a `to_parent` code for a child that already has a parent; `delete_my_account` leaves a classed child in its class unlinked and deletes a class-less one; a teacher who has not accepted the acknowledgement sees no class child; demoting the last teacher of a class with unclaimed children succeeds and the children survive; nobody can redeem a code they created.
+
+## 10. Failure modes
+
+- Teacher removed from a class while a device holds its children: next sync returns `revoked`; local data stays; the list entry says so.
+- Code typed with the wrong class, or for a child already in a class: clear message, code **not** consumed on a role/ownership error (consumed only on success).
+- Two teachers redeem the same code: one wins, the other gets the uniform error.
+- A parent pulls the child out of the class while the teacher has it open: the teacher's next sync is `revoked`.
+- Offline: codes need the network (clear message); everything else behaves as in the first spec.
+- A device with the old app version: still syncs own children (section 7).
+
+## 11. Out of scope
+
+Profile merging (a home profile plus a class profile of the same child stay two profiles: accepted), a teacher statistics panel beyond each child's progress, payments, billing, school SSO, account deletion by admins, many classes per child, **a second parent on the same child** (v1 allows one parent link per child; a two-parent family shares one account on the tablet; **Mi llamada**, to revisit with a parent-to-parent code), promoting an existing account by looking it up (only invitations by email), admin accounts created from the UI.
+
+## 12. Decided with Fran, and what is still open
+
+**Decidido con Fran (brainstorming chat of this run):**
+1. Access model: link tables plus `security definer` helper functions; `sync.js` keeps using PostgREST directly.
+2. Shared school tablet: when the account signs out, the children that reached it only through a class are removed from the device after a last sync (section 6).
+3. Who deletes: a child with a parent link, only that parent; an unclaimed teacher-created child, the teachers of its class. A teacher can always take a child out of the class (unless it has no parent: no orphans). A parent can always take their child out of a class (section 5).
+4. Teachers are created by an admin's invitation by email, claimed at the teacher's first sign-in (section 1).
+5. One class per child; invitation codes of 8 unambiguous characters, single use.
+
+**Still open (Pregunta), none blocks the build:**
+1. Code life 7 days (my call): longer is friendlier, shorter is safer.
+2. Limits: 8 children without class, 60 per class, **one parent per child** (a two-parent family shares an account on the device in v1).
+3. Class-only children are added to a device **on demand**, not automatically.
+4. Admin is fully trusted (section 3); `admin_log` is the only safeguard in v1: enough?
+5. Section 8, for Fran's legal review: data controller and processor roles, legal basis when a teacher creates a child, age-of-consent wording, retention, whether deleting a parent's account must also erase their children that are in a class.

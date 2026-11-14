@@ -115,7 +115,7 @@ try {
     emails.push(`x-${stamp}@example.com`);
     const calls = [['admin_list_accounts', {}], ['admin_list_classes', {}], ['admin_invite_teacher', { p_email: `x-${stamp}@example.com` }], ['admin_revoke_invite', { p_email: 'x@example.com' }],
       ['admin_demote_teacher', { p_user: V.id }], ['admin_create_class', { p_name: 'Hack' }], ['admin_rename_class', { p_class: CV, p_name: 'Hack' }], ['admin_delete_class', { p_class: CV }],
-      ['admin_assign_teacher', { p_class: CV, p_user: PM.id }], ['admin_unassign_teacher', { p_class: CV, p_user: V.id }]];
+      ['admin_assign_teacher', { p_class: CV, p_user: PM.id }], ['admin_unassign_teacher', { p_class: CV, p_user: V.id }], ['admin_drop_teacher_links', { p_user: V.id }]];
     const res = []; for (const [n, a] of calls) res.push(refused(await rpc(PM, n, a)));
     const ctl = okr(await rpc(AD, 'admin_list_accounts')) && okr(await rpc(AD, 'admin_rename_class', { p_class: CV, p_name: 'rls victim ' + stamp })); // the same functions work for an admin
     const still = ctl && (await whoami(V)).role === 'teacher' && !!(await one(await svc(`classes?id=eq.${CV}`))) && res.every(Boolean);
@@ -149,10 +149,10 @@ try {
     const used = await code(PU, KU, 'to_class'); const first = await redeem(T1, used, C1);
     const rUsed = await redeem(T2, used, C2);
     const exp = await code(PU, KE, 'to_class');
-    await svc(`invites?child_id=eq.${KE}`, { method: 'PATCH', body: JSON.stringify({ expires_at: new Date(Date.now() - 6e4).toISOString() }) });
+    const pr = await svc(`invites?child_id=eq.${KE}`, { method: 'PATCH', body: JSON.stringify({ expires_at: new Date(Date.now() - 6e4).toISOString() }) }), patched = ((await json(pr)) || []).length; // the fixture must take: a silently refused PATCH would test nothing
     const rExp = await redeem(T1, exp, C1), rWrong = await redeem(T1, 'ZZZZZZZZ', C1), rOwn = await redeem(T1, await code(T1, own, 'to_parent'));
     const want = JSON.stringify({ error: 'invalid' });
-    return [okr(first) && [rUsed, rExp, rWrong, rOwn].every((r) => JSON.stringify(r.body) === want), [rUsed, rExp, rWrong, rOwn].map((r) => JSON.stringify(r.body)).join(' ')];
+    return [okr(first) && patched === 1 && [rUsed, rExp, rWrong, rOwn].every((r) => JSON.stringify(r.body) === want), `patch=${pr.status}/${patched} ` + [rUsed, rExp, rWrong, rOwn].map((r) => JSON.stringify(r.body)).join(' ')];
   });
   await t('two concurrent redeem_invite calls: exactly one wins', async () => {
     const PC = await mk('pc'), KC = await mkKid(PC), c = await code(PC, KC, 'to_class');
@@ -301,6 +301,53 @@ try {
     const tomb = (await json(await svc(`deleted_children?id=eq.${alone}&select=id`))) || [];
     return [r.status < 300 && !(await kidRow(alone)) && tomb.length === 1 && (await kidRow(classed) || {}).class_id === C1 && !(await linksOf(classed)).length, `${r.status} tomb=${tomb.length}`];
   });
+  // Pending codes of a child that gets a parent, or loses one. A code issued before the claim must never re-parent the child later.
+  const pendingOf = async (kid) => (await json(await svc(`invites?child_id=eq.${kid}&used_at=is.null&select=id`))) || [];
+  const seedPending = (kid, by) => svc('invites', { method: 'POST', body: JSON.stringify({ code_hash: 'seed-' + uuid(), kind: 'to_class', child_id: kid, created_by: by.id, expires_at: new Date(Date.now() + 864e5).toISOString() }) });
+  await t("a to_parent redeem voids the child's other pending parent codes (a second one answers invalid, not has_parent)", async () => {
+    const kid = await mkKid(T1, { class_id: C1 }), c1 = await code(T1, kid, 'to_parent'), c2 = await code(T1, kid, 'to_parent');
+    const before = (await pendingOf(kid)).length, a = await redeem(await mk('pv1'), c1), b = await redeem(await mk('pv2'), c2);
+    return [before === 2 && okr(a) && errOf(b) === 'invalid' && !(await pendingOf(kid)).length && (await linksOf(kid)).length === 1, `${before} ${JSON.stringify(a.body)} ${JSON.stringify(b.body)}`];
+  });
+  for (const [how, del] of [['delete_my_account', (u) => rpc(u, 'delete_my_account')], ['the Auth admin API', (u) => fetch(`${url}/auth/v1/admin/users/${u.id}`, { method: 'DELETE', headers: j({ apikey: service, Authorization: 'Bearer ' + service }) })]]) {
+    await t(`a code issued before the claim is invalid after the claiming parent is deleted through ${how}, and the child's pending codes are gone`, async () => {
+      const PC = await mk('pclaim'), kid = await mkKid(T1, { class_id: C1 }), c1 = await code(T1, kid, 'to_parent'), c2 = await code(T1, kid, 'to_parent');
+      const a = await redeem(PC, c1);
+      await seedPending(kid, T1); // a pending row that the redeem did not void: only the deletion can remove it
+      const seeded = (await pendingOf(kid)).length === 1;
+      const d = await del(PC), late = await redeem(await mk('plate'), c2);
+      return [okr(a) && seeded && d.status < 300 && errOf(late) === 'invalid' && !(await pendingOf(kid)).length && !(await linksOf(kid)).length && (await kidRow(kid) || {}).class_id === C1, `${seeded} ${d.status} ${JSON.stringify(late.body)}`];
+    });
+  }
+  // Stored codes: keyed, so a copy of public.invites does not give the live codes back (32^8 is brute-forced in minutes when unkeyed).
+  await t('a stored code hash is not the plain SHA-256 of the code (HMAC with a server secret), and the secret is not reachable through the API', async () => {
+    const PH = await mk('phash'), kid = await mkKid(PH), c = await code(PH, kid, 'to_class');
+    const row = await one(await svc(`invites?child_id=eq.${kid}&select=code_hash`));
+    const { createHash } = await import('node:crypto'), plain = createHash('sha256').update(c).digest('hex');
+    const sec = await rest(T1, 'secrets?select=value', { headers: { 'Accept-Profile': 'private' } }), body = await json(sec);
+    return [!!c && !!row && /^[0-9a-f]{64}$/.test(row.code_hash) && row.code_hash !== plain && sec.status >= 400 && !(Array.isArray(body) && body.length), `${row && row.code_hash === plain} ${sec.status}`];
+  });
+  // A teacher chooses who receives a parent code, and a code is not tied to a person: the grant is logged and an admin can undo it.
+  await t('every to_parent redeem is written to admin_log (redeemer, child, teacher)', async () => {
+    const PL = await mk('plog'), kid = await claim(T1, C1, PL);
+    const rows = (await json(await svc(`admin_log?action=eq.redeem_to_parent&detail->>child_id=eq.${kid}&select=actor,detail`))) || [];
+    return [rows.length === 1 && rows[0].actor === PL.id && rows[0].detail.teacher === T1.id, JSON.stringify(rows)];
+  });
+  await t("demote and unassign report the parent links from that teacher's codes, and admin_drop_teacher_links undoes the ones still in a class", async () => {
+    const TG = await mkRole('tg', 'teacher', { ack: true }), CG = await mkClass('rls grant ' + stamp), ALT = await mk('alt'), FAM = await mk('fam'); await teach(CG, TG);
+    const inClass = await claim(TG, CG, ALT), left = await claim(TG, CG, FAM);
+    const lv = await rpc(FAM, 'leave_class', { p_child: left }); // the family took this one out of every class
+    const TO = await mkRole('tg2', 'teacher', { ack: true }); await teach(CG, TO); // a second teacher, so the class keeps one
+    const un = await rpc(AD, 'admin_unassign_teacher', { p_class: CG, p_user: TG.id }); await teach(CG, TG);
+    const dm = await rpc(AD, 'admin_demote_teacher', { p_user: TG.id });
+    const parent = await rpc(PM, 'admin_drop_teacher_links', { p_user: TG.id });
+    const dr = await rpc(AD, 'admin_drop_teacher_links', { p_user: TG.id });
+    const ok = okr(lv) && okr(un) && un.body.parent_links === 1 && un.body.outside_class === 0 && okr(dm) && dm.body.parent_links === 1 && dm.body.outside_class === 1
+      && refused(parent) && okr(dr) && dr.body.dropped === 1 && !(await linksOf(inClass)).length && !(await seen(ALT, inClass)) && (await kidRow(inClass) || {}).class_id === CG
+      && (await seen(TO, inClass)) && (await linksOf(left)).length === 1 && (await seen(FAM, left));
+    const again = ok && okr(await rpc(TO, 'create_invite', { p_child: inClass, p_kind: 'to_parent' })); // unclaimed again: the class's teacher can give the right family a code
+    return [ok && again, JSON.stringify({ un: un.body, dm: dm.body, parent: parent.body, dr: dr.body })];
+  });
   await t('a parent claims a teacher-created child and takes it out of the class: the teacher can no longer read or edit it', async () => {
     const PD = await mk('pd5'), kid = await claim(T1, C1, PD), saw = await seen(T1, kid), r = await rpc(PD, 'leave_class', { p_child: kid });
     const edit = await json(await rest(T1, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ name: 'Teacher' }) }));
@@ -345,7 +392,7 @@ try {
     const calls = [['whoami', {}], ['ack_teacher', {}], ['create_invite', { p_child: x, p_kind: 'to_class' }], ['redeem_invite', { p_code: 'ZZZZZZZZ', p_class: x }], ['leave_class', { p_child: x }], ['unlink_me', { p_child: x }],
       ['delete_child', { p_child: x }], ['export_my_data', {}], ['admin_list_accounts', {}], ['admin_list_classes', {}], ['admin_invite_teacher', { p_email: 'anon@example.com' }], ['admin_revoke_invite', { p_email: 'anon@example.com' }],
       ['admin_demote_teacher', { p_user: x }], ['admin_create_class', { p_name: 'Anon' }], ['admin_rename_class', { p_class: x, p_name: 'Anon' }], ['admin_delete_class', { p_class: x }],
-      ['admin_assign_teacher', { p_class: x, p_user: x }], ['admin_unassign_teacher', { p_class: x, p_user: x }], ['delete_my_account', {}]];
+      ['admin_assign_teacher', { p_class: x, p_user: x }], ['admin_unassign_teacher', { p_class: x, p_user: x }], ['admin_drop_teacher_links', { p_user: x }], ['delete_my_account', {}]];
     const bad = []; // last, delete_my_account removes CT: its control runs after the others
     for (const [n, a] of calls) { const an = await rpc(null, n, a), au = await rpc(CT, n, a); if (!(an.status === 401 || an.status === 403) || au.status === 404) bad.push(`${n}:${an.status}/${au.status}`); }
     return [!bad.length, bad.join(' ')];

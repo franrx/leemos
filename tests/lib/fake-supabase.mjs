@@ -18,6 +18,7 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
   const tombstones = new Set();
   const hidden = new Set();     // row ids the account no longer sees (policy refuses them)
   const log = [];
+  const adminLog = [];          // admin_log rows the RPCs write (only redeem_to_parent is modelled)
   let offline = false, n = 0, skew = 0;
   const clock = () => baseNow() + skew;
   const iso = (ms) => new Date(ms).toISOString();
@@ -53,6 +54,15 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
     const f = {};
     for (const [k, v] of u.searchParams) { const m = /^eq\.(.*)$/.exec(v); if (m) f[k] = m[1]; }
     return f;
+  };
+  // private.granted_links: the parent links that came from a teacher's redeemed to_parent codes (optionally only for one class)
+  const granted = (teacher, cls) => {
+    const out = [];
+    for (const [id, set] of links) for (const user of set) {
+      const r = rows.get(id);
+      if (r && (!cls || r.class_id === cls) && invites.some((i) => i.child === id && i.kind === 'to_parent' && i.used && i.usedBy === user && i.by === teacher)) out.push({ r, user });
+    }
+    return out;
   };
   // ---------- RPCs: the same semantics and return shapes as the SQL functions ----------
   function rpc(name, a, uid) {
@@ -113,8 +123,13 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
           if (hasAnyLink(child.id)) return fail('has_parent');
           if ([...links.values()].filter((l) => l.has(uid)).length >= 8) return fail('limit');
         }
-        inv.used = true;
-        if (inv.kind === 'to_class') child.class_id = cls; else linkSet(child.id).add(uid);
+        inv.used = true; inv.usedBy = uid;
+        if (inv.kind === 'to_class') child.class_id = cls;
+        else { // the child has its parent: its other parent codes go, and the grant is logged
+          linkSet(child.id).add(uid);
+          for (let i = invites.length; i--;) if (invites[i].child === child.id && invites[i].kind === 'to_parent' && !invites[i].used) invites.splice(i, 1);
+          adminLog.push({ actor: uid, action: 'redeem_to_parent', detail: { child_id: child.id, teacher: inv.by } });
+        }
         return { ok: true, child_id: child.id };
       }
       case 'leave_class': {
@@ -156,7 +171,7 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
         for (const r of [...rows.values()]) {
           if (!hasLink(uid, r.id)) continue;
           if (!r.class_id && linkSet(r.id).size === 1) removeChild(r.id); // linked, class-less and nobody else's: deleted with a tombstone
-          else dropLink(uid, r.id);
+          else { dropLink(uid, r.id); for (let i = invites.length; i--;) if (invites[i].child === r.id && !invites[i].used) invites.splice(i, 1); } // its pending codes are voided
         }
         for (const r of rows.values()) if (r.owner === uid) r.owner = null;
         for (const t of [...teachers]) if (t.endsWith('|' + uid)) teachers.delete(t);
@@ -199,7 +214,8 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
         acc.role = 'parent'; acc.ack = null;
         for (const t of [...teachers]) if (t.endsWith('|' + a.p_user)) teachers.delete(t);
         for (let i = invites.length; i--;) if (invites[i].by === a.p_user && invites[i].kind === 'to_parent' && !invites[i].used) invites.splice(i, 1);
-        return { ok: true };
+        const g = granted(a.p_user, null);
+        return { ok: true, parent_links: g.filter((x) => x.r.class_id).length, outside_class: g.filter((x) => !x.r.class_id).length };
       }
       case 'admin_create_class': {
         const bad = admin(); if (bad) return bad;
@@ -244,7 +260,13 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
           const r = rows.get(invites[i].child);
           if (invites[i].by === a.p_user && invites[i].kind === 'to_parent' && !invites[i].used && r && r.class_id === a.p_class) invites.splice(i, 1);
         }
-        return { ok: true };
+        return { ok: true, parent_links: granted(a.p_user, a.p_class).length, outside_class: 0 };
+      }
+      case 'admin_drop_teacher_links': {
+        const bad = admin(); if (bad) return bad;
+        const g = granted(a.p_user, a.p_class || null).filter((x) => x.r.class_id);
+        for (const x of g) { dropLink(x.user, x.r.id); for (let i = invites.length; i--;) if (invites[i].child === x.r.id && !invites[i].used) invites.splice(i, 1); }
+        return { ok: true, dropped: g.length };
       }
       default: return { error: 'not_found' };
     }
@@ -316,7 +338,7 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
     revokeRefreshTokens: () => refresh.clear(),
     userByEmail: (e) => users.get(e),
     // teachers/classes helpers
-    links, accounts, classes, tombstones, roleInvites, invites,
+    links, accounts, classes, tombstones, roleInvites, invites, adminLog,
     advance: (ms) => { skew += ms; },
     setRole: (email, role, { ack = false } = {}) => { const u = ensureUser(email); accounts.set(u.id, { role, ack: ack ? iso(clock()) : null }); },
     addClass: (name) => { const id = crypto.randomUUID(); classes.set(id, { id, name }); return id; },

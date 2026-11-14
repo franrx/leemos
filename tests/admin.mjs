@@ -158,6 +158,53 @@ const kid = (srv, id, classId, claimed, name) => { srv.rows.set(id, { id, owner:
   const html = readFileSync(join(ROOT, 'tools/admin.html'), 'utf8');
   check('admin: the page asks search engines not to index it', /<meta name="robots" content="noindex">/.test(html));
 }
+// A parent link a teacher's code gave: k1 (in the class) and k2 (taken out of every class) were claimed with prof's to_parent codes.
+const granted = (s, cid, profEmail) => {
+  const prof = s.userByEmail(profEmail).id;
+  kid(s, 'k1', cid, true, 'Ana'); kid(s, 'k2', null, true, 'Beto');
+  for (const k of ['k1', 'k2']) s.invites.push({ code: 'C' + k, kind: 'to_parent', child: k, by: prof, exp: Date.now() + 864e5, used: true, usedBy: 'user-x' });
+};
+{
+  // demote: the links from that teacher's codes are reported, and the admin may drop the ones still in a class
+  let cid;
+  const { root, srv, doc } = await open('admin@e.c', (s) => { s.setRole('admin@e.c', 'admin'); s.setRole('prof@e.c', 'teacher', { ack: true }); s.setRole('otra@e.c', 'teacher', { ack: true }); cid = s.addClass('3A'); s.addTeacher(cid, 'prof@e.c'); s.addTeacher(cid, 'otra@e.c'); granted(s, cid, 'prof@e.c'); });
+  await click(byLabel(root, /^Quitar rol de profesor: prof@e.c$/)[0]);
+  const dlg = root.querySelector('[role=alertdialog]');
+  const told = !!dlg && dlg.textContent.includes(`${t('grantIn')} 1`) && dlg.textContent.includes(t('grantOutside').slice(0, 20)) && doc.activeElement && doc.activeElement.textContent === t('keepLinks') && !/Ana|Beto/.test(root.textContent);
+  await click([...dlg.querySelectorAll('button')].find((b) => b.textContent === t('dropLinks')));
+  check("admin: demoting reports the parent links from the teacher's codes and «Quitar esos vínculos» drops the one still in a class",
+    told && srv.links.get('k1').size === 0 && srv.rows.get('k1').class_id === cid && srv.links.get('k2').size === 1 && root.querySelector('#adminStatus').textContent === `${t('dropped')} 1` && !root.querySelector('[role=alertdialog]'), JSON.stringify({ told, txt: dlg && dlg.textContent }));
+}
+{
+  // unassign: the same report for that class; keeping them changes nothing and the focus lands on the section heading
+  let cid;
+  const { root, srv, doc } = await open('admin@e.c', (s) => { s.setRole('admin@e.c', 'admin'); s.setRole('prof@e.c', 'teacher', { ack: true }); cid = s.addClass('3A'); s.addTeacher(cid, 'prof@e.c'); granted(s, cid, 'prof@e.c'); });
+  const b = byLabel(root, /^Quitar de la clase: prof@e.c$/)[0]; b.focus();
+  await click(b);
+  const dlg = root.querySelector('[role=alertdialog]'), told = !!dlg && dlg.textContent.includes('1') && !dlg.textContent.includes(t('grantOutside').slice(0, 20));
+  await click([...dlg.querySelectorAll('button')].find((x) => x.textContent === t('keepLinks')));
+  check('admin: unassigning reports the class links; «Mantenerlos» keeps them and the focus goes to the section heading',
+    told && srv.links.get('k1').size === 1 && !root.querySelector('[role=alertdialog]') && doc.activeElement && doc.activeElement.tagName === 'H2' && doc.activeElement.textContent === t('classes'), JSON.stringify({ told, a: doc.activeElement && doc.activeElement.outerHTML }));
+}
+{
+  // a demotion with no such link asks nothing more
+  let cid;
+  const { root } = await open('admin@e.c', (s) => { s.setRole('admin@e.c', 'admin'); s.setRole('prof@e.c', 'teacher', { ack: true }); cid = s.addClass('3A'); s.addTeacher(cid, 'prof@e.c'); });
+  await click(byLabel(root, /^Quitar rol de profesor: prof@e.c$/)[0]);
+  check('admin: a demotion without parent links from the teacher opens no dialog', !root.querySelector('[role=alertdialog]') && root.querySelector('#adminStatus').textContent === t('done'));
+}
+{
+  // focus after an action: the same control when it still exists, else the heading of its section; success is announced
+  const { root, doc } = await open('admin@e.c', (s) => { s.setRole('admin@e.c', 'admin'); s.addClass('3A'); });
+  const inv = root.querySelector('input[type=email]'); type(inv, 'nueva@e.c');
+  const go = [...root.querySelectorAll('button')].find((b) => b.textContent === 'Invitar'); go.focus();
+  await click(go);
+  const same = doc.activeElement && doc.activeElement.isConnected && doc.activeElement.textContent === 'Invitar' && root.querySelector('#adminStatus').textContent === t('done');
+  const rv = byLabel(root, /^Revocar invitación: nueva@e.c$/)[0]; rv.focus();
+  await click(rv);
+  const heading = doc.activeElement && doc.activeElement.tagName === 'H2' && doc.activeElement.textContent === t('teachers');
+  check('admin: after an action the focus stays on the same control, or on its section heading when the control is gone, and "Hecho" is announced', same && heading, JSON.stringify({ same, heading, a: doc.activeElement && doc.activeElement.outerHTML }));
+}
 {
   const { root } = await open('admin@e.c', (s) => { s.setRole('admin@e.c', 'admin'); s.setRole('prof@e.c', 'teacher', { ack: true }); const c = s.addClass('3A'); s.addTeacher(c, 'prof@e.c'); s.addClass('4B'); });
   const selects = root.querySelectorAll('select');

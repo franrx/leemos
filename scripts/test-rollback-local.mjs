@@ -36,15 +36,23 @@ const run = () => {
      insert into public.child_profiles (id, owner, name, kind, class_id) values ('${C(5)}','${U(2)}','DeClase','reader','00000000-0000-0000-0000-0000000000d1');
      insert into public.child_links (child_id, user_id) values ('${C(5)}','${U(3)}');
      insert into public.invites (code_hash, kind, child_id, created_by, expires_at) values ('h1','to_parent','${C(5)}','${U(2)}', now() + interval '1 day');
+     -- an unclaimed class child: its owner is the teacher who created it (maybe since demoted); the old policies would give it to them
+     insert into public.child_profiles (id, owner, name, kind, class_id) values ('${C(6)}','${U(2)}','SinFamilia','reader','00000000-0000-0000-0000-0000000000d1');
      insert into public.admin_log (action) values ('seed');
      insert into public.deleted_children (id) values ('${C(9)}');`);
   const down = readFileSync('supabase/rollback/20261113000000_teachers_classes.down.sql', 'utf8');
   const guarded = psql(down);
-  check('the guard aborts the rollback while an unlinked child has no owner, saying how many', guarded.status !== 0 && /1 child_profiles row\(s\) have no owner and no parent link/.test(guarded.stderr), guarded.stderr);
+  check('the guard aborts the rollback while an unlinked child has no owner or a class child has no parent, saying how many', guarded.status !== 0 && /2 child_profiles row\(s\) have no owner, or are class children with no parent link/.test(guarded.stderr), guarded.stderr);
   check('an aborted rollback changes nothing (the new tables are still there)', q(`select to_regclass('public.accounts') is not null`) === 't');
 
-  // Now clear the owner-less row (the README tells the adult to do this) and apply the file.
+  // Clearing only the owner-less row is not enough: the unclaimed class child (owned by its teacher) still stops it.
   q(`delete from public.child_profiles where owner is null;`);
+  const still = psql(down);
+  check('the guard still aborts for an unclaimed class child whose owner is its teacher', still.status !== 0 && /1 child_profiles row\(s\) have no owner, or are class children with no parent link/.test(still.stderr), still.stderr);
+  check('the unclaimed class child still belongs to nobody but its class (owner unchanged, no link)', q(`select owner from public.child_profiles where id='${C(6)}'`) === U(2));
+
+  // Fran decides: the unclaimed child goes to the parent (a link, as the README says), and the file applies.
+  q(`insert into public.child_links (child_id, user_id) values ('${C(6)}','${U(3)}');`);
   const applied = psql(down);
   check('the down file applies cleanly in one transaction', applied.status === 0, applied.stderr);
   if (applied.status !== 0) return 1;
@@ -64,8 +72,9 @@ const run = () => {
     && same(lines(q(`select privilege_type from information_schema.role_table_grants where table_name='child_profiles' and table_schema='public' and grantee='authenticated' and privilege_type in ('SELECT','INSERT','UPDATE','DELETE')`)), ['SELECT', 'INSERT', 'DELETE']));
   check('column grants: authenticated may update name, data and version only (not kind, owner or id)',
     same(lines(q(`select column_name from information_schema.column_privileges where table_name='child_profiles' and table_schema='public' and grantee='authenticated' and privilege_type='UPDATE'`)), ['name', 'data', 'version']));
-  check('the rollback deleted no child rows (c1 and the class child are still there)', q(`select count(*) from public.child_profiles where id in ('${C(1)}','${C(5)}')`) === '2');
+  check('the rollback deleted no child rows (c1 and the class children are still there)', q(`select count(*) from public.child_profiles where id in ('${C(1)}','${C(5)}','${C(6)}')`) === '3');
   check('the class child claimed by a parent now belongs to that parent', q(`select owner from public.child_profiles where id='${C(5)}'`) === U(3));
+  check('the formerly unclaimed class child goes to the person chosen, not to the teacher who created it', q(`select owner from public.child_profiles where id='${C(6)}'`) === U(3));
 
   // Functional checks with the old semantics, as an authenticated user through RLS (set role + jwt claim).
   const as = (u, sql) => `begin; set local role authenticated; select set_config('request.jwt.claims','{"sub":"${u}","role":"authenticated"}',true); ${sql} rollback;`;
