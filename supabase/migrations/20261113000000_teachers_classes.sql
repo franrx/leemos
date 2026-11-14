@@ -148,6 +148,17 @@ $$;
 revoke execute on function private.has_any_link(uuid) from public, anon;
 grant execute on function private.has_any_link(uuid) to authenticated;
 
+-- A computed column of child_profiles (PostgREST: select=...,has_parent): a boolean per row the caller can already read, so a teacher
+-- knows whether a child still needs a code for the parents. It never says who the parent is. The row is looked up again and the
+-- read policy repeated, because /rpc/has_parent can also be called with a made-up row and must not answer for an unreadable child.
+create function public.has_parent(public.child_profiles) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select coalesce((select private.has_any_link(c.id) from public.child_profiles c
+    where c.id = $1.id and (private.has_link(c.id) or private.is_class_teacher(c.class_id) or c.owner = (select auth.uid()))), false);
+$$;
+revoke execute on function public.has_parent(public.child_profiles) from public, anon;
+grant execute on function public.has_parent(public.child_profiles) to authenticated;
+
 create function private.is_tombstoned(p_child uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (select 1 from public.deleted_children d where d.id = p_child);
@@ -445,6 +456,9 @@ begin
     -- child, and the loser must get the uniform 'invalid', not a class or link error. Lock order: child, then invite.
     perform 1 from public.invites i where i.id = v_inv.id and i.used_at is null and i.expires_at > now();
     if not found then v_err := 'invalid'; exit checks; end if;
+    -- The class box takes only to_class codes: a to_parent code with a class is refused and stays valid for the family (a teacher must
+    -- never end up as the parent of a child through a colleague's code). Same uniform answer as any other bad code.
+    if v_inv.kind = 'to_parent' and p_class is not null then v_err := 'invalid'; exit checks; end if;
     -- Void: the creator lost the right to make this code.
     if v_inv.kind = 'to_class' and not exists (select 1 from public.child_links l where l.child_id = v_child.id and l.user_id = v_inv.created_by) then
       v_err := 'invalid'; exit checks;

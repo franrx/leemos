@@ -2904,7 +2904,17 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     type(app, 'teachCode', own.code); app.$('teachRedeem').click();
     await until(() => w.s.log.filter((l) => /redeem_invite/.test(l)).length >= 2 && !app.$('teachRedeem').disabled, 3000); await sleep(40);
     const m2 = msgOf(app);
-    check('teach: redeeming a wrong code shows one generic message', m1 === ies.teachBadCode && m2 === ies.teachBadCode && w.s.rows.get(RID_A).class_id === null, JSON.stringify({ m1, m2 }));
+    const tried = async (c) => { const n = w.s.log.filter((l) => /redeem_invite/.test(l)).length; type(app, 'teachCode', c); app.$('teachRedeem').click(); await until(() => w.s.log.filter((l) => /redeem_invite/.test(l)).length > n && !app.$('teachRedeem').disabled, 3000); await sleep(40); return msgOf(app); };
+    const other = await signedAuth(w.s, 'otro@example.com');
+    const used = await rpcAs(w.s, w.tea.auth, 'create_invite', { p_child: RID_B, p_kind: 'to_parent' });
+    await rpcAs(w.s, other.auth, 'redeem_invite', { p_code: used.code, p_class: null }); // somebody else already used it
+    const m3 = await tried(used.code);
+    const RID_X = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    w.s.rows.set(RID_X, { id: RID_X, owner: null, class_id: w.cls, name: 'Xavi', kind: 'reader', data: dat({ name: 'Xavi' }), version: 1 });
+    const old = await rpcAs(w.s, w.tea.auth, 'create_invite', { p_child: RID_X, p_kind: 'to_parent' });
+    w.s.advance(8 * 24 * 3600 * 1000); // the week is over
+    const m4 = await tried(old.code);
+    check('teach: redeeming a wrong code shows one generic message (wrong, own, used and expired alike)', [m1, m2, m3, m4].every((m) => m === ies.teachBadCode) && w.s.rows.get(RID_A).class_id === null && !(w.s.links.get(RID_X) || new Set()).size, JSON.stringify({ m1, m2, m3, m4 }));
   }
 
   {
@@ -2926,6 +2936,8 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     const leave = qs(app, '[data-act=leave][data-child="' + RID_B + '"]'), del = qs(app, '[data-act=delete][data-child="' + RID_B + '"]');
     leave.click(); const askLeave = await confirmWith(app, false);
     const intact1 = w.s.rows.get(RID_B).class_id === w.cls;
+    const fa = app.d.activeElement;
+    check('teach: after an action the focus returns to the same button (the panel is rebuilt)', !!fa && fa.dataset.act === 'leave' && fa.dataset.child === RID_B && app.$('teach').contains(fa) && app.$('teachMsg') && app.$('teachMsg').getAttribute('role') === 'status', fa && fa.outerHTML);
     qs(app, '[data-act=delete][data-child="' + RID_B + '"]').click(); const askDel = await confirmWith(app, false);
     const intact2 = w.s.rows.has(RID_B);
     qs(app, '[data-act=delete][data-child="' + RID_B + '"]').click(); await confirmWith(app, true);
@@ -2937,12 +2949,14 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
 
   {
     const w = await world({ who: 'teacher' });
+    const cls2 = w.s.addClass('3B'); w.s.addTeacher(cls2, T_EMAIL); // two classes: the picker decides
     const own = await rpcAs(w.s, w.par.auth, 'create_invite', { p_child: RID_A, p_kind: 'to_class' });
     const app = await bootWorld(w);
-    app.$('teachPick').value = w.cls;
+    const opts = [...app.$('teachPick').options].map((o) => o.value);
+    app.$('teachPick').value = cls2; app.$('teachPick').dispatchEvent(new app.w.Event('change', { bubbles: true }));
     type(app, 'teachClassCode', own.code); app.$('teachClassRedeem').click();
-    await until(() => w.s.rows.get(RID_A).class_id === w.cls, 3000); await sleep(100);
-    check('teach: redeeming a valid to_class code as a teacher puts the child in the chosen class', w.s.rows.get(RID_A).class_id === w.cls && msgOf(app) === ies.teachRedeemedClass && !!qs(app, '[data-roster] [data-child="' + RID_A + '"]'), msgOf(app));
+    await until(() => w.s.rows.get(RID_A).class_id, 3000); await sleep(100);
+    check('teach: redeeming a valid to_class code as a teacher puts the child in the chosen class', opts.length === 2 && cls2 !== w.cls && w.s.rows.get(RID_A).class_id === cls2 && !!qs(app, '[data-class="' + cls2 + '"] [data-child="' + RID_A + '"]') && msgOf(app) === ies.teachRedeemedClass && !!qs(app, '[data-roster] [data-child="' + RID_A + '"]'), msgOf(app));
   }
 
   {
@@ -2987,6 +3001,27 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   }
 
   {
+    // the parents' code is offered only for a child nobody has claimed (has_parent comes from the server, not from the caller's own link)
+    const w = await world({ who: 'teacher' });
+    w.s.rows.get(RID_A).class_id = w.cls; // Elsa: in 3A and claimed by her parent
+    const app = await bootWorld(w);
+    check('teach: "Código para los padres" is absent for a claimed child and present for an unclaimed one', !!qs(app, '[data-act=parentcode][data-child="' + RID_B + '"]') && !qs(app, '[data-act=parentcode][data-child="' + RID_A + '"]') && !!qs(app, '[data-roster] [data-child="' + RID_A + '"]'), app.$('teach').textContent);
+  }
+
+  {
+    // a parents' code typed into the teacher's class box is refused and stays valid for the family
+    const w = await world({ who: 'teacher' });
+    const inv = await rpcAs(w.s, w.tea.auth, 'create_invite', { p_child: RID_B, p_kind: 'to_parent' });
+    const app = await bootWorld(w);
+    app.$('teachPick').value = w.cls;
+    type(app, 'teachClassCode', inv.code); app.$('teachClassRedeem').click();
+    await until(() => msgOf(app).length > 0, 3000); await sleep(40);
+    const refused = msgOf(app) === ies.teachBadCode && !(w.s.links.get(RID_B) || new Set()).size;
+    const later = await rpcAs(w.s, w.par.auth, 'redeem_invite', { p_code: inv.code, p_class: null });
+    check('teach: a to_parent code typed in the class box is refused, links nobody and still works for the family', refused && later.ok === true && w.s.links.get(RID_B).has(w.par.uid), JSON.stringify({ msg: msgOf(app), later }));
+  }
+
+  {
     const w = await world();
     const inv = await rpcAs(w.s, w.tea.auth, 'create_invite', { p_child: RID_B, p_kind: 'to_parent' });
     const app = await bootWorld(w);
@@ -2997,7 +3032,7 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     const m1 = msgOf(app);
     qs(app, '[data-act=share]').click(); await confirmWith(app, true);
     await until(() => msgOf(app) === ies.acctNetwork && !qs(app, '[data-code]'), 3000); await sleep(40);
-    const untouched = JSON.stringify(w.s.invites) === before && !qs(app, '[data-code]'); // nothing was consumed or created while offline
+    const untouched = JSON.stringify(w.s.invites) === before && !qs(app, '[data-code]') && app.$('teachCode').value === inv.code; // nothing was consumed or created while offline, and the typed code is still in the box
     w.s.setOffline(false);
     type(app, 'teachCode', inv.code); app.$('teachRedeem').click();
     await until(() => w.s.links.get(RID_B) && w.s.links.get(RID_B).has(w.par.uid), 3000);

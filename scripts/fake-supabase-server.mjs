@@ -7,6 +7,7 @@
 //
 // Sign in with any of the emails below; the emailed code is always 123456.
 import { createServer } from 'node:http';
+import { pathToFileURL } from 'node:url';
 import { createFakeSupabase } from '../tests/lib/fake-supabase.mjs';
 
 export const SEED = { parent: 'padre@example.com', teacher: 'profe@example.com', newTeacher: 'profe-nuevo@example.com', admin: 'admin@example.com', code: '123456' };
@@ -54,7 +55,7 @@ export function startFakeServer({ port = Number(process.env.PORT || 5174), host 
   return new Promise((resolve) => server.listen(port, host, () => resolve({ server, fake, seeded, port: server.address().port })));
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { port } = await startFakeServer();
   console.log(`Supabase de pruebas en http://127.0.0.1:${port} (solo memoria). Código de acceso: ${SEED.code}`);
   console.log(`Cuentas: ${SEED.parent} (familia), ${SEED.teacher} (profesor), ${SEED.newTeacher} (profesor sin aceptar), ${SEED.admin} (admin)`);

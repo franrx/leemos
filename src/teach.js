@@ -16,6 +16,18 @@ export function createTeach(ctx) {
   const codes = {};               // child id -> {code, expires_at} shown in its row
   const hasParent = new Set();    // roster children the server said already have a parent (no parent code for them)
   const draft = { redeem: '', classCode: '', pick: '', names: {} };
+  // render() rebuilds the panel: the focused control is found again by what it is (id, or action + child/class)
+  let want = null, clicked = null; // clicked: Safari does not focus a button on tap, so the tapped one is remembered
+  const body = doc.createElement('div');
+  const msgEl = doc.createElement('p'); msgEl.className = 'small'; msgEl.id = 'teachMsg'; msgEl.setAttribute('role', 'status'); msgEl.setAttribute('aria-live', 'polite'); // created once: a live region that is rebuilt is not announced
+  root.append(body, msgEl);
+  root.tabIndex = -1;
+  const keyOf = (e) => {
+    if (!e || !root.contains(e) || e === root) return null;
+    if (e.id) return '#' + e.id;
+    const d = e.dataset || {};
+    return d.act ? `[data-act="${d.act}"]` + (d.child ? `[data-child="${d.child}"]` : '') + (d.class ? `[data-class="${d.class}"]` : '') : null;
+  };
 
   const el = (tag, cls, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
   const clean = (s, n = 40) => (typeof s === 'string' ? s.trim().slice(0, n) : '');
@@ -28,7 +40,7 @@ export function createTeach(ctx) {
     if (act) b.dataset.act = act;
     if (child) b.dataset.child = child;
     if (extra) Object.assign(b.dataset, extra);
-    b.onclick = onClick;
+    b.onclick = () => { clicked = b; onClick(); };
     return b;
   };
   const heading = (key) => { const h = el('h3', 'teach-h', t(key)); return h; };
@@ -62,13 +74,13 @@ export function createTeach(ctx) {
   // One action at a time (a double tap must not send two requests). Any failure becomes a message; the lists reload either way.
   async function act(fn, forbidden) {
     if (busy) return;
-    busy = true; setMsg(null); render();
+    busy = true; setMsg(null); want = keyOf(clicked || doc.activeElement); clicked = null; render();
     try { await fn(); }
     catch (e) {
       const key = errKey(e, forbidden);
       setMsg(key);
       if (key === 'teachGone') await load();
-    } finally { busy = false; render(); }
+    } finally { busy = false; render(); want = null; }
   }
 
   async function load() {
@@ -91,10 +103,11 @@ export function createTeach(ctx) {
     if (!c) return null;
     const box = el('div', 'teach-code');
     box.append(el('p', 'small', t('teachCodeFor', { n: nameOf(r) })));
-    const big = el('p', 'teach-code-big', c.code); big.dataset.code = '1'; big.setAttribute('aria-label', c.code.split('').join(' '));
+    const big = el('p', 'teach-code-big', c.code); big.dataset.code = '1'; big.setAttribute('aria-hidden', 'true'); // read letter by letter through the hidden copy
+    const spoken = el('span', 'sr-only', c.code.split('').join(' '));
     const day = new Date(c.expires_at).toLocaleDateString(lang() === 'ca' ? 'ca' : 'es', { day: 'numeric', month: 'long' });
     const exp = el('p', 'small', t('teachCodeExp', { d: day })); exp.dataset.expiry = '1';
-    box.append(big, exp, el('p', 'small', t(kind === 'to_parent' ? 'teachCodeParent' : 'teachCodeTeacher')));
+    box.append(big, spoken, exp, el('p', 'small', t(kind === 'to_parent' ? 'teachCodeParent' : 'teachCodeTeacher')));
     box.append(btn('teachCopy', () => copy(c.code), { act: 'copy', child: r.id, name: nameOf(r) }));
     return box;
   }
@@ -191,7 +204,7 @@ export function createTeach(ctx) {
     const acts = el('div', 'teach-acts');
     const nm = nameOf(r);
     acts.append(btn('teachOpen', () => open(r), { act: 'open', child: r.id, name: nm }));
-    if (!r.linked && !hasParent.has(r.id)) acts.append(btn('teachParentCode', () => parentCode(r), { act: 'parentcode', child: r.id, name: nm }));
+    if (!r.linked && !r.has_parent && !hasParent.has(r.id)) acts.append(btn('teachParentCode', () => parentCode(r), { act: 'parentcode', child: r.id, name: nm }));
     acts.append(btn('teachTake', () => takeOut(r), { act: 'leave', child: r.id, name: nm }));
     acts.append(btn('teachDelete', () => remove(r), { act: 'delete', child: r.id, name: nm, cls: 'icon-btn danger' }));
     li.append(acts);
@@ -273,18 +286,18 @@ export function createTeach(ctx) {
     if (!sync.userId()) { // signed out: nothing of an account stays on the screen (or in memory)
       rows = null; classes = []; me = null; msg = null; hasParent.clear();
       Object.keys(codes).forEach((k) => delete codes[k]);
-      root.textContent = ''; root.hidden = true;
+      body.textContent = ''; msgEl.textContent = ''; root.hidden = true;
       return;
     }
     if (!rows) return;
-    const active = doc.activeElement && doc.activeElement.id && root.contains(doc.activeElement) ? doc.activeElement.id : null;
-    root.textContent = '';
-    root.append(parentBlock());
-    if (ctx.role() === 'teacher') root.append(teacherBlock());
-    const m = el('p', 'small', msg ? t(msg.key, msg.vars) : ''); m.id = 'teachMsg'; m.setAttribute('role', 'status'); m.setAttribute('aria-live', 'polite');
-    root.append(m);
+    const key = want || keyOf(doc.activeElement);
+    body.textContent = '';
+    body.append(parentBlock());
+    if (ctx.role() === 'teacher') body.append(teacherBlock());
+    const text = msg ? t(msg.key, msg.vars) : '';
+    if (msgEl.textContent !== text) msgEl.textContent = text;
     root.hidden = false;
-    if (active) { const f = doc.getElementById(active); if (f && f.focus) f.focus(); }
+    if (key) { let f = null; try { f = root.querySelector(key); } catch (e) { /* a key that is not a selector */ } if (f && !f.disabled) f.focus(); else if (want) root.focus(); } // the control is gone (left, deleted): the panel itself
   }
 
   return { render, refresh };

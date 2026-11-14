@@ -410,6 +410,8 @@ html.listen .session,html.listen #goal,html.listen #tiles,html.listen #pic,html.
 .teach input[type=text],.teach select{min-height:44px;padding:8px 10px;font:inherit;border:2px solid var(--line);border-radius:12px;background:var(--panel);color:inherit}
 .teach-code{margin-top:8px;padding:10px;border:2px dashed var(--c2);border-radius:14px;background:var(--bg)}
 .teach-code-big{font-size:2rem;font-weight:700;letter-spacing:.25em;margin:4px 0;font-family:"Andika","Comic Sans MS",sans-serif;user-select:all;word-break:break-all}
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.teach:focus{outline:none}
 .teach-ack{padding:10px;border:2px solid var(--line);border-radius:14px}
 .mode.dim{opacity:.45}
 .path{margin-top:14px;padding-top:12px;border-top:2px dashed var(--line)}

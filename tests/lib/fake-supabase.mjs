@@ -104,6 +104,7 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
         if (inv.kind === 'to_class' && !hasLink(inv.by, child.id)) return fail('invalid'); // void: the creator lost the right
         if (inv.kind === 'to_parent' && !isTeacher(inv.by, child.class_id)) return fail('invalid');
         const cls = a.p_class || null;
+        if (inv.kind === 'to_parent' && cls) return fail('invalid'); // the class box takes only to_class codes
         if (inv.kind === 'to_class') {
           if (!isTeacher(uid, cls)) return fail('forbidden');
           if (child.class_id) return fail('already_in_class');
@@ -284,7 +285,7 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
       }
       if (u.pathname !== '/rest/v1/child_profiles') return res(404, { message: 'not found: ' + u.pathname });
       // the embedded child_links(user_id): RLS returns only the caller's own link
-      const out = (r) => ({ ...r, child_links: hasLink(uid, r.id) ? [{ user_id: uid }] : [] });
+      const out = (r) => ({ ...r, has_parent: hasAnyLink(r.id), child_links: hasLink(uid, r.id) ? [{ user_id: uid }] : [] }); // has_parent: the computed column
       if (method === 'GET') return res(200, [...rows.values()].filter((r) => canSee(uid, r) && (!f.id || r.id === f.id)).map(out));
       if (method === 'POST') {
         const cid = body.class_id || null;

@@ -190,7 +190,7 @@
   "teachMine": "Mis niños",
   "teachNoKids": "Aún no hay ningún niño en tu cuenta.",
   "teachShare": "Compartir con el profesor",
-  "teachShareAsk": "Vas a compartir a {n} con un profesor. Verá su nombre, su nivel, su progreso (qué sílabas y palabras domina) y sus pegatinas. Puedes sacarlo de la clase cuando quieras. ¿Generar el código?",
+  "teachShareAsk": "Vas a compartir a {n} con un profesor. Verá su nombre, su nivel, su progreso (qué sílabas y palabras domina) y sus pegatinas, y podrá practicar con él en clase. Puedes sacarlo de la clase cuando quieras. ¿Generar el código?",
   "teachShareYes": "Sí, generar el código",
   "teachCodeFor": "Código para {n}",
   "teachCodeExp": "Caduca el {d}. Sirve una sola vez.",

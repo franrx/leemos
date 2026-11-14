@@ -79,7 +79,7 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
     return r;
   }
   const rows = async (r) => { try { const j = await r.json(); return Array.isArray(j) ? j : []; } catch (e) { return []; } };
-  const SELECT = 'select=id,name,kind,data,version,class_id,child_links(user_id)';
+  const SELECT = 'select=id,name,kind,data,version,class_id,has_parent,child_links(user_id)'; // has_parent: a computed column (a boolean for rows the caller can read)
 
   // ---------- RPCs (security definer functions): expected failures come back as a value, {error:'<code>'} ----------
   async function rpc(name, args = {}) {
@@ -113,7 +113,7 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
     const r = await api(`child_profiles?${SELECT}&order=id`);
     if (!r.ok) throw new SyncError('http', 'could not list profiles', r.status);
     const me_ = userId();
-    return (await rows(r)).map(({ child_links, ...p }) => ({ ...p, class_id: p.class_id || null, linked: !!me_ && Array.isArray(child_links) && child_links.some((l) => l && l.user_id === me_) }));
+    return (await rows(r)).map(({ child_links, ...p }) => ({ ...p, class_id: p.class_id || null, has_parent: p.has_parent === true, linked: !!me_ && Array.isArray(child_links) && child_links.some((l) => l && l.user_id === me_) }));
   }
   async function getProfile(rid) {
     const r = await api(`child_profiles?${SELECT}&id=eq.${encodeURIComponent(rid)}`);

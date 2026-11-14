@@ -315,6 +315,26 @@ const as = async (srv, email) => { const storage = memoryStorage(); const sync =
   const gone = await rejects(p.sync.rpc('whoami'));
   check('sync: deleteMyAccount ends the account (its token stops working)', gone instanceof SyncError && gone.kind === 'auth', gone && gone.kind);
 }
+{
+  // has_parent (a computed column) and the class box that refuses to_parent codes
+  const srv = createFakeSupabase();
+  const cls = srv.addClass('3A'), cls2 = srv.addClass('3B');
+  const t = await as(srv, 't@e.c'); srv.setRole('t@e.c', 'teacher', { ack: true }); srv.addTeacher(cls, 't@e.c');
+  const t2 = await as(srv, 't2@e.c'); srv.setRole('t2@e.c', 'teacher', { ack: true }); srv.addTeacher(cls2, 't2@e.c');
+  const p = await as(srv, 'p@e.c');
+  const U = '55555555-5555-4555-8555-555555555555', V = '66666666-6666-4666-8666-666666666666';
+  await t.sync.createInClass({ id: U, name: 'Uno', kind: 'reader', classId: cls, data: data() });
+  await t.sync.createInClass({ id: V, name: 'Vera', kind: 'reader', classId: cls, data: data() });
+  const flags = async () => Object.fromEntries((await t.sync.listProfiles()).map((r) => [r.id, r.has_parent]));
+  const before = await flags();
+  const cV = await t.sync.createInvite(V, 'to_parent');
+  const viaBox = await rejects(t2.sync.redeemInvite(cV.code, cls2));
+  const stillNone = (await flags())[V] === false && (srv.links.get(V) || new Set()).size === 0;
+  await p.sync.redeemInvite(cV.code);
+  const after = await flags();
+  check('sync: listProfiles carries has_parent (false while unclaimed, true once a parent redeemed)', before[U] === false && before[V] === false && after[U] === false && after[V] === true && srv.log.some((l) => /has_parent/.test(l)), JSON.stringify({ before, after }));
+  check('sync: a to_parent code redeemed with a class is a code error, links nobody and still works for the parent', viaBox instanceof SyncError && viaBox.kind === 'code' && stillNone && srv.links.get(V).has(srv.userByEmail('p@e.c').id));
+}
 
 console.log(failures ? `\n${failures} sync test(s) FAILED` : '\nAll sync tests passed');
 process.exit(failures ? 1 : 0);

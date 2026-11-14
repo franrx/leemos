@@ -156,6 +156,20 @@ try {
     const lost = rs.filter((r) => !okr(r)); // the loser gets the uniform error, not a class or link error
     return [rs.filter(okr).length === 1 && lost.length === 1 && JSON.stringify(lost[0].body) === JSON.stringify({ error: 'invalid' }) && [C1, C2].includes((await kidRow(KC)).class_id), rs.map((r) => JSON.stringify(r.body)).join(' ')];
   });
+  await t('has_parent: a teacher sees true for a claimed child and false for an unclaimed one, and still cannot see who the parent is', async () => {
+    const KU = await mkKid(T1, { class_id: C1 }), KCl = await claim(T1, C1, await mk('pcl'));
+    const flag = async (u, id) => { const b = await json(await rest(u, `child_profiles?id=eq.${id}&select=id,has_parent`)); return Array.isArray(b) && b[0] ? b[0].has_parent : undefined; };
+    const links = await json(await rest(T1, `child_links?child_id=eq.${KCl}`));
+    const fake = await rpc(T2, 'has_parent', { child_profiles: { id: K1 } }); // a made-up row for a child T2 cannot read must not answer true
+    return [(await flag(T1, KU)) === false && (await flag(T1, KCl)) === true && (await flag(T1, K1)) === true && Array.isArray(links) && links.length === 0 && fake.body !== true, `${await flag(T1, KU)} ${await flag(T1, KCl)} ${JSON.stringify(links)} ${fake.status} ${JSON.stringify(fake.body)}`];
+  });
+  await t('a to_parent code typed into the class box is refused (invalid), links nobody, and still works for the family', async () => {
+    const KP = await mkKid(T1, { class_id: C1 }), cd = await code(T1, KP, 'to_parent');
+    const TX = await mkRole('tx', 'teacher', { ack: true }), CX = await mkClass('rls box ' + stamp); await teach(CX, TX);
+    const r = await redeem(TX, cd, CX), none = (await linksOf(KP)).length === 0;
+    const PF = await mk('pfam'), r2 = await redeem(PF, cd);
+    return [JSON.stringify(r.body) === JSON.stringify({ error: 'invalid' }) && none && okr(r2) && (await linksOf(KP)).length === 1, `${JSON.stringify(r.body)} ${JSON.stringify(r2.body)}`];
+  });
   await t('the 11th wrong code in an hour is rate limited', async () => {
     const TR = await mkRole('tr', 'teacher', { ack: true }), CR = await mkClass('rls rate ' + stamp); await teach(CR, TR);
     const rs = []; for (let i = 0; i < 11; i++) rs.push(await redeem(TR, 'ZZZZZZZZ', CR));
