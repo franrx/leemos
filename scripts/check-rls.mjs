@@ -268,10 +268,14 @@ try {
     const row = ((await json(u)) || [])[0];
     return [p.status === 201 && u.status === 200 && row && row.name === 'Old2' && row.version === 2, `${p.status} ${u.status}`];
   });
-  await t('the helper functions are not callable at /rest/v1/rpc (and they do exist: the policies and whoami depend on them)', async () => {
-    const sts = []; for (const n of ['is_admin', 'current_role', 'is_class_teacher', 'has_link', 'is_tombstoned']) sts.push((await rpc(T1, n, { p_class: C1, p_child: K1, p_id: K1 })).status);
-    const control = (await seen(T1, K1)) && (await whoami(T1)).role === 'teacher' && (await whoami(AD)).role === 'admin'; // positive control: only works with the helpers in place
-    return [control && sts.every((x) => x === 404 || x === 403), sts.join()];
+  await t('the helper functions are not exposed at /rest/v1/rpc (OpenAPI lists none; calls with their real signatures answer 404/403)', async () => {
+    const helpers = { is_admin: {}, current_role: {}, is_class_teacher: { p_class: C1 }, has_link: { p_child: K1 }, has_any_link: { p_child: K1 }, is_tombstoned: { p_child: K1 } };
+    const doc = await json(await fetch(`${url}/rest/v1/`, { headers: { apikey: anon, Authorization: 'Bearer ' + T1.token } }));
+    const paths = Object.keys((doc && doc.paths) || {});
+    const listed = Object.keys(helpers).filter((n) => paths.includes('/rpc/' + n));
+    const sts = []; for (const [n, a] of Object.entries(helpers)) sts.push((await rpc(T1, n, a)).status);
+    const control = paths.includes('/rpc/whoami') && (await seen(T1, K1)); // the document does list exposed functions, and the policies work (they use the helpers)
+    return [control && !listed.length && sts.every((x) => x === 404 || x === 403), `${listed.join()} ${sts.join()}`];
   });
   await t('anon cannot call any RPC (the same call works signed in)', async () => {
     const CT = await mk('ctl'), x = uuid();
