@@ -689,7 +689,7 @@ const withAccount = async (rows) => { // a fake project whose account already ha
   await s.fetch('https://x/auth/v1/otp', { method: 'POST', body: JSON.stringify({ email: 'mama@example.com' }) });
   await s.fetch('https://x/auth/v1/verify', { method: 'POST', body: JSON.stringify({ email: 'mama@example.com', token: '123456', type: 'email' }) });
   const uid = s.userByEmail('mama@example.com').id;
-  rows.forEach(([id, name, kind, d]) => s.rows.set(id, { id, owner: uid, name, kind, data: d, version: 1 }));
+  rows.forEach(([id, name, kind, d]) => { s.rows.set(id, { id, owner: uid, name, kind, data: d, version: 1 }); s.links.set(id, new Set([uid])); }); // the account's own children: a parent link each
   return s;
 };
 const dat = (o = {}) => ({ stats: {}, total: 0, stickers: 0, pre: { es: 0, ca: 0 }, resets: { es: 0, ca: 0 }, level: 0, name: '', modAt: 1, ...o });
@@ -2607,6 +2607,163 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   const swJs = readFileSync(join(ROOT, 'sw.js'), 'utf8'), cssL = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
   check('lumi: the old antics are gone (code and css) and src/lumi.js is cached for offline', !/antic-/.test(appJs) && !/antic/.test(cssL) && /'src\/lumi\.js'/.test(swJs));
   check('lumi: no errors anywhere', lx.errors.length === 0 && gx.errors.length === 0 && rx.errors.length === 0, [...lx.errors, ...gx.errors, ...rx.errors].join(' | '));
+}
+
+// ---------- teachers and classes: role at sign-in, linked-only linking, tablet cleanup (spec 2026-11-13-teachers-classes-design.md §6) ----------
+{
+  const T_EMAIL = 'profe@example.com';
+  // a teacher who is also the parent of RID_A (linked) and teaches a class holding RID_B (Mateo, nobody's link)
+  const teacherWorld = async ({ signed = true } = {}) => {
+    const s = createFakeSupabase();
+    const { auth, uid } = await signedAuth(s, T_EMAIL);
+    s.setRole(T_EMAIL, 'teacher', { ack: true });
+    const cls = s.addClass('3A'); s.addTeacher(cls, T_EMAIL);
+    s.rows.set(RID_A, { id: RID_A, owner: uid, class_id: null, name: 'Elsa', kind: 'reader', data: dat({ total: 4, name: 'Elsa', modAt: 2 }), version: 1 });
+    s.links.set(RID_A, new Set([uid]));
+    s.rows.set(RID_B, { id: RID_B, owner: null, class_id: cls, name: 'Mateo', kind: 'reader', data: dat({ total: 5, name: 'Mateo', modAt: 2 }), version: 1 });
+    return { s, uid, auth: signed ? auth : null, cls };
+  };
+  const CLASS_PROFILES = (extra = {}) => ({ 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }, { id: 'ana', name: 'Ana', kind: 'reader' }], ...extra } });
+  const stOf = (app, id) => JSON.parse(app.w.localStorage.getItem(id === 'elsa' ? 'leemos-v1' : 'leemos-v1:' + id) || 'null');
+  const signedTeacherBoot = async (storage = {}) => {
+    const t = await teacherWorld();
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...CLASS_PROFILES(), 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 }, 'leemos-v1:ana': { name: 'Ana', total: 3 }, ...storage } });
+    await until(() => t.s.log.filter((l) => l.startsWith('GET /rest/v1/child_profiles')).length >= 2, 3000); await sleep(80); // the start-up sync read both linked rows
+    return { ...t, app };
+  };
+
+  // linking: the class child is neither a candidate nor auto-added
+  {
+    const t = await teacherWorld({ signed: false });
+    const app = await boot({ supa: t.s, syncConfig: CFG });
+    await signInUi(app, T_EMAIL);
+    await until(() => !app.$('link').hidden, 3000);
+    const opts = linkButtons(app).map((b) => b.textContent);
+    check('sign-in: a teacher with a local profile is not offered a class child in askLink', !app.$('link').hidden && opts.length === 2 && opts.some((x) => /Elsa/.test(x)) && !opts.some((x) => /Mateo/.test(x)), opts.join('|'));
+    linkButtons(app)[0].click();
+    await until(() => profList(app).some((p) => p.rid === RID_A), 3000); await sleep(60);
+    check('sign-in: class children are not auto-added', !profList(app).some((p) => p.rid === RID_B || p.name === 'Mateo') && profList(app).length === 1, JSON.stringify(profList(app)));
+  }
+
+  // sign-out: final sync, then only the via:'class' profiles go
+  {
+    const { s, app } = await signedTeacherBoot();
+    app.w.localStorage.setItem('leemos-v1:mateo', JSON.stringify({ ...stOf(app, 'mateo'), total: 9, modAt: Date.now() + 1000 })); // played just before signing out
+    app.$('acctOutBtn').click();
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(40);
+    const ids = profList(app).map((p) => p.id);
+    check('sign-out: removes only via:class profiles and their state, keeps linked and unmarked ones',
+      ids.join(',') === 'elsa,ana' && stOf(app, 'mateo') === null && stOf(app, 'elsa').total === 4 && stOf(app, 'ana').total === 3 && profList(app)[0].rid === RID_A && s.rows.get(RID_B).data.total === 9 && app.errors.length === 0,
+      JSON.stringify({ ids, server: s.rows.get(RID_B).data.total, e: app.errors }));
+  }
+
+  // sign-out offline with unsent progress: asks; "stay" keeps everything, "sign out anyway" purges
+  {
+    const { s, app } = await signedTeacherBoot();
+    app.w.localStorage.setItem('leemos-v1:mateo', JSON.stringify({ ...stOf(app, 'mateo'), total: 9, modAt: Date.now() + 1000 }));
+    s.setOffline(true);
+    app.$('acctOutBtn').click();
+    await until(() => !app.$('link').hidden, 3000);
+    const asked = !app.$('link').hidden && app.$('linkAsk').textContent === ies.acctUnsentAsk && linkButtons(app).length === 2;
+    (linkButtons(app)[1] || app.$('linkCancel')).click(); // stay signed in
+    await sleep(60);
+    check('sign-out: offline with unsent progress asks and keeps everything on "stay"',
+      asked && app.$('link').hidden && app.w.localStorage.getItem('leemos-auth') !== null && profList(app).some((p) => p.id === 'mateo') && stOf(app, 'mateo').total === 9,
+      JSON.stringify({ asked, ask: app.$('linkAsk').textContent, list: profList(app).map((p) => p.id) }));
+    app.$('acctOutBtn').click();
+    await until(() => !app.$('link').hidden, 3000);
+    (linkButtons(app)[0] || app.$('linkCancel')).click(); // sign out anyway
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(40);
+    check('sign-out: offline, "sign out anyway" then removes the class profiles', !profList(app).some((p) => p.id === 'mateo') && stOf(app, 'mateo') === null && stOf(app, 'ana').total === 3);
+  }
+
+  // revoked: the server no longer lets this account have the child
+  {
+    const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);
+    s.rows.set(RID_A, { id: RID_A, owner: null, class_id: null, name: 'Elsa', kind: 'reader', data: dat({ total: 1, name: 'Elsa' }), version: 1 });
+    s.hideRow(RID_A);
+    const app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', total: 6, modAt: 10 } } });
+    await until(() => !profList(app)[0].rid, 3000); await sleep(40);
+    check('sync revoked: keeps local data and drops the rid',
+      !profList(app)[0].rid && JSON.parse(app.w.localStorage.getItem('leemos-v1')).total === 6 && app.$('acctMsg').textContent === ies.acctRevoked.replace('{n}', 'Elsa') && s.rows.size === 1 && s.rows.get(RID_A).data.total === 1,
+      JSON.stringify({ list: profList(app), msg: app.$('acctMsg').textContent }));
+  }
+
+  // auth error: the class profiles are hidden until the same account signs in again
+  {
+    const t = await teacherWorld();
+    t.s.expireAccessTokens(); t.s.revokeRefreshTokens(); // the session is dead (revoked or expired refresh token)
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...CLASS_PROFILES(), 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    await until(() => (profList(app).find((p) => p.id === 'mateo') || {}).hidden === true, 3000);
+    app.$('profileBtn').click();
+    const listed = [...app.d.querySelectorAll('#profileList .wbtn')].map((b) => b.textContent);
+    app.$('profilesClose').click();
+    const hiddenOk = (profList(app).find((p) => p.id === 'mateo') || {}).hidden === true && !listed.some((x) => /Mateo/.test(x)) && listed.length === 2 && stOf(app, 'mateo').total === 5;
+    await signInUi(app, T_EMAIL);
+    await until(() => !(profList(app).find((p) => p.id === 'mateo') || {}).hidden, 3000); await sleep(60);
+    const m = profList(app).find((p) => p.id === 'mateo');
+    check('auth error: marked profiles are hidden, and unhidden after the same account signs in again', hiddenOk && !!m && !m.hidden && m.rid === RID_B && m.via === 'class' && stOf(app, 'mateo').total === 5, JSON.stringify({ hiddenOk, listed, m }));
+    const h = await boot({ storage: { 'leemos-profiles': { active: 'mateo', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class', hidden: true }] }, 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    check('auth error: a hidden profile cannot be opened (the app starts on a visible one)', h.$('hello').textContent === '¡Hola, Elsa!' && JSON.parse(h.w.localStorage.getItem('leemos-profiles')).active === 'elsa', h.$('hello').textContent);
+  }
+
+  // another account signs in on the tablet: the hidden class profiles go
+  {
+    const s = createFakeSupabase();
+    const app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class', hidden: true }] }, 'leemos-auth-user': 'user-of-the-teacher', 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    await signInUi(app, 'mama@example.com');
+    await until(() => s.rows.size === 1, 3000); await sleep(40);
+    check('a different account signing in purges the hidden ones', profList(app).map((p) => p.id).join(',') === 'elsa' && stOf(app, 'mateo') === null && profList(app)[0].rid !== RID_A && !s.rows.has(RID_B), JSON.stringify(profList(app)));
+  }
+
+  // the purge removes the active profile: the app moves to a remaining one
+  {
+    const { app } = await signedTeacherBoot({ ...CLASS_PROFILES({ active: 'mateo' }) });
+    app.$('acctOutBtn').click();
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(60);
+    const pf = JSON.parse(app.w.localStorage.getItem('leemos-profiles'));
+    const ok1 = pf.active === 'elsa' && !pf.list.some((p) => p.id === 'mateo') && stOf(app, 'mateo') === null;
+    app.$('joinBtn').click(); app.$('okBtn').click(); await sleep(20); // the old screen keeps running until the reload: it must not write the state back
+    const t2 = await teacherWorld();
+    const only = await boot({ supa: t2.s, syncConfig: CFG, storage: { 'leemos-auth': t2.auth, 'leemos-auth-user': t2.uid, 'leemos-profiles': { active: 'mateo', list: [{ id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] }, 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    await sleep(80);
+    only.$('acctOutBtn').click();
+    await until(() => only.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(60);
+    const pf2 = JSON.parse(only.w.localStorage.getItem('leemos-profiles'));
+    check('purging the active profile switches to a remaining one', ok1 && stOf(app, 'mateo') === null && pf2.list.length === 1 && pf2.active === pf2.list[0].id && !pf2.list[0].via && pf2.list[0].kind === 'reader' && stOf(only, 'mateo') === null, JSON.stringify({ pf, pf2 }));
+  }
+
+  // the kind: pushed once when switched here, adopted from the server otherwise
+  {
+    const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);
+    s.rows.set(RID_A, { id: RID_A, owner: uid, class_id: null, name: 'Elsa', kind: 'reader', data: dat({ total: 1, name: 'Elsa' }), version: 1 });
+    s.links.set(RID_A, new Set([uid]));
+    let app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', total: 1, modAt: 10 } } });
+    await until(() => s.log.some((l) => l.startsWith('GET /rest/v1/child_profiles')), 3000); await sleep(60);
+    app.$('pfSwitch').click(); // the adult switches Elsa to the pre-reader screen; the page reloads
+    const dirty = profList(app)[0].kindDirty === true;
+    app = await boot({ supa: s, syncConfig: CFG, storage: dump(app.w) });
+    await until(() => s.rows.get(RID_A).kind === 'pre' && !profList(app)[0].kindDirty, 3000);
+    const pushed = s.rows.get(RID_A).kind === 'pre' && !profList(app)[0].kindDirty;
+    const r = s.rows.get(RID_A); r.kind = 'reader'; r.version++; // another device switches it back
+    Object.defineProperty(app.d, 'hidden', { value: true, configurable: true });
+    app.d.dispatchEvent(new app.w.Event('visibilitychange'));
+    await until(() => profList(app)[0].kind === 'reader', 3000); await sleep(40);
+    check('kind switched here is pushed once (kindDirty) and then adopted from the server', dirty && pushed && profList(app)[0].kind === 'reader' && s.rows.get(RID_A).kind === 'reader' && app.errors.length === 0, JSON.stringify({ dirty, pushed, list: profList(app), server: s.rows.get(RID_A).kind }));
+  }
+
+  // the role is read at start when a session is stored (whoami also claims a pending teacher invitation)
+  {
+    const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s, T_EMAIL);
+    s.inviteTeacher(T_EMAIL);
+    s.log.length = 0;
+    await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A } });
+    await until(() => s.accounts.get(uid).role === 'teacher', 3000);
+    check('role is read at app start with a stored session', s.log.includes('POST /rest/v1/rpc/whoami') && s.accounts.get(uid).role === 'teacher', s.log.join(' | '));
+  }
+
+  const ies2 = readJSON('src/data/i18n.es.json'), ica2 = readJSON('src/data/i18n.ca.json');
+  check('i18n parity still holds', Object.keys(ies2).length === Object.keys(ica2).length && Object.keys(ies2).every((k) => k in ica2) && ['acctRevoked', 'acctUnsentAsk', 'acctUnsentOut', 'acctUnsentStay'].every((k) => typeof ies2[k] === 'string' && typeof ica2[k] === 'string'));
 }
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');

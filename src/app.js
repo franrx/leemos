@@ -43,7 +43,9 @@ const cleanProfiles=p=>{
     if(!x||typeof x.id!=='string'||!x.id||seen.has(x.id))return;
     seen.add(x.id);
     list.push({id:x.id,name:typeof x.name==='string'&&x.name.trim()?x.name.trim():x.id,kind:x.kind==='pre'?'pre':'reader',
-      ...(typeof x.rid==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x.rid)?{rid:x.rid}:{})});
+      ...(typeof x.rid==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x.rid)?{rid:x.rid}:{}),
+      // via:'class' = reached this device through a class (purged at sign-out); kindDirty = kind changed here, not pushed yet; hidden = class profile after an auth error
+      ...(x.via==='class'?{via:'class'}:{}),...(x.kindDirty===true?{kindDirty:true}:{}),...(x.hidden===true?{hidden:true}:{})});
   });
   return list.some(x=>x.id===p.active)?{active:p.active,list}:null;
 };
@@ -52,8 +54,18 @@ const loadProfiles=()=>{
   return {active:'elsa',list:[{id:'elsa',name:'Elsa',kind:'reader'}]};
 };
 const PROFILES=loadProfiles();
-const PROFILE=PROFILES.list.find(x=>x.id===PROFILES.active);
 const saveProfiles=()=>{try{localStorage.setItem(PKEY,JSON.stringify(PROFILES));return true}catch(e){return false}};
+// Where the app goes when the open profile is purged or hidden: the first one that did not come through a class, else a new default reader.
+function fallbackId(){
+  const f=PROFILES.list.find(x=>x.via!=='class'&&!x.hidden);
+  if(f)return f.id;
+  let id='elsa',i=2;while(PROFILES.list.some(x=>x.id===id))id='elsa-'+i++;
+  PROFILES.list.push({id,name:'Elsa',kind:'reader'});
+  return id;
+}
+if(PROFILES.list.find(x=>x.id===PROFILES.active).hidden){PROFILES.active=fallbackId();saveProfiles()} // a hidden profile is never opened
+const PROFILE=PROFILES.list.find(x=>x.id===PROFILES.active);
+let purgedActive=false; // the open profile was purged: its state must not be written back before the reload
 const keyFor=id=>id==='elsa'?'leemos-v1':'leemos-v1:'+id;
 const profileSlug=n=>n.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 function switchProfile(id){PROFILES.active=id;saveProfiles();location.reload()}
@@ -66,6 +78,7 @@ function addProfile(name,kind){
 const KEY=keyFor(PROFILE.id);
 const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||{}}catch(e){return {}}};
 const save=()=>{
+  if(purgedActive)return;
   const fp=fpOf();
   if(fp!==lastFp){lastFp=fp;S.modAt=stampAfter(S.modAt);onProgressChange()} // never older than a stamp that came from a device with a faster clock
   if(lastSessFp!==null){
@@ -727,30 +740,97 @@ function storeState(id,data){
 }
 function schedSync(){if(!sync)return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncAll(),5000)}
 onProgressChange=schedSync;
-async function syncAll(){
-  if(syncBusy||!sync)return;
+// Resolves with the worst error kind of this round (null when everything synced or there was nothing to do).
+// final: the last sync before signing out, which decides itself what an auth error means (no hiding, no profile switch).
+async function syncAll({final=false}={}){
+  if(syncBusy||!sync)return null;
   syncBusy=true; // before the first await: two triggers at once (visibilitychange + pagehide, a double tap) must run ONE sync
   try{
     let s=null;
-    try{s=await sync.session()}catch(e){renderAcct();return}
-    if(!s)return;
+    try{s=await sync.session()}catch(e){if(e&&e.kind==='auth'&&!final)hideClassProfiles();renderAcct();return e&&e.kind||'error'}
+    if(!s)return null;
     let last=null;try{last=localStorage.getItem(AUTH_USER_KEY)}catch(e){}
-    if(last&&s.user&&s.user.id&&last!==s.user.id)return; // a session of another account than the one this device was linked to: never send these profiles to it
+    if(last&&s.user&&s.user.id&&last!==s.user.id)return null; // a session of another account than the one this device was linked to: never send these profiles to it
     syncState='syncing';renderAcct();
     const rank=k=>k==='auth'?3:k==='offline'?1:2;
     let worst=null,again=false;
     for(const p of PROFILES.list){
-      if(!p.rid)continue;
+      if(!p.rid||p.hidden)continue;
       try{
-        const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:mergeMod.pickSynced(stateOf(p.id))});
+        const dirty=!!p.kindDirty; // the adult switched the kind on this device: push it once, then the server's kind wins
+        const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:mergeMod.pickSynced(stateOf(p.id)),kindChanged:dirty});
+        if(r.revoked){delete p.rid;saveProfiles();acctMsg('acctRevoked',{n:p.name});continue} // removed from the class or deleted by someone else: local progress stays
+        let ch=false;
+        if(dirty&&p.kind===r.kind){delete p.kindDirty;ch=true} // pushed (unless the adult switched it again meanwhile)
+        if(!p.kindDirty&&(r.kind==='pre'||r.kind==='reader')&&r.kind!==p.kind){p.kind=r.kind;ch=true} // the server's kind; the screen follows on the next load
+        if(ch)saveProfiles();
         const merged=storeState(p.id,r.data);
         if(!mergeMod.sameData(merged,r.data))again=true; // the child progressed meanwhile: push that too
       }catch(e){const k=e&&e.kind||'error';if(!worst||rank(k)>rank(worst))worst=k} // one profile failing must not stop the others
     }
-    if(worst){syncState=worst==='offline'?'offline':'error';if(worst==='auth')acctMsg('acctExpired')}
+    if(worst){syncState=worst==='offline'?'offline':'error';if(worst==='auth'){acctMsg('acctExpired');if(!final)hideClassProfiles()}}
     else{syncState='idle';try{localStorage.setItem(SYNC_AT_KEY,String(Date.now()))}catch(e){}}
     if(again)schedSync();
+    return worst;
   }finally{syncBusy=false;renderAcct()}
+}
+// ---------- teachers and classes (spec: docs/superpowers/specs/2026-11-13-teachers-classes-design.md §6) ----------
+let ROLE='parent'; // from whoami() after sign-in and at start; it only chooses what the panel offers, the database decides what is visible
+async function readRole(){
+  try{const r=await sync.me();ROLE=r&&(r.role==='teacher'||r.role==='admin')?r.role:'parent';return null}
+  catch(e){return e&&e.kind||'error'}
+}
+// Removes the profiles that came through a class, with their saved state. Returns whether the open profile was one of them.
+function dropClassProfiles(){
+  const gone=PROFILES.list.filter(p=>p.via==='class');
+  gone.forEach(p=>{try{localStorage.removeItem(keyFor(p.id))}catch(e){}});
+  for(let i=PROFILES.list.length-1;i>=0;i--)if(PROFILES.list[i].via==='class')PROFILES.list.splice(i,1);
+  const active=gone.some(p=>p.id===PROFILES.active);
+  if(active)purgedActive=true;
+  return active;
+}
+// A shared school tablet keeps no other family's child: their progress is on the server and comes back when the teacher opens them again.
+async function purgeClassProfiles(){
+  if(!PROFILES.list.some(p=>p.via==='class'))return;
+  if(dropClassProfiles())switchProfile(fallbackId());else saveProfiles();
+}
+// The session is dead (auth error) and nobody can be asked: the class profiles are hidden, not deleted, until the next sign-in.
+function hideClassProfiles(){
+  const m=PROFILES.list.filter(p=>p.via==='class'&&!p.hidden);
+  if(!m.length)return;
+  m.forEach(p=>{p.hidden=true});
+  if(PROFILES.list.find(p=>p.id===PROFILES.active).hidden)switchProfile(fallbackId());else saveProfiles();
+}
+// Progress of a profile newer than the last complete sync (a stamp from a faster clock only means one question too many).
+function unsent(p){
+  let at=0;try{at=Number(localStorage.getItem(SYNC_AT_KEY))||0}catch(e){}
+  const st=stateOf(p.id);
+  return Math.max(Number(st.modAt)||0,Number(st.session&&st.session.at)||0)>at;
+}
+// Asks a yes/no question in the link sheet. Resolves true for yesKey; noKey, "Ahora no" and Escape resolve false.
+function askChoice(textKey,yesKey,noKey,titleKey='acctSignOut'){
+  return new Promise(resolve=>{
+    $('linkTitle').textContent=t(titleKey);$('linkAsk').textContent=t(textKey);
+    const box=$('linkOpts');box.innerHTML='';
+    const onKey=e=>{if(e.key==='Escape')done(false)};
+    const done=v=>{document.removeEventListener('keydown',onKey);$('link').hidden=true;$('linkTitle').textContent=t('linkTitle');resolve(v)};
+    [[yesKey,true],[noKey,false]].forEach(([k,v])=>{const b=document.createElement('button');b.className='wbtn';b.textContent=t(k);b.onclick=()=>done(v);box.appendChild(b)});
+    $('linkCancel').onclick=()=>done(false);
+    document.addEventListener('keydown',onKey);
+    $('link').hidden=false;
+    box.lastChild.focus(); // the safe answer has the focus
+  });
+}
+// Sign out: one last sync, then the class profiles go. If that sync failed and a class profile has progress not yet sent, ask first.
+async function signOutAndClean(){
+  if(!sync)return;
+  for(let i=0;syncBusy&&i<200;i++)await new Promise(r=>setTimeout(r,50)); // a sync in flight finishes first
+  const fail=await syncAll({final:true});
+  if(fail&&PROFILES.list.some(p=>p.via==='class'&&unsent(p))&&!await askChoice('acctUnsentAsk','acctUnsentOut','acctUnsentStay'))return;
+  await sync.signOut();
+  ROLE='parent';syncState='idle';acctMsg('');
+  await purgeClassProfiles();
+  renderAcct();
 }
 function acctMsg(key,vars){$('acctMsg').textContent=key?t(key,vars):''}
 function renderAcct(){
@@ -783,7 +863,7 @@ $('acctVerify').onclick=async()=>{
   }catch(e){acctMsg(e&&e.kind==='code'?'acctBadCode':e&&e.kind==='offline'?'acctNetwork':'acctError')}
 };
 $('acctSync').onclick=()=>syncAll();
-$('acctOutBtn').onclick=()=>{if(sync)sync.signOut();syncState='idle';acctMsg('');renderAcct()};
+$('acctOutBtn').onclick=()=>signOutAndClean();
 // Asks which account profile (if any) a local profile is. Resolves with a remote id, or null for "add as a new child".
 // Closing the dialog ("Ahora no") rejects, and the caller leaves everything as it was.
 const remoteName=r=>typeof(r&&r.name)==='string'?r.name.trim().slice(0,20):''; // account data is untrusted: only a real, short string is a name
@@ -805,19 +885,25 @@ function askLink(local,candidates){
 async function afterSignIn(user){
   let prev=null;try{prev=localStorage.getItem(AUTH_USER_KEY)}catch(err){}
   const snapshot=JSON.stringify(PROFILES.list);
+  let activeGone=false;
   try{
-    if(prev&&prev!==user.id)PROFILES.list.forEach(p=>{delete p.rid}); // another account used this tablet: never upload its children into this one unasked
+    if(prev&&prev!==user.id){
+      // another account used this tablet: its class children go (also the hidden ones), and the rest is never uploaded into this one unasked
+      if(PROFILES.list.some(p=>p.via==='class')){activeGone=dropClassProfiles();saveProfiles()}
+      PROFILES.list.forEach(p=>{delete p.rid});
+    }else PROFILES.list.forEach(p=>{delete p.hidden}); // the same account is back: its class profiles show again
+    await readRole();
     const remote=await sync.listProfiles();
     const known=new Set(remote.map(r=>r.id));
     const claimed=new Set(PROFILES.list.filter(p=>p.rid&&known.has(p.rid)).map(p=>p.rid));
-    for(const p of PROFILES.list.filter(x=>!x.rid)){
-      const cands=remote.filter(r=>!claimed.has(r.id)&&r.kind===p.kind); // only a child of the same kind can be the same child
+    for(const p of PROFILES.list.filter(x=>!x.rid&&x.via!=='class')){ // a class child that lost its link is never uploaded as this account's own
+      const cands=remote.filter(r=>r.linked&&!claimed.has(r.id)&&r.kind===p.kind); // only the account's own children (never one seen through a class), of the same kind
       const pick=cands.length?await askLink(p,cands):null;
       p.rid=pick||uuid();
       if(pick){claimed.add(pick);const rn=remoteName(remote.find(r=>r.id===pick));if(rn)p.name=rn} // the account's name is the one that follows the child
     }
     for(const r of remote){
-      if(claimed.has(r.id)||PROFILES.list.some(p=>p.rid===r.id))continue;
+      if(!r.linked||claimed.has(r.id)||PROFILES.list.some(p=>p.rid===r.id))continue; // children of a class are opened on demand, not added here
       const rn=remoteName(r);
       if(!rn)continue; // a remote row without a usable name is skipped, never allowed to break the linking
       const base=profileSlug(rn)||'nino';let id=base,i=2;
@@ -833,17 +919,21 @@ async function afterSignIn(user){
     // so PROFILE (the active entry) is still one of its objects and renaming the child keeps persisting.
     const keep=JSON.parse(snapshot);
     for(let i=PROFILES.list.length-1;i>=0;i--)if(!keep.some(k=>k.id===PROFILES.list[i].id))PROFILES.list.splice(i,1);
-    PROFILES.list.forEach(p=>{const k=keep.find(x=>x.id===p.id);delete p.rid;if(k&&k.rid)p.rid=k.rid;if(k)p.name=k.name});
-    sync.signOut();syncState='idle';
+    PROFILES.list.forEach(p=>{const k=keep.find(x=>x.id===p.id);delete p.rid;if(k&&k.rid)p.rid=k.rid;if(k)p.name=k.name;delete p.hidden;if(k&&k.hidden)p.hidden=true});
+    sync.signOut();syncState='idle';ROLE='parent';
     $('link').hidden=true;
     acctMsg(e&&e.kind==='offline'?'acctNetwork':e&&e.message==='cancelled'?'':'acctError');
     renderAcct();
+    if(activeGone)switchProfile(fallbackId());
     return;
   }
   await syncAll();
+  if(activeGone)switchProfile(fallbackId()); // the open profile was another account's class child
 }
 // A session from an earlier visit: sync at start (only if signed in; otherwise nothing is loaded or sent).
-try{if(localStorage.getItem('leemos-auth'))syncInit().then(sy=>{if(sy){renderAcct();syncAll()}})}catch(e){}
+try{if(localStorage.getItem('leemos-auth'))syncInit().then(async sy=>{if(sy){renderAcct();let last=null;try{last=localStorage.getItem(AUTH_USER_KEY)}catch(e){}
+  if(!last||last===sy.userId())if(await readRole()==='auth')hideClassProfiles(); // the role first (one request at a time, so a refresh never races another); never for another account's session
+  syncAll()}})}catch(e){}
 
 // ---------- mascot, sound, rewards ----------
 const MASCOT_STATES=['cheer','tilt','dance'];
@@ -1140,6 +1230,7 @@ function updateProfileChip(){$('profileName').textContent=PROFILE.name}
 function renderProfiles(){
   const g=$('profileList');g.innerHTML='';
   PROFILES.list.forEach(p=>{
+    if(p.hidden)return; // a class profile hidden after an auth error is not listed (nor opened)
     const b=document.createElement('button');
     b.className='wbtn';b.setAttribute('aria-pressed',p.id===PROFILES.active);
     const ic=document.createElement('span');ic.textContent=p.kind==='pre'?'🔤':'📖';
@@ -1149,7 +1240,7 @@ function renderProfiles(){
   });
 }
 function renderSwitch(){$('pfSwitch').textContent=t(PROFILE.kind==='pre'?'pfToReader':'pfToPre')}
-$('pfSwitch').onclick=()=>{PROFILE.kind=PROFILE.kind==='pre'?'reader':'pre';switchProfile(PROFILE.id)}; // same progress, other screen; kind goes to the account on the next sync
+$('pfSwitch').onclick=()=>{PROFILE.kind=PROFILE.kind==='pre'?'reader':'pre';PROFILE.kindDirty=true;switchProfile(PROFILE.id)}; // same progress, other screen; kind goes to the account on the next sync (kindDirty)
 function openProfiles(){renderProfiles();renderSwitch();$('profiles').hidden=false;$('profilesClose').focus()}
 $('profileBtn').onclick=openProfiles;
 $('profileOpen').onclick=openProfiles;
