@@ -79,38 +79,81 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
     return r;
   }
   const rows = async (r) => { try { const j = await r.json(); return Array.isArray(j) ? j : []; } catch (e) { return []; } };
-  const SELECT = 'select=id,name,kind,data,version';
+  const SELECT = 'select=id,name,kind,data,version,class_id,child_links(user_id)';
 
+  // ---------- RPCs (security definer functions): expected failures come back as a value, {error:'<code>'} ----------
+  async function rpc(name, args = {}) {
+    const r = await api('rpc/' + name, { method: 'POST', body: JSON.stringify(args) });
+    if (!r.ok) throw new SyncError('http', 'rpc ' + name + ' failed', r.status);
+    try { return await r.json(); } catch (e) { return {}; }
+  }
+  // An rpc whose {error} becomes a SyncError: invalid -> 'code', rate -> 'rate', anything else -> 'http' with the code as the message.
+  async function call(name, args) {
+    const j = await rpc(name, args);
+    if (j && j.error) throw new SyncError(j.error === 'invalid' ? 'code' : j.error === 'rate' ? 'rate' : 'http', j.error);
+    return j;
+  }
+  const me = () => call('whoami');
+  const ackTeacher = () => call('ack_teacher');
+  async function listClasses() {
+    const r = await api('classes?select=id,name&order=name');
+    if (!r.ok) throw new SyncError('http', 'could not list classes', r.status);
+    return rows(r);
+  }
+  const createInvite = (childId, kind) => call('create_invite', { p_child: childId, p_kind: kind });
+  const redeemInvite = (code, classId) => call('redeem_invite', { p_code: code, p_class: classId || null });
+  const leaveClass = (id) => call('leave_class', { p_child: id });
+  const unlinkMe = (id) => call('unlink_me', { p_child: id });
+  const deleteChild = (id) => call('delete_child', { p_child: id });
+  const exportMyData = () => call('export_my_data');
+  const deleteMyAccount = () => call('delete_my_account');
+
+  // `linked`: the caller has a parent link (RLS returns only the caller's own child_links row). A class child seen by its teacher is not.
   async function listProfiles() {
     const r = await api(`child_profiles?${SELECT}&order=id`);
     if (!r.ok) throw new SyncError('http', 'could not list profiles', r.status);
-    return rows(r);
+    const me_ = userId();
+    return (await rows(r)).map(({ child_links, ...p }) => ({ ...p, class_id: p.class_id || null, linked: !!me_ && Array.isArray(child_links) && child_links.some((l) => l && l.user_id === me_) }));
   }
   async function getProfile(rid) {
     const r = await api(`child_profiles?${SELECT}&id=eq.${encodeURIComponent(rid)}`);
     if (!r.ok) throw new SyncError('http', 'could not read the profile', r.status);
     return (await rows(r))[0] || null;
   }
+  // "New child in this class": an explicit insert with class_id, before the ordinary sync (whose create-on-missing would land it class-less).
+  async function createInClass({ id, name, kind, classId, data }) {
+    const c = await api('child_profiles', { method: 'POST', body: JSON.stringify({ id, name, kind, class_id: classId, data: mergeData(data, {}) }) });
+    if (!c.ok) throw new SyncError('http', 'could not create the child', c.status);
+    return (await rows(c))[0] || null;
+  }
 
-  // Pull, merge, push one profile. `data` is the local synced snapshot. Returns the merged data and the server version.
-  async function syncProfile({ rid, name, kind, data }) {
+  // Pull, merge, push one profile. `data` is the local synced snapshot. Returns {data, version, kind}, or {revoked:true} when the server
+  // no longer lets this account have the row. `kind` is pushed only with kindChanged (the adult changed it here); otherwise the server's wins.
+  async function syncProfile({ rid, name, kind, data, kindChanged = false }) {
     for (let attempt = 0; attempt < 5; attempt++) {
-      const row = await getProfile(rid);
+      let row = await getProfile(rid);
       if (!row) {
         const c = await api('child_profiles', { method: 'POST', body: JSON.stringify({ id: rid, name, kind, data: mergeData(data, {}) }) });
-        if (c.status === 409) continue; // another device created it first: read it and merge
-        if (!c.ok) throw new SyncError('http', 'could not create the profile', c.status);
-        return { data: mergeData(data, {}), version: 1 };
+        if (c.status === 403) return { revoked: true }; // the insert policy refuses (e.g. a deleted child's id)
+        if (c.status === 409) { // exists but not visible to us (revoked), or another device created it first
+          row = await getProfile(rid);
+          if (!row) return { revoked: true };
+        } else {
+          if (!c.ok) throw new SyncError('http', 'could not create the profile', c.status);
+          return { data: mergeData(data, {}), version: 1, kind };
+        }
       }
       const merged = mergeData(data, row.data);
-      if (sameData(merged, mergeData(row.data, {})) && row.name === name) return { data: merged, version: row.version };
-      const p = await api(`child_profiles?id=eq.${encodeURIComponent(rid)}&version=eq.${row.version}`, { method: 'PATCH', body: JSON.stringify({ name, data: merged, version: row.version + 1 }) });
+      const push = kindChanged && kind !== row.kind;
+      const nextKind = push ? kind : row.kind;
+      if (sameData(merged, mergeData(row.data, {})) && row.name === name && !push) return { data: merged, version: row.version, kind: nextKind };
+      const p = await api(`child_profiles?id=eq.${encodeURIComponent(rid)}&version=eq.${row.version}`, { method: 'PATCH', body: JSON.stringify({ name, data: merged, version: row.version + 1, ...(push ? { kind } : {}) }) });
       if (!p.ok) throw new SyncError('http', 'could not save the profile', p.status);
-      if ((await rows(p)).length) return { data: merged, version: row.version + 1 };
+      if ((await rows(p)).length) return { data: merged, version: row.version + 1, kind: nextKind };
       // empty result: someone else wrote first, go again from the read
     }
     throw new SyncError('conflict', 'too many concurrent writes');
   }
 
-  return { requestCode, verifyCode, session, signOut, userId, listProfiles, syncProfile };
+  return { requestCode, verifyCode, session, signOut, userId, listProfiles, syncProfile, createInClass, rpc, me, ackTeacher, listClasses, createInvite, redeemInvite, leaveClass, unlinkMe, deleteChild, exportMyData, deleteMyAccount };
 }

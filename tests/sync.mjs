@@ -192,5 +192,129 @@ for (const pasted of ['https://x.supabase.co/rest/v1/', 'https://x.supabase.co/a
   check('path: a later change on another device wins and keeps the other key', r.data.prefs.pathEs.v === 7 && r.data.prefs.pathAuto.v === false);
 }
 
+// ---------- teachers and classes (Task 4): rpc, class and link fields, revoked outcome ----------
+const as = async (srv, email) => { const storage = memoryStorage(); const sync = createSync({ url: URL_, anonKey: 'anon-key', fetch: srv.fetch, storage }); await sync.requestCode(email); await sync.verifyCode(email, '123456'); return { sync, storage, id: srv.userByEmail(email).id }; };
+{
+  const { srv, sync } = await signedIn();
+  srv.expireAccessTokens();
+  const w = await sync.rpc('whoami');
+  const refreshes = srv.log.filter((l) => l.includes('grant_type=refresh_token')).length;
+  check('sync: rpc refreshes an expired token once', w.role === 'parent' && refreshes === 1 && srv.log.includes('POST /rest/v1/rpc/whoami'), JSON.stringify({ w, refreshes }));
+}
+{
+  const srv = createFakeSupabase();
+  const cls = srv.addClass('3A');
+  const t = await as(srv, 't@e.c'); srv.setRole('t@e.c', 'teacher', { ack: true }); srv.addTeacher(cls, 't@e.c');
+  const p = await as(srv, 'p@e.c');
+  await p.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+  const { code } = await p.sync.createInvite(RID, 'to_class');
+  const bad = await rejects(t.sync.redeemInvite('ZZZZZZZZ', cls));
+  check('sync: redeemInvite maps invalid to kind code and rate to kind rate', bad instanceof SyncError && bad.kind === 'code', bad && bad.kind);
+  const other = await rejects(t.sync.redeemInvite(code, crypto.randomUUID()));
+  check('sync: redeemInvite maps another error to http with its code as message and the code survives', other instanceof SyncError && other.kind === 'http' && other.message === 'forbidden', other && other.message);
+  for (let i = 0; i < 8; i++) await rejects(t.sync.redeemInvite('ZZZZZZZZ', cls)); // 10 failures so far (invalid x9, forbidden x1)
+  const limited = await rejects(t.sync.redeemInvite(code, cls));
+  check('sync: redeemInvite maps rate (10 failures in an hour) to kind rate', limited instanceof SyncError && limited.kind === 'rate', limited && limited.kind);
+  srv.advance(61 * 60 * 1000);
+  const ok = await t.sync.redeemInvite(code, cls);
+  check('sync: after the hour the unused code still redeems and moves the child into the class', ok.ok === true && ok.child_id === RID && srv.rows.get(RID).class_id === cls);
+  const again = await rejects(t.sync.redeemInvite(code, cls));
+  check('sync: a code is single use (uniform invalid)', again instanceof SyncError && again.kind === 'code');
+}
+{
+  const srv = createFakeSupabase();
+  const cls = srv.addClass('3A');
+  const t = await as(srv, 't@e.c'); srv.setRole('t@e.c', 'teacher', { ack: true }); srv.addTeacher(cls, 't@e.c');
+  const row = await t.sync.createInClass({ id: RID, name: 'Nuria', kind: 'reader', classId: cls, data: data() });
+  const list = await t.sync.listProfiles();
+  check('sync: listProfiles marks a class child as not linked', row.id === RID && list.length === 1 && list[0].class_id === cls && list[0].linked === false && !('child_links' in list[0]), JSON.stringify(list));
+  const p = await as(srv, 'p@e.c');
+  const R2 = '22222222-2222-4222-8222-222222222222';
+  await p.sync.syncProfile({ rid: R2, name: 'Elsa', kind: 'reader', data: data() });
+  const mine = await p.sync.listProfiles();
+  check('sync: a parent own child is linked and has no class', mine.length === 1 && mine[0].linked === true && mine[0].class_id === null);
+  check('sync: createInClass sends class_id and the insert gives the teacher no parent link', srv.rows.get(RID).class_id === cls && !(srv.links.get(RID) || new Set()).size && srv.log.some((l) => l === 'POST /rest/v1/child_profiles'));
+  const notTeacher = await rejects(p.sync.createInClass({ id: crypto.randomUUID(), name: 'X', kind: 'reader', classId: cls, data: data() }));
+  check('sync: createInClass by a non-teacher is an http 403 and creates nothing', notTeacher instanceof SyncError && notTeacher.kind === 'http' && notTeacher.status === 403 && srv.rows.size === 2, notTeacher && String(notTeacher.status));
+}
+{
+  const { srv, sync } = await signedIn();
+  await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+  srv.hideRow(RID);
+  const before = JSON.stringify(srv.rows.get(RID));
+  const r = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ total: 77, modAt: 900 }) });
+  check('sync: syncProfile on a hidden row resolves revoked and does not create', r.revoked === true && srv.rows.size === 1 && JSON.stringify(srv.rows.get(RID)) === before, JSON.stringify(r));
+  const T = '33333333-3333-4333-8333-333333333333';
+  srv.tombstone(T);
+  const r2 = await sync.syncProfile({ rid: T, name: 'Gone', kind: 'reader', data: data() });
+  check('sync: a tombstoned id (403 on insert) also resolves revoked', r2.revoked === true && !srv.rows.has(T));
+}
+{
+  const { srv, sync } = await signedIn();
+  await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+  const up = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'pre', data: data(), kindChanged: true });
+  check('sync: a locally changed kind is pushed; an unchanged kind is adopted from the server', srv.rows.get(RID).kind === 'pre' && up.kind === 'pre');
+  srv.rows.get(RID).kind = 'reader'; srv.rows.get(RID).version++; // another device changed it
+  const before = srv.log.length;
+  const adopt = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'pre', data: data() });
+  check('sync: a stale local kind without the changed flag is not pushed (adopted, nothing written)', adopt.kind === 'reader' && srv.rows.get(RID).kind === 'reader' && !srv.log.slice(before).some((l) => l.startsWith('PATCH')), JSON.stringify(adopt));
+  const same = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data(), kindChanged: true });
+  check('sync: a kind flagged as changed but equal to the server writes nothing', same.kind === 'reader' && !srv.log.slice(before).some((l) => l.startsWith('PATCH')));
+}
+{
+  const srv = createFakeSupabase();
+  srv.inviteTeacher('t@e.c');
+  const t = await as(srv, 't@e.c');
+  const w1 = await t.sync.me();
+  const w2 = await t.sync.me();
+  check('sync: whoami claims a pending invitation', w1.role === 'teacher' && w1.teacher_ack_at === null && w2.role === 'teacher' && !srv.roleInvites.has('t@e.c'), JSON.stringify(w1));
+  const ack = await t.sync.ackTeacher();
+  check('sync: ackTeacher sets the acknowledgement', ack.ok === true && !!(await t.sync.me()).teacher_ack_at);
+  const p = await as(srv, 'p@e.c');
+  const e = await rejects(p.sync.ackTeacher());
+  check('sync: a parent cannot acknowledge as teacher (http forbidden)', e instanceof SyncError && e.kind === 'http' && e.message === 'forbidden');
+  srv.inviteTeacher('late@e.c'); srv.advance(31 * 24 * 3600 * 1000);
+  const l = await as(srv, 'late@e.c');
+  check('sync: an expired invitation is not claimed', (await l.sync.me()).role === 'parent');
+}
+{
+  const { srv, sync } = await signedIn();
+  srv.setOffline(true);
+  const e = await rejects(sync.rpc('whoami'));
+  check('sync: offline rpc throws kind offline', e instanceof SyncError && e.kind === 'offline', e && e.kind);
+}
+{
+  const { srv, sync, storage } = await signedIn();
+  srv.expireAccessTokens(); srv.revokeRefreshTokens();
+  const e = await rejects(sync.rpc('whoami'));
+  check('sync: a revoked refresh token on an rpc gives kind auth', e instanceof SyncError && e.kind === 'auth' && storage.getItem('leemos-auth') === null, e && e.kind);
+}
+{
+  const srv = createFakeSupabase();
+  const cls = srv.addClass('3A');
+  const t = await as(srv, 't@e.c'); srv.setRole('t@e.c', 'teacher', { ack: true }); srv.addTeacher(cls, 't@e.c');
+  const p = await as(srv, 'p@e.c');
+  const C = '44444444-4444-4444-8444-444444444444';
+  await t.sync.createInClass({ id: C, name: 'Nuria', kind: 'reader', classId: cls, data: data() });
+  const inv = await t.sync.createInvite(C, 'to_parent');
+  check('sync: createInvite returns code and expiry (8 chars, 7 days)', /^[A-Z2-9]{8}$/.test(inv.code) && Date.parse(inv.expires_at) > Date.now() + 6 * 24 * 3600 * 1000);
+  const red = await p.sync.redeemInvite(inv.code.toLowerCase().replace(/^(....)/, '$1-'));
+  check('sync: redeeming a to_parent code links the parent (case and dashes are ignored)', red.child_id === C && (await p.sync.listProfiles())[0].linked === true);
+  const orphanLeave = await t.sync.leaveClass(C);
+  check('sync: leaveClass takes a linked child out of the class', orphanLeave.ok === true && srv.rows.get(C).class_id === null);
+  const un = await p.sync.unlinkMe(C);
+  check('sync: unlinkMe of the last link deletes the child with a tombstone', un.deleted === true && !srv.rows.has(C) && srv.tombstones.has(C));
+  const ex = await t.sync.exportMyData();
+  check('sync: exportMyData has account, classes and children', ex.account.role === 'teacher' && ex.classes.length === 1 && Array.isArray(ex.children));
+  const adm = await rejects(t.sync.rpc('admin_list_classes'));
+  const raw = await t.sync.rpc('admin_list_classes');
+  check('sync: admin rpcs answer forbidden to a non-admin as a value', adm === null && raw.error === 'forbidden');
+  const lc = await t.sync.listClasses();
+  check('sync: listClasses returns id and name', lc.length === 1 && lc[0].id === cls && lc[0].name === '3A');
+  await p.sync.deleteMyAccount();
+  const gone = await rejects(p.sync.rpc('whoami'));
+  check('sync: deleteMyAccount ends the account (its token stops working)', gone instanceof SyncError && gone.kind === 'auth', gone && gone.kind);
+}
+
 console.log(failures ? `\n${failures} sync test(s) FAILED` : '\nAll sync tests passed');
 process.exit(failures ? 1 : 0);
