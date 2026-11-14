@@ -66,8 +66,8 @@ try {
   check("B cannot read A's profile", (await (await rest(B, `child_profiles?id=eq.${id}`)).json()).length === 0);
   const upd = await (await rest(B, `child_profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ name: 'Hacked' }) })).json();
   check("B cannot update A's profile", Array.isArray(upd) && upd.length === 0);
-  const del = await (await rest(B, `child_profiles?id=eq.${id}`, { method: 'DELETE' })).json();
-  check("B cannot delete A's profile", Array.isArray(del) && del.length === 0);
+  const delR = await rest(B, `child_profiles?id=eq.${id}`, { method: 'DELETE' }), del = await json(delR); // direct delete is revoked (403) since the teachers migration
+  check("B cannot delete A's profile", (delR.status >= 400 || (Array.isArray(del) && del.length === 0)) && !!(await one(await svc(`child_profiles?id=eq.${id}&select=id`))), String(delR.status));
   const steal = await rest(B, 'child_profiles', { method: 'POST', body: JSON.stringify({ id: uuid(), owner: A.id, name: 'X', kind: 'reader' }) });
   check('B cannot create a profile owned by A', steal.status >= 400, String(steal.status));
   const anonRead = await fetch(`${url}/rest/v1/child_profiles?select=id`, { headers: { apikey: anon, Authorization: 'Bearer ' + anon } });
