@@ -246,7 +246,7 @@
   "acctExported": "Listo: el archivo se ha descargado en este dispositivo. No se ha enviado a nadie.",
   "acctDelete": "Borrar mi cuenta",
   "acctDelTitle": "Borrar mi cuenta",
-  "acctDelAsk1": "Vas a borrar tu cuenta. Los niños que solo están en tu cuenta se borrarán del servidor; los que están en una clase seguirán en ella, sin familia vinculada. El progreso guardado en este dispositivo se queda. ¿Quieres continuar?",
+  "acctDelAsk1": "Vas a borrar tu cuenta. Los niños que solo están en tu cuenta se borrarán del servidor; los que están en una clase seguirán en ella, sin familia vinculada. El progreso guardado en este dispositivo se queda y no se volverá a subir salvo que tú lo decidas. ¿Quieres continuar?",
   "acctDelYes1": "Sí, continuar",
   "acctDelAsk2": "Última pregunta: borrar la cuenta no se puede deshacer. ¿Borrarla ahora?",
   "acctDelYes2": "Sí, borrar mi cuenta",
@@ -255,8 +255,10 @@
   "acctLastAdmin": "Eres la única persona administradora: no se puede borrar esta cuenta.",
   "teachDownload": "Descargar",
   "teachWipe": "Borrar los datos de este niño",
-  "teachWipeAsk": "¿Borrar para siempre los datos de {n} del servidor? Su progreso en este dispositivo no se toca. No se puede deshacer.",
-  "teachWipeAskClass": "{n} está en la clase {c}. Si borras sus datos, el profesor también dejará de verlo y se borrarán del servidor para siempre. Su progreso en este dispositivo no se toca. ¿Borrarlos?",
+  "teachWipeAsk": "¿Borrar para siempre los datos de {n} del servidor? Su progreso se queda solo en este dispositivo y no se volverá a subir a la cuenta salvo que tú lo decidas. No se puede deshacer.",
+  "teachWipeAskClass": "{n} está en la clase {c}. Si borras sus datos, el profesor también dejará de verlo y se borrarán del servidor para siempre. Su progreso se queda solo en este dispositivo y no se volverá a subir a la cuenta salvo que tú lo decidas. ¿Borrarlos?",
   "teachWipeYes": "Sí, borrar sus datos",
-  "teachWiped": "Datos borrados del servidor."
+  "teachWiped": "Datos borrados del servidor.",
+  "teachLocalOnly": "Solo en este dispositivo",
+  "teachResync": "Volver a guardar en la cuenta"
 }

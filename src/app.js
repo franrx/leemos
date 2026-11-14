@@ -44,8 +44,8 @@ const cleanProfiles=p=>{
     seen.add(x.id);
     list.push({id:x.id,name:typeof x.name==='string'&&x.name.trim()?x.name.trim():x.id,kind:x.kind==='pre'?'pre':'reader',
       ...(typeof x.rid==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x.rid)?{rid:x.rid}:{}),
-      // via:'class' = reached this device through a class (purged at sign-out); kindDirty = kind changed here, not pushed yet; hidden = class profile after an auth error
-      ...(x.via==='class'?{via:'class'}:{}),...(x.kindDirty===true?{kindDirty:true}:{}),...(x.hidden===true?{hidden:true}:{})});
+      // via:'class' = reached this device through a class (purged at sign-out); kindDirty = kind changed here, not pushed yet; noSync = its server copy was deleted or revoked: never uploaded again unless the adult chooses; hidden = class profile after an auth error
+      ...(x.via==='class'?{via:'class'}:{}),...(x.kindDirty===true?{kindDirty:true}:{}),...(x.hidden===true?{hidden:true}:{}),...(x.noSync===true?{noSync:true}:{})});
   });
   return list.some(x=>x.id===p.active)?{active:p.active,list}:null;
 };
@@ -762,7 +762,7 @@ async function syncAll({final=false}={}){
       try{
         const dirty=!!p.kindDirty; // the adult switched the kind on this device: push it once, then the server's kind wins
         const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:mergeMod.pickSynced(stateOf(p.id)),kindChanged:dirty});
-        if(r.revoked){delete p.rid;saveProfiles();acctMsg('acctRevoked',{n:p.name});continue} // removed from the class or deleted by someone else: local progress stays
+        if(r.revoked){delete p.rid;p.noSync=true;saveProfiles();acctMsg('acctRevoked',{n:p.name});continue} // removed from the class or deleted by someone else: local progress stays
         let ch=false;
         if(dirty&&p.kind===r.kind){delete p.kindDirty;ch=true} // pushed (unless the adult switched it again meanwhile)
         if(!p.kindDirty&&(r.kind==='pre'||r.kind==='reader')&&r.kind!==p.kind){p.kind=r.kind;ch=true} // the server's kind; the screen follows on the next load
@@ -813,7 +813,7 @@ function loadTeach(){
     try{
       const m=await (window.__leemosImport||(p=>import(p)))('./teach.js');
       teach=m.createTeach({doc:document,root:$('teach'),sync,t,lang:()=>S.lang,role:()=>ROLE,setRole:r=>{ROLE=r==='teacher'||r==='admin'?r:'parent'},profiles:PROFILES,uuid,pct:pctOfData,
-        openChild,syncNow:()=>syncAll(),download:downloadJSON,forgetRid,confirm:(k,vars,yes)=>askChoice(k,yes||'teachYes','teachNo','teachConfirmTitle',vars)});
+        openChild,syncNow:()=>syncAll(),download:downloadJSON,forgetRid,resync:resyncProfile,confirm:(k,vars,yes)=>askChoice(k,yes||'teachYes','teachNo','teachConfirmTitle',vars)});
       return teach;
     }catch(e){teachP=null;return null}
   })());
@@ -890,7 +890,22 @@ function downloadJSON(name,obj){
 }
 const acctErrKey=e=>e&&e.kind==='offline'?'acctNetwork':e&&e.kind==='auth'?'acctExpired':e&&e.message==='last_admin'?'acctLastAdmin':'acctError';
 // A child that was deleted on the server loses its link here; its local progress stays (it is the family's own copy).
-function forgetRid(id){const p=PROFILES.list.find(x=>x.rid===id);if(p){delete p.rid;saveProfiles()}}
+function forgetRid(id){
+  const p=PROFILES.list.find(x=>x.rid===id);if(!p)return;
+  if(p.via==='class'){ // a class child held for a teacher: it goes from the device at once (purge only ever touches these)
+    try{localStorage.removeItem(keyFor(p.id))}catch(e){}
+    const was=p.id===PROFILES.active;
+    PROFILES.list.splice(PROFILES.list.indexOf(p),1);
+    if(was){purgedActive=true;PROFILES.active=fallbackId();saveProfiles();switchProfile(PROFILES.active)}else saveProfiles();
+    return;
+  }
+  delete p.rid;p.noSync=true;saveProfiles(); // the family's own copy stays here, and is not uploaded again unless the adult asks
+}
+// "Volver a guardar en la cuenta": the adult's explicit choice to upload a profile whose server copy was deleted.
+function resyncProfile(id){
+  const p=PROFILES.list.find(x=>x.id===id);if(!p||!p.noSync)return false;
+  delete p.noSync;p.rid=uuid();saveProfiles();syncAll();return true;
+}
 async function exportMine(){
   if(!sync||!sync.userId())return;
   try{const d=await sync.exportMyData();downloadJSON('leemos-mis-datos.json',{exported_at:new Date().toISOString(),...d});acctMsg('acctExported')}
@@ -901,9 +916,11 @@ async function deleteAccount(){
   if(!sync||!sync.userId())return;
   if(!await askChoice('acctDelAsk1','acctDelYes1','acctDelNo','acctDelTitle'))return;
   if(!await askChoice('acctDelAsk2','acctDelYes2','acctDelNo','acctDelTitle'))return;
+  const wait=Date.now()+(window.__leemosSignOutWait||10000);
+  while(syncBusy&&Date.now()<wait)await new Promise(r=>setTimeout(r,50)); // a sync in flight finishes first
   try{await sync.deleteMyAccount()}catch(e){acctMsg(acctErrKey(e));return}
   [AUTH_USER_KEY,SYNC_AT_KEY,'leemos-auth'].forEach(k=>{try{localStorage.removeItem(k)}catch(e){}});
-  PROFILES.list.forEach(p=>{delete p.rid;delete p.hidden});
+  PROFILES.list.forEach(p=>{if(p.rid&&p.via!=='class')p.noSync=true;delete p.rid;delete p.hidden});
   saveProfiles();
   ROLE='parent';syncState='idle';
   await purgeClassProfiles();
@@ -973,7 +990,7 @@ async function afterSignIn(user){
     const remote=await sync.listProfiles();
     const known=new Set(remote.map(r=>r.id));
     const claimed=new Set(PROFILES.list.filter(p=>p.rid&&known.has(p.rid)).map(p=>p.rid));
-    for(const p of PROFILES.list.filter(x=>!x.rid&&x.via!=='class')){ // a class child that lost its link is never uploaded as this account's own
+    for(const p of PROFILES.list.filter(x=>!x.rid&&x.via!=='class'&&!x.noSync)){ // a class child that lost its link is never uploaded as this account's own
       const cands=remote.filter(r=>r.linked&&!claimed.has(r.id)&&r.kind===p.kind); // only the account's own children (never one seen through a class), of the same kind
       const pick=cands.length?await askLink(p,cands):null;
       p.rid=pick||uuid();

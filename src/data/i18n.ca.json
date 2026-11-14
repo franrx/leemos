@@ -246,7 +246,7 @@
   "acctExported": "Fet: el fitxer s'ha descarregat en aquest dispositiu. No s'ha enviat a ningú.",
   "acctDelete": "Esborra el meu compte",
   "acctDelTitle": "Esborra el meu compte",
-  "acctDelAsk1": "Esborraràs el teu compte. Els nens que només són al teu compte s'esborraran del servidor; els que són en una classe hi continuaran, sense família vinculada. El progrés guardat en aquest dispositiu es queda. Vols continuar?",
+  "acctDelAsk1": "Esborraràs el teu compte. Els nens que només són al teu compte s'esborraran del servidor; els que són en una classe hi continuaran, sense família vinculada. El progrés guardat en aquest dispositiu es queda i no es tornarà a pujar tret que tu ho decideixis. Vols continuar?",
   "acctDelYes1": "Sí, continua",
   "acctDelAsk2": "Última pregunta: esborrar el compte no es pot desfer. L'esborro ara?",
   "acctDelYes2": "Sí, esborra el meu compte",
@@ -255,8 +255,10 @@
   "acctLastAdmin": "Ets l'única persona administradora: no es pot esborrar aquest compte.",
   "teachDownload": "Descarrega",
   "teachWipe": "Esborra les dades d'aquest nen",
-  "teachWipeAsk": "Vols esborrar per sempre del servidor les dades de {n}? El seu progrés en aquest dispositiu no es toca. No es pot desfer.",
-  "teachWipeAskClass": "{n} és a la classe {c}. Si esborres les seves dades, el professor també deixarà de veure'l i s'esborraran del servidor per sempre. El seu progrés en aquest dispositiu no es toca. Les esborro?",
+  "teachWipeAsk": "Vols esborrar per sempre del servidor les dades de {n}? El seu progrés es queda només en aquest dispositiu i no es tornarà a pujar al compte tret que tu ho decideixis. No es pot desfer.",
+  "teachWipeAskClass": "{n} és a la classe {c}. Si esborres les seves dades, el professor també deixarà de veure'l i s'esborraran del servidor per sempre. El seu progrés es queda només en aquest dispositiu i no es tornarà a pujar al compte tret que tu ho decideixis. Les esborro?",
   "teachWipeYes": "Sí, esborra'n les dades",
-  "teachWiped": "Dades esborrades del servidor."
+  "teachWiped": "Dades esborrades del servidor.",
+  "teachLocalOnly": "Només en aquest dispositiu",
+  "teachResync": "Torna a desar al compte"
 }

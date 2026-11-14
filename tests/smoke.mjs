@@ -3141,13 +3141,95 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('delete account: offline keeps the session and says there is no connection', app.$('acctMsg').textContent === ies.acctNetwork && app.w.localStorage.getItem('leemos-auth') !== null && w.s.accounts.has(w.par.uid), app.$('acctMsg').textContent);
   }
 
+  // ---------- fix round 1: a deletion the adult chose stays deleted (noSync) ----------
+  {
+    const RID_C2 = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const w = await world();
+    w.s.rows.set(RID_C2, { id: RID_C2, owner: w.par.uid, class_id: null, name: 'Ana', kind: 'reader', data: dat({ total: 2, name: 'Ana', modAt: 2 }), version: 1 }); // a sibling of the same kind, not on this device
+    w.s.links.set(RID_C2, new Set([w.par.uid]));
+    const profs = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }] }, 'leemos-v1': { name: 'Elsa', total: 4 } };
+    const app = await bootWorld(w, profs);
+    qs(app, '[data-act=wipe][data-child="' + RID_A + '"]').click(); await confirmWith(app, true);
+    await until(() => !w.s.rows.has(RID_A), 3000); await sleep(100);
+    const marked = profList(app).find((x) => x.id === 'elsa');
+    const resyncBtn = qs(app, '[data-act=resync][data-child="elsa"]');
+    const rows0 = w.s.rows.size, mark = w.s.log.length;
+    app.$('acctOutBtn').click();
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(60);
+    await signInUi(app, P_EMAIL);
+    await until(() => app.w.localStorage.getItem('leemos-auth') !== null && profList(app).some((x) => x.rid === RID_C2), 4000); await sleep(150);
+    const after = w.s.log.slice(mark);
+    const el = profList(app).find((x) => x.id === 'elsa');
+    check('noSync: wiping a child, signing out and in again uploads nothing and asks nothing (no askLink for the wiped profile)',
+      !!marked && marked.noSync === true && !marked.rid && !!resyncBtn && resyncBtn.getAttribute('aria-label').includes('Elsa') && app.$('link').hidden && !after.some((l) => l === 'POST /rest/v1/child_profiles') && w.s.rows.size === rows0 && !!el && !el.rid && el.noSync === true && JSON.parse(app.w.localStorage.getItem('leemos-v1')).total === 4 && app.errors.length === 0,
+      JSON.stringify({ marked, el, rows0, rows: w.s.rows.size, linkHidden: app.$('link').hidden, post: after.filter((l) => /^POST/.test(l)) }));
+  }
+
+  {
+    const w = await world();
+    const profs = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'ana', name: 'Ana', kind: 'reader', rid: 'ffffffff-ffff-4fff-8fff-ffffffffffff' }] }, 'leemos-v1': { name: 'Elsa', total: 4 }, 'leemos-v1:ana': { name: 'Ana', total: 3 } };
+    const app = await bootWorld(w, profs);
+    await sleep(100);
+    app.$('acctDelete').click(); await confirmWith(app, true); await confirmWith(app, true);
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(100);
+    const afterDel = profList(app);
+    const rows0 = w.s.rows.size, mark = w.s.log.length;
+    await signInUi(app, 'nueva@example.com');
+    await until(() => app.w.localStorage.getItem('leemos-auth') !== null, 4000); await sleep(200);
+    const after = w.s.log.slice(mark);
+    const list = profList(app);
+    check('noSync: after deleting the account, a new account does not receive the former profiles',
+      afterDel.find((x) => x.id === 'elsa').noSync === true && !afterDel.find((x) => x.id === 'elsa').rid && !after.some((l) => l === 'POST /rest/v1/child_profiles') && w.s.rows.size === rows0 && list.find((x) => x.id === 'elsa').noSync === true && !list.find((x) => x.id === 'elsa').rid && app.errors.length === 0,
+      JSON.stringify({ afterDel, list, post: after.filter((l) => /^POST/.test(l)) }));
+  }
+
+  {
+    const w = await world();
+    const profs = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', noSync: true }] }, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 5 } };
+    const app = await bootWorld(w, profs);
+    w.s.rows.delete(RID_A); w.s.links.delete(RID_A);
+    const btn = qs(app, '[data-act=resync][data-child="elsa"]');
+    const kept = !!btn; // the marker survived the profile sanitizer on load
+    const mark = w.s.log.length;
+    btn.click();
+    await until(() => profList(app).find((x) => x.id === 'elsa').rid, 3000);
+    await until(() => [...w.s.rows.values()].some((r) => r.name === 'Elsa'), 4000); await sleep(100);
+    const el = profList(app).find((x) => x.id === 'elsa');
+    const row = [...w.s.rows.values()].find((r) => r.name === 'Elsa');
+    check('noSync: the marker survives a reload and "Volver a guardar" clears it and syncs the profile again',
+      kept && !el.noSync && el.rid === row.id && row.data.total === 4 && w.s.log.slice(mark).some((l) => l === 'POST /rest/v1/child_profiles') && !qs(app, '[data-act=resync]') && app.errors.length === 0,
+      JSON.stringify({ kept, el, row: row && row.id }));
+  }
+
+  {
+    const w = await world({ who: 'teacher' });
+    const app = await bootWorld(w);
+    qs(app, '[data-act=open][data-child="' + RID_B + '"]').click();
+    await until(() => profList(app).some((p) => p.rid === RID_B), 3000); await sleep(60);
+    const id = profList(app).find((p) => p.rid === RID_B).id;
+    qs(app, '[data-act=delete][data-child="' + RID_B + '"]').click(); await confirmWith(app, true);
+    await until(() => !w.s.rows.has(RID_B), 3000); await sleep(100);
+    check('delete: a teacher deleting a class child drops its via:class profile from this device at once',
+      !profList(app).some((p) => p.id === id) && app.w.localStorage.getItem('leemos-v1:' + id) === null && profList(app).some((p) => p.id === 'ana') && app.errors.length === 0, JSON.stringify(profList(app)));
+  }
+
+  {
+    const w = await world();
+    w.s.setRole(P_EMAIL, 'admin'); // the only admin
+    const app = await bootWorld(w, { 'leemos-v1': { name: 'Elsa', total: 4 } });
+    app.$('acctDelete').click(); await confirmWith(app, true); await confirmWith(app, true);
+    await until(() => app.$('acctMsg').textContent.length > 0, 3000); await sleep(40);
+    check('delete account: the only admin cannot delete: the session and local data stay and the message says why',
+      app.$('acctMsg').textContent === ies.acctLastAdmin && app.w.localStorage.getItem('leemos-auth') !== null && w.s.accounts.has(w.par.uid) && JSON.parse(app.w.localStorage.getItem('leemos-v1')).total === 4 && !profList(app).some((p) => p.noSync) && profList(app).some((p) => p.rid === RID_A), app.$('acctMsg').textContent);
+  }
+
   {
     const page = existsSync(join(ROOT, 'privacy.html')) ? readFileSync(join(ROOT, 'privacy.html'), 'utf8') : '';
     const text = page.replace(/<style[\s\S]*?<\/style>/g, '');
     const marks = ['responsable', 'correo', 'región'].map((w2) => new RegExp('PENDIENTE[^<]{0,80}' + w2, 'i').test(text));
     const marksCa = (text.match(/PENDENT|PENDIENTE/g) || []).length;
     check('privacy.html contains the PENDIENTE markers',
-      page.length > 2000 && (text.match(/PENDIENTE/g) || []).length >= 6 && marks.every(Boolean) && /borrador sin revisi[oó]n legal/i.test(text) && /borrador sense revisi[oó] legal/i.test(text) && /lang="es"/.test(page) && /lang="ca"/.test(page) && /prefers-color-scheme:\s*dark/.test(page) && /name="viewport"/.test(page) && !new RegExp('service' + '_role').test(page) && !/[\w.-]+@[\w-]+\.[a-z]{2,}/i.test(text) && !/(href|src)="(\/|https?:)/.test(page.replace(/https:\/\/(fonts\.googleapis\.com|fonts\.gstatic\.com)[^"]*/g, '')) && marksCa >= 6,
+      page.length > 2000 && (text.match(/PENDIENTE/g) || []).length >= 6 && marks.every(Boolean) && /borrador sin revisi[oó]n legal/i.test(text) && /esborrany sense revisi[oó] legal/i.test(text) && !/borrador sense/i.test(text) && /lang="es"/.test(page) && /lang="ca"/.test(page) && /prefers-color-scheme:\s*dark/.test(page) && /name="viewport"/.test(page) && !new RegExp('service' + '_role').test(page) && !/[\w.-]+@[\w-]+\.[a-z]{2,}/i.test(text) && !/(href|src)="(\/|https?:)/.test(page.replace(/https:\/\/(fonts\.googleapis\.com|fonts\.gstatic\.com)[^"]*/g, '')) && marksCa >= 6,
       JSON.stringify({ n: (text.match(/PENDIENTE/g) || []).length, marks, len: page.length }));
   }
 

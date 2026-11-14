@@ -166,6 +166,14 @@ export function createTeach(ctx) {
     const mine = rows.filter((r) => r.linked);
     if (!mine.length) box.append(el('p', 'small', t('teachNoKids')));
     mine.forEach((r) => box.append(parentRow(r)));
+    ctx.profiles.list.filter((p) => p.noSync && p.via !== 'class').forEach((p) => { // deleted from the account: kept here, off the account until the adult says so
+      const li = el('div', 'teach-row'); li.dataset.local = p.id;
+      const top = el('div', 'teach-top'); top.append(el('strong', 'teach-name', clean(p.name, 20) || '?'), el('span', 'chip', t('teachLocalOnly')));
+      li.append(top);
+      const acts = el('div', 'teach-acts');
+      acts.append(btn('teachResync', () => act(async () => { ctx.resync(p.id); await load(); }), { act: 'resync', child: p.id, name: clean(p.name, 20) }));
+      li.append(acts); box.append(li);
+    });
     const form = el('div', 'teach-form');
     form.append(fieldRow('teachCode', 'teachHaveCode', 'teachCodeHint', draft.redeem, (v) => { draft.redeem = v; }, redeemParent));
     const b = btn('teachRedeem', redeemParent); b.id = 'teachRedeem'; b.disabled = busy;
