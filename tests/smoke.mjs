@@ -2697,14 +2697,41 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('sign-out: a final sync that could not run (another round hangs) asks instead of purging', asked && profList(app).some((p) => p.id === 'mateo') && stOf(app, 'mateo').total === 9 && app.w.localStorage.getItem('leemos-auth') !== null, JSON.stringify({ asked, list: profList(app).map((p) => p.id) }));
   }
 
-  // fix round 1: a revoked class profile (no rid) with progress always asks
+  // destructive buttons (Borrar mi cuenta, Eliminar…): text at 18px bold needs 4.5:1 on the panel in both themes
+  {
+    const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
+    const block = (sel) => (new RegExp(sel.replace(/[[\]"()]/g, '\\$&') + '\\{([^}]*)\\}').exec(css) || [])[1] || '';
+    const tok = (b, n) => (new RegExp('--' + n + ':(#[0-9A-Fa-f]{6})').exec(b) || [])[1];
+    const lum = (h) => { const c = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+    const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+    const light = block(':root'), dark = block(':root[data-theme="dark"]');
+    const rl = tok(light, 'danger-text') && ratio(tok(light, 'danger-text'), tok(light, 'panel')), rd = tok(dark, 'danger-text') && ratio(tok(dark, 'danger-text'), tok(dark, 'panel'));
+    check('contrast: danger buttons use --danger-text (≥ 4.5:1 on the panel in light and dark) and keep --retry for the border',
+      /\.icon-btn\.danger\{border-color:var\(--retry\);color:var\(--danger-text\)\}/.test(css) && rl >= 4.5 && rd >= 4.5, `${rl} ${rd}`);
+  }
+
+  // the teacher's roster bar and the child's own bar use one mastery rule (Dominado = ok >= 2 && ok > fail)
+  check('mastery: one predicate (isMastered) serves the level bars and the roster percentage (pctOfData)',
+    (appJs.match(/ok>=2&&\w+\.ok>\w+\.fail/g) || []).length === 1 && /const mastered=k=>isMastered\(S\.stats\[k\]\)/.test(appJs) && /function pctOfData[\s\S]{0,300}isMastered\(st\[x\.key\]\)/.test(appJs));
+
+  // a class profile without rid can never send anything: signing out removes it without asking
   {
     const { app } = await signedTeacherBoot({ 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'mateo', name: 'Mateo', kind: 'reader', via: 'class' }] } });
     app.$('acctOutBtn').click();
-    await until(() => !app.$('link').hidden, 3000);
-    const asked = !app.$('link').hidden && app.$('linkAsk').textContent === ies.acctUnsentAsk;
-    (linkButtons(app)[1] || app.$('linkCancel')).click(); await sleep(40);
-    check('sign-out: a revoked class profile with progress asks, and "stay" changes nothing', asked && profList(app).some((p) => p.id === 'mateo' && p.via === 'class' && !p.hidden) && stOf(app, 'mateo').total === 5 && app.w.localStorage.getItem('leemos-auth') !== null, JSON.stringify({ asked, list: profList(app) }));
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(40);
+    check('sign-out: a class profile without rid (nothing to send) is removed without asking', app.$('link').hidden && !profList(app).some((p) => p.id === 'mateo') && stOf(app, 'mateo') === null, JSON.stringify({ list: profList(app) }));
+  }
+
+  // revoked class child (the family took it out of the class or deleted it, or the teacher lost the class): it leaves this tablet at once
+  for (const active of ['elsa', 'mateo']) {
+    const t = await teacherWorld();
+    t.s.hideRow(RID_B); // the policy no longer lets this teacher have Mateo
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...CLASS_PROFILES({ active }), 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 }, 'leemos-v1:ana': { name: 'Ana', total: 3 } } });
+    await until(() => !profList(app).some((p) => p.id === 'mateo'), 3000); await sleep(60);
+    const pf = JSON.parse(app.w.localStorage.getItem('leemos-profiles'));
+    check(`sync revoked: a class profile is removed from the device with its saved state (open profile: ${active})`,
+      !pf.list.some((p) => p.id === 'mateo') && stOf(app, 'mateo') === null && pf.active === 'elsa' && pf.list.find((p) => p.id === 'elsa').rid === RID_A && stOf(app, 'ana').total === 3
+      && app.$('acctMsg').textContent === ies.acctRevokedClass.replace('{n}', 'Mateo') && app.errors.length === 0, JSON.stringify({ pf, msg: app.$('acctMsg').textContent, e: app.errors }));
   }
 
   // fix round 1: the session dies during the final sync and the adult stays: the class profiles are hidden
@@ -2816,10 +2843,12 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     s.links.set(RID_A, new Set([uid]));
     const app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'pre', rid: RID_A }] }, 'leemos-v1': { name: 'Elsa', total: 1, modAt: 10 } } });
     await until(() => s.log.some((l) => l.startsWith('GET /rest/v1/child_profiles')), 3000); await sleep(80);
-    const after = profList(app)[0];
-    const again = await boot({ supa: s, syncConfig: CFG, storage: dump(app.w) }); // a later start: the migration runs once
-    await sleep(80);
-    check('upgrade: a kind switched before this version is pushed once, not replaced by the server\'s stale kind', after.kind === 'pre' && !after.kindDirty && s.rows.get(RID_A).kind === 'pre' && profList(again)[0].kind === 'pre' && !profList(again)[0].kindDirty && app.errors.length === 0, JSON.stringify({ after, server: s.rows.get(RID_A).kind, again: profList(again) }));
+    const after = profList(app)[0], sealed = JSON.parse(dump(app.w)['leemos-profiles']).kindSynced === true;
+    const r = s.rows.get(RID_A); r.kind = 'reader'; r.version++; // another device switches it back before this one starts again
+    const again = await boot({ supa: s, syncConfig: CFG, storage: dump(app.w) }); // a later start: the migration must not run again
+    await until(() => profList(again)[0].kind === 'reader', 3000); await sleep(80);
+    check('upgrade: a kind switched before this version is pushed once, not replaced by the server\'s stale kind; a later start adopts a switch made elsewhere',
+      after.kind === 'pre' && !after.kindDirty && sealed && profList(again)[0].kind === 'reader' && !profList(again)[0].kindDirty && s.rows.get(RID_A).kind === 'reader' && app.errors.length === 0 && again.errors.length === 0, JSON.stringify({ after, sealed, server: s.rows.get(RID_A).kind, again: profList(again) }));
   }
 
   // the role is read at start when a session is stored (whoami also claims a pending teacher invitation)
@@ -2879,7 +2908,10 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   }
 
   const ies2 = readJSON('src/data/i18n.es.json'), ica2 = readJSON('src/data/i18n.ca.json');
-  check('i18n parity still holds', Object.keys(ies2).length === Object.keys(ica2).length && Object.keys(ies2).every((k) => k in ica2) && ['acctRevoked', 'acctUnsentAsk', 'acctUnsentOut', 'acctUnsentStay'].every((k) => typeof ies2[k] === 'string' && typeof ica2[k] === 'string'));
+  check('i18n parity still holds', Object.keys(ies2).length === Object.keys(ica2).length && Object.keys(ies2).every((k) => k in ica2) && ['acctRevoked', 'acctRevokedClass', 'acctUnsentAsk', 'acctUnsentOut', 'acctUnsentStay'].every((k) => typeof ies2[k] === 'string' && typeof ica2[k] === 'string'));
+  { // one Catalan term per role in the account and class strings: «mestre» and «infant» (as in teachShare, teachClasses…)
+    const mixed = Object.entries(ica2).filter(([k, v]) => /^(teach|acct)/.test(k) && /\b(professors?|nens?)\b/i.test(v)).map(([k]) => k);
+    check('i18n ca: the account and class strings say «mestre» and «infant», never «professor» or «nen»', !mixed.length, mixed.join()); }
 }
 
 // ---------- parent and teacher UI (src/teach.js): sharing, code redeem, class panel ----------

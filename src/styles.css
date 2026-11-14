@@ -4,6 +4,7 @@
   padding-bottom:env(safe-area-inset-bottom,0px);
   --bg:#FFF3FA; --panel:#FFFFFF; --ink:#2A1A5E; --muted:#7A5FA6; --line:#FFD1EC;
   --edge:rgba(42,26,94,.28); --ok:#00B368; --retry:#FF5A36;
+  --danger-text:#C2371A; /* text of destructive buttons: 5.4:1 on the panel (--retry is 3.1:1, kept for borders) */
   --c0:#00C2B8; --c1:#FFC53D; --c2:#8A3FFC; --c3:#FF4D6D; --c4:#2F9BFF;
   --vowel:#C2255C; /* 5.7:1 on the panel; the dark one is 7.4:1 (3:1 on the rescue pulse: large bold text) */
   --t0:#fff; --t1:#2A1A5E; --t2:#fff; --t3:#fff; --t4:#fff;
@@ -12,6 +13,7 @@
   --bg:#15122B; --panel:#211D42; --ink:#F3F1FF; --muted:#A9A5CC; --line:#372F66;
   --vowel:#FF8FB3;
   --edge:rgba(0,0,0,.45); --ok:#3DDC97; --retry:#FF9B62;
+  --danger-text:#FF9B62;
 }
 html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
 *,*::before,*::after{box-sizing:inherit}
@@ -400,7 +402,7 @@ html.listen .session,html.listen #goal,html.listen #tiles,html.listen #pic,html.
 .teach-name{font-size:1.05rem}
 .teach-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
 .teach-acts .icon-btn,.teach-form .icon-btn,.teach-ack .icon-btn,.teach-code .icon-btn{min-width:44px;min-height:44px}
-.icon-btn.danger{border-color:var(--retry);color:var(--retry)}
+.icon-btn.danger{border-color:var(--retry);color:var(--danger-text)}
 .icon-btn:disabled{opacity:.55}
 .teach-bar{flex:1;min-width:80px;max-width:200px;height:8px;border-radius:99px;background:var(--line);overflow:hidden}
 .teach-bar i{display:block;height:100%;background:var(--ok)}

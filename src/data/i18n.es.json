@@ -179,6 +179,7 @@
   "acctError": "No se pudo completar. Inténtalo de nuevo.",
   "acctExpired": "La sesión ha caducado. Vuelve a entrar.",
   "acctRevoked": "{n} ya no se comparte con esta cuenta. Su progreso sigue en este dispositivo.",
+  "acctRevokedClass": "{n} ya no se comparte con esta cuenta: se ha quitado de este dispositivo.",
   "acctUnsentAsk": "Hay progreso de la clase que aún no se ha enviado. Si cierras la sesión, se perderá.",
   "acctUnsentOut": "Cerrar sesión y perderlo",
   "acctUnsentStay": "Seguir con la sesión",

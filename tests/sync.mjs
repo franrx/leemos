@@ -209,7 +209,7 @@ const as = async (srv, email) => { const storage = memoryStorage(); const sync =
   await p.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
   const { code } = await p.sync.createInvite(RID, 'to_class');
   const bad = await rejects(t.sync.redeemInvite('ZZZZZZZZ', cls));
-  check('sync: redeemInvite maps invalid to kind code and rate to kind rate', bad instanceof SyncError && bad.kind === 'code', bad && bad.kind);
+  check('sync: redeemInvite maps invalid to kind code', bad instanceof SyncError && bad.kind === 'code', bad && bad.kind);
   const other = await rejects(t.sync.redeemInvite(code, crypto.randomUUID()));
   check('sync: redeemInvite maps another error to http with its code as message and the code survives', other instanceof SyncError && other.kind === 'http' && other.message === 'forbidden', other && other.message);
   for (let i = 0; i < 8; i++) await rejects(t.sync.redeemInvite('ZZZZZZZZ', cls)); // 10 failures so far (invalid x9, forbidden x1)

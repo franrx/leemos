@@ -157,7 +157,8 @@ let curWorld=Math.floor(Math.random()*WORLDS.length);
 
 const $=id=>document.getElementById(id);
 const stat=k=>S.stats[k]||(S.stats[k]={ok:0,fail:0});
-const mastered=k=>{const s=S.stats[k];return !!s&&s.ok>=2&&s.ok>s.fail};
+const isMastered=s=>!!s&&s.ok>=2&&s.ok>s.fail; // Dominado = ok >= 2 && ok > fail: the one rule, for this child and for a child's server data
+const mastered=k=>isMastered(S.stats[k]);
 
 // ---------- voice ----------
 let voice=null,esVoices=[];
@@ -769,7 +770,10 @@ async function syncAll({final=false}={}){
         const dirty=!!p.kindDirty; // the adult switched the kind on this device: push it once, then the server's kind wins
         const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:mergeMod.pickSynced(stateOf(p.id)),kindChanged:dirty});
         if(!PROFILES.list.includes(p))continue; // removed from this device while the request was in flight (purged, deleted): nothing is written back
-        if(r.revoked){delete p.rid;p.noSync=true;saveProfiles();acctMsg('acctRevoked',{n:p.name});continue} // removed from the class or deleted by someone else: local progress stays
+        if(r.revoked){ // removed from the class or deleted by someone else
+          if(p.via==='class'){const n=p.name;forgetRid(p.rid);acctMsg('acctRevokedClass',{n});continue} // another family's child held for a class: nothing of it can be sent, it leaves this device
+          delete p.rid;p.noSync=true;saveProfiles();acctMsg('acctRevoked',{n:p.name});continue // the family's own copy: local progress stays
+        }
         let ch=false;
         if(dirty&&p.kind===r.kind){delete p.kindDirty;ch=true} // pushed (unless the adult switched it again meanwhile)
         if(!p.kindDirty&&(r.kind==='pre'||r.kind==='reader')&&r.kind!==p.kind){p.kind=r.kind;ch=true} // the server's kind; the screen follows on the next load
@@ -829,7 +833,7 @@ function showTeach(){if(sync&&$('parents').open&&sync.userId())loadTeach().then(
 // Percentage of mastered items (syllables and words of every level) in the language on screen, for a child's server data.
 function pctOfData(data){
   const st=(data&&data.stats)||{};let n=0,m=0;
-  LEVELS.forEach((_,i)=>[...itemsFor(i,'syl'),...itemsFor(i,'word')].forEach(x=>{n++;const v=st[x.key];if(v&&v.ok>=2&&v.ok>v.fail)m++}));
+  LEVELS.forEach((_,i)=>[...itemsFor(i,'syl'),...itemsFor(i,'word')].forEach(x=>{n++;if(isMastered(st[x.key]))m++}));
   return n?Math.round(100*m/n):0;
 }
 // "Abrir aquí": the local profile of an account child, created on demand with the id of its row. A child the account is not linked to
@@ -855,7 +859,6 @@ function unsent(p){
   const st=stateOf(p.id);
   return Math.max(Number(st.modAt)||0,Number(st.session&&st.session.at)||0)>at;
 }
-function hasProgress(p){const st=stateOf(p.id);return (Number(st.total)||0)>0||Object.keys(st.stats||{}).length>0}
 // Asks a yes/no question in the link sheet. Resolves true for yesKey; noKey, "Ahora no" and Escape resolve false.
 function askChoice(textKey,yesKey,noKey,titleKey='acctSignOut',vars){
   return new Promise(resolve=>{
@@ -876,8 +879,8 @@ async function signOutAndClean(){
   const wait=Date.now()+(window.__leemosSignOutWait||10000);
   while(syncBusy&&Date.now()<wait)await new Promise(r=>setTimeout(r,50)); // a sync in flight finishes first (if it does not, this round is 'busy': nothing counts as sent)
   const fail=await syncAll({final:true});
-  // a class profile without rid (revoked) can never send its progress: always ask for it; the others only when this last round failed
-  const risky=PROFILES.list.some(p=>p.via==='class'&&(p.rid?fail&&unsent(p):hasProgress(p)));
+  // only when this last round failed and a class profile has progress not yet sent (one without rid can never send anything: it just goes)
+  const risky=PROFILES.list.some(p=>p.via==='class'&&p.rid&&fail&&unsent(p));
   if(risky&&!await askChoice('acctUnsentAsk','acctUnsentOut','acctUnsentStay')){
     if(fail==='auth'||!sync.userId())hideClassProfiles(); // staying without a session: the class children must not stay open on a shared tablet
     renderAcct();
