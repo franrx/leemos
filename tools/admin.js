@@ -1,5 +1,6 @@
 // Admin page: teachers, classes and assignments. The admin sees counts, never a child's name. Every server string goes in with textContent.
-// mountAdmin(root, sync, t) is pure DOM work (testable in jsdom); the page bootstrap at the end signs in and loads src/sync.js.
+// mountAdmin(root, sync, t) is pure DOM work (testable in jsdom); bootAdmin(doc, sync) is the sign-in form and "Salir";
+// the page bootstrap at the end reads the config and loads src/sync.js.
 export const TEXT = {
   notAdmin: 'Esta cuenta no es de administrador',
   teachers: 'Profesores y administradores',
@@ -16,6 +17,8 @@ export const TEXT = {
   rename: 'Renombrar',
   renameLabel: 'Nuevo nombre de la clase',
   del: 'Borrar clase',
+  askDel: 'Los niños con familia saldrán de la clase y sus familias tendrán que volver a compartirlos con un código. ¿Borrar la clase',
+  confirmDel: 'Borrar la clase',
   children: 'niños',
   unclaimed: 'sin familia',
   classTeachers: 'Profesores de la clase',
@@ -50,7 +53,7 @@ export async function mountAdmin(root, sync, tr = t) {
   const btn = (label, onclick, extra = {}) => el('button', { type: 'button', text: label, 'aria-label': extra.aria || label, onclick, ...(extra.cls ? { class: extra.cls } : {}) });
   const field = (label, ph) => { const i = el('input', { type: 'text', 'aria-label': label, placeholder: ph || label }); return i; };
   const status = el('p', { role: 'status', 'aria-live': 'polite', id: 'adminStatus' });
-  let panel = null; // the open demote warning, if any
+  let panel = null; // the open confirmation (demote or delete), if any: one at a time
 
   const msgFor = (j) => {
     const e = j && j.error;
@@ -80,26 +83,35 @@ export async function mountAdmin(root, sync, tr = t) {
     render(a, c);
   }
 
-  function demote(acc, classes) {
+  const closePanel = () => { if (panel) panel.remove(); panel = null; };
+  // An in-page confirmation. The safe answer (Cancel) has the focus; Cancel or Escape give the focus back to the button that opened it.
+  // The destructive answer closes it before the request, so a failure leaves only the status message.
+  function ask(id, label, kids, yesLabel, onYes, opener) {
+    closePanel();
+    const cancel = () => { closePanel(); if (opener && opener.isConnected) opener.focus(); };
+    const no = btn(tr('cancel'), cancel);
+    panel = el('div', { role: 'alertdialog', 'aria-label': label, class: 'warn', id }, ...kids,
+      el('div', { class: 'row' }, btn(yesLabel, () => { closePanel(); onYes(); }, { cls: 'primary' }), no));
+    panel.addEventListener('keydown', (e) => { if (e.key === 'Escape') cancel(); });
+    root.append(panel);
+    no.focus();
+  }
+  function demote(acc, classes, opener) {
     const left = classes.filter((k) => k.unclaimed > 0 && k.teachers.length === 1 && k.teachers[0].user_id === acc.user_id);
-    if (!left.length) return actAndRefresh('admin_demote_teacher', { p_user: acc.user_id });
+    if (!left.length) { closePanel(); return actAndRefresh('admin_demote_teacher', { p_user: acc.user_id }); }
     const list = el('ul');
     for (const k of left) list.append(el('li', { text: `${k.name}: ${k.unclaimed} ${tr('unclaimed')}` }));
-    panel = el('div', { role: 'alertdialog', 'aria-label': tr('warnDemote'), class: 'warn', id: 'demoteWarn' },
-      el('p', { text: `${acc.email}. ${tr('warnDemote')}` }), list,
-      el('div', { class: 'row' },
-        btn(tr('confirmDemote'), () => { panel = null; actAndRefresh('admin_demote_teacher', { p_user: acc.user_id }); }, { cls: 'primary' }),
-        btn(tr('cancel'), () => { panel.remove(); panel = null; })));
-    root.append(panel);
-    panel.querySelector('button').focus();
+    ask('demoteWarn', tr('warnDemote'), [el('p', { text: `${acc.email}. ${tr('warnDemote')}` }), list], tr('confirmDemote'), () => actAndRefresh('admin_demote_teacher', { p_user: acc.user_id }), opener);
   }
+  // Deleting a class takes its linked children out of it: their families must share them again (with a code) to put them in a class.
+  const delClass = (k, opener) => ask('delWarn', `${tr('del')}: ${k.name}`, [el('p', { text: `${tr('askDel')} ${k.name}?` })], tr('confirmDel'), () => actAndRefresh('admin_delete_class', { p_class: k.id }), opener);
 
   function render(a, c) {
     const teachers = a.accounts.filter((x) => x.role === 'teacher');
     const tl = el('ul');
     for (const acc of a.accounts) {
       const li = el('li', {}, el('span', { text: `${acc.email} (${acc.role}) ` }));
-      if (acc.role === 'teacher') li.append(btn(tr('demote'), () => demote(acc, c.classes), { aria: `${tr('demote')}: ${acc.email}` }));
+      if (acc.role === 'teacher') li.append(btn(tr('demote'), (e) => demote(acc, c.classes, e.currentTarget), { aria: `${tr('demote')}: ${acc.email}` }));
       tl.append(li);
     }
     if (!a.accounts.length) tl.append(el('li', { text: tr('none') }));
@@ -117,21 +129,53 @@ export async function mountAdmin(root, sync, tr = t) {
     const nc = field(tr('newClass'));
     const secC = el('section', {}, el('h2', { text: tr('classes') }));
     for (const k of c.classes) {
-      const rn = field(tr('renameLabel'));
+      const rn = field(`${tr('renameLabel')}: ${k.name}`, tr('renameLabel')); // each field names its class for screen readers
       const tUl = el('ul');
       for (const tt of k.teachers) tUl.append(el('li', {}, el('span', { text: tt.email + ' ' }), btn(tr('unassign'), () => actAndRefresh('admin_unassign_teacher', { p_class: k.id, p_user: tt.user_id }), { aria: `${tr('unassign')}: ${tt.email}` })));
       if (!k.teachers.length) tUl.append(el('li', { text: tr('none') }));
       const free = teachers.filter((x) => !k.teachers.some((y) => y.user_id === x.user_id));
       const sel = el('select', { 'aria-label': tr('assignLabel') });
       for (const x of free) sel.append(el('option', { value: x.user_id, text: x.email }));
-      const row = el('div', { class: 'row' }, rn, btn(tr('rename'), () => { const v = rn.value.trim(); if (v) actAndRefresh('admin_rename_class', { p_class: k.id, p_name: v }); }, { aria: `${tr('rename')}: ${k.name}` }), btn(tr('del'), () => actAndRefresh('admin_delete_class', { p_class: k.id }), { aria: `${tr('del')}: ${k.name}` }));
+      const row = el('div', { class: 'row' }, rn, btn(tr('rename'), () => { const v = rn.value.trim(); if (v) actAndRefresh('admin_rename_class', { p_class: k.id, p_name: v }); }, { aria: `${tr('rename')}: ${k.name}` }), btn(tr('del'), (e) => delClass(k, e.currentTarget), { aria: `${tr('del')}: ${k.name}` }));
       const assignRow = free.length ? el('div', { class: 'row' }, sel, btn(tr('assign'), () => { if (sel.value) actAndRefresh('admin_assign_teacher', { p_class: k.id, p_user: sel.value }); }, { aria: `${tr('assign')}: ${k.name}` })) : null;
       secC.append(el('article', { class: 'class' }, el('h3', { text: k.name }), el('p', { class: 'muted', text: `${k.children} ${tr('children')}, ${k.unclaimed} ${tr('unclaimed')}` }), row, el('h4', { text: tr('classTeachers') }), tUl, assignRow));
     }
     secC.append(el('div', { class: 'row' }, nc, btn(tr('create'), () => { const v = nc.value.trim(); if (v) actAndRefresh('admin_create_class', { p_name: v }); })));
+    panel = null; // a re-render drops any open confirmation
     root.replaceChildren(status, secT, secC);
   }
   await load();
+}
+
+// ---------- sign-in and "Salir" (testable with a sync client) ----------
+// "Salir" lives outside #app, before it: mountAdmin re-renders #app on every refresh and would drop it.
+export async function bootAdmin(doc, sync) {
+  const root = doc.getElementById('app');
+  const out = Object.assign(doc.createElement('button'), { type: 'button', textContent: t('signOut'), hidden: true });
+  out.addEventListener('click', async () => { await sync.signOut(); form(); });
+  root.before(out);
+  const form = () => {
+    out.hidden = true;
+    const mail = Object.assign(doc.createElement('input'), { type: 'email', autocomplete: 'email' });
+    mail.setAttribute('aria-label', t('email'));
+    const code = Object.assign(doc.createElement('input'), { type: 'text', inputMode: 'numeric', autocomplete: 'one-time-code', hidden: true });
+    code.setAttribute('aria-label', t('code'));
+    const go = Object.assign(doc.createElement('button'), { type: 'button', textContent: t('sendCode') });
+    const msg = Object.assign(doc.createElement('p'), {}); msg.setAttribute('role', 'status');
+    go.addEventListener('click', async () => {
+      try {
+        if (code.hidden) { await sync.requestCode(mail.value.trim()); code.hidden = false; go.textContent = t('verify'); code.focus(); }
+        else { await sync.verifyCode(mail.value.trim(), code.value); await start(); }
+      } catch (e) { msg.textContent = e && e.kind === 'code' ? t('codeBad') : t('failed'); }
+    });
+    root.replaceChildren(mail, code, go, msg);
+  };
+  const start = async () => {
+    if (!(await sync.session().catch(() => null))) return form();
+    out.hidden = false;
+    await mountAdmin(root, sync, t);
+  };
+  await start();
 }
 
 // ---------- page bootstrap (browser only) ----------
@@ -142,29 +186,6 @@ async function boot(doc) {
   try { cfg = await (await fetch('../src/data/sync.config.json')).json(); } catch (e) { cfg = {}; }
   if (!cfg.url || !cfg.anonKey) { say(t('empty')); return; }
   const { createSync } = await import('../src/sync.js');
-  const sync = createSync({ url: cfg.url, anonKey: cfg.anonKey });
-  const form = () => {
-    const mail = Object.assign(doc.createElement('input'), { type: 'email', autocomplete: 'email' });
-    mail.setAttribute('aria-label', t('email'));
-    const code = Object.assign(doc.createElement('input'), { type: 'text', inputMode: 'numeric', autocomplete: 'one-time-code', hidden: true });
-    code.setAttribute('aria-label', t('code'));
-    const go = Object.assign(doc.createElement('button'), { type: 'button', textContent: t('sendCode') });
-    const msg = Object.assign(doc.createElement('p'), {}); msg.setAttribute('role', 'status');
-    go.addEventListener('click', async () => {
-      try {
-        if (code.hidden) { await sync.requestCode(mail.value.trim()); code.hidden = false; go.textContent = t('verify'); code.focus(); }
-        else { await sync.verifyCode(mail.value.trim(), code.value); start(); }
-      } catch (e) { msg.textContent = e && e.kind === 'code' ? t('codeBad') : t('failed'); }
-    });
-    root.replaceChildren(mail, code, go, msg);
-  };
-  const start = async () => {
-    if (!(await sync.session().catch(() => null))) return form();
-    await mountAdmin(root, sync, t);
-    const out = Object.assign(doc.createElement('button'), { type: 'button', textContent: t('signOut') });
-    out.addEventListener('click', async () => { await sync.signOut(); form(); });
-    root.append(out);
-  };
-  start();
+  await bootAdmin(doc, createSync({ url: cfg.url, anonKey: cfg.anonKey }));
 }
 if (typeof document !== 'undefined' && document.getElementById('app')) boot(document);

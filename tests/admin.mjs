@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createFakeSupabase, memoryStorage } from './lib/fake-supabase.mjs';
 import { createSync } from '../src/sync.js';
-import { mountAdmin, t } from '../tools/admin.js';
+import { mountAdmin, bootAdmin, t } from '../tools/admin.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let failures = 0;
@@ -53,6 +53,7 @@ const kid = (srv, id, classId, claimed, name) => { srv.rows.set(id, { id, owner:
   let cid;
   const { root, srv } = await open('admin@e.c', (s) => { s.setRole('admin@e.c', 'admin'); cid = s.addClass('3A'); kid(s, 'k1', cid, false, 'Ana'); kid(s, 'k2', cid, false, 'Beto'); kid(s, 'k3', cid, true, 'Cleo'); });
   await click(byLabel(root, /^Borrar clase: 3A$/)[0]);
+  await click([...root.querySelectorAll('[role=alertdialog] button')].find((b) => b.textContent === t('confirmDel')));
   check('admin: deleting a class with orphans shows the count and does not delete', srv.classes.has(cid) && root.textContent.includes('Cantidad: 2') && root.textContent.includes('3A') && !/Ana|Beto|Cleo/.test(root.textContent), root.textContent);
 }
 {
@@ -66,6 +67,96 @@ const kid = (srv, id, classId, claimed, name) => { srv.rows.set(id, { id, owner:
   await click(byLabel(root, /^Quitar rol de profesor: prof@e.c$/)[0]);
   await click([...root.querySelectorAll('[role=alertdialog] button')].find((b) => b.textContent === 'Quitar el rol igualmente'));
   check('admin: demoting the last teacher of a class with unclaimed children asks first', asked && cancelled && srv.accounts.get(uid).role === 'parent', JSON.stringify({ asked, cancelled }));
+}
+{
+  // the demote warning: the safe answer has the focus, one dialog at a time, focus back on cancel, gone after a failed confirm
+  let cid;
+  const { root, srv, doc } = await open('admin@e.c', (s) => { s.setRole('admin@e.c', 'admin'); s.setRole('prof@e.c', 'teacher', { ack: true }); cid = s.addClass('3A'); s.addTeacher(cid, 'prof@e.c'); kid(s, 'k1', cid, false, 'Ana'); });
+  const opener = () => byLabel(root, /^Quitar rol de profesor: prof@e.c$/)[0];
+  await click(opener());
+  const focusCancel = doc.activeElement && doc.activeElement.textContent === t('cancel') && root.querySelector('[role=alertdialog]').contains(doc.activeElement);
+  await click(opener());
+  const one = root.querySelectorAll('[role=alertdialog]').length === 1;
+  await click([...root.querySelectorAll('[role=alertdialog] button')].find((b) => b.textContent === t('cancel')));
+  const back = doc.activeElement === opener();
+  await click(opener());
+  srv.setOffline(true);
+  await click([...root.querySelectorAll('[role=alertdialog] button')].find((b) => b.textContent === t('confirmDemote')));
+  srv.setOffline(false);
+  check('admin: the demote warning focuses Cancel, opens once, returns the focus on cancel and closes after a failed confirm',
+    focusCancel && one && back && !root.querySelector('[role=alertdialog]') && root.querySelector('#adminStatus').textContent === t('failed') && srv.accounts.get(srv.userByEmail('prof@e.c').id).role === 'teacher', JSON.stringify({ focusCancel, one, back }));
+}
+{
+  // no warning when the class keeps another teacher, or when every child has a family
+  let c1, c2;
+  const { root, srv } = await open('admin@e.c', (s) => {
+    s.setRole('admin@e.c', 'admin'); s.setRole('p1@e.c', 'teacher', { ack: true }); s.setRole('p2@e.c', 'teacher', { ack: true }); s.setRole('p3@e.c', 'teacher', { ack: true });
+    c1 = s.addClass('3A'); s.addTeacher(c1, 'p1@e.c'); s.addTeacher(c1, 'p2@e.c'); kid(s, 'k1', c1, false, 'Ana'); // two teachers, an unclaimed child
+    c2 = s.addClass('4B'); s.addTeacher(c2, 'p3@e.c'); kid(s, 'k2', c2, true, 'Beto'); // one teacher, only claimed children
+  });
+  await click(byLabel(root, /^Quitar rol de profesor: p1@e.c$/)[0]);
+  const noAsk1 = !root.querySelector('[role=alertdialog]') && srv.accounts.get(srv.userByEmail('p1@e.c').id).role === 'parent';
+  await click(byLabel(root, /^Quitar rol de profesor: p3@e.c$/)[0]);
+  const noAsk2 = !root.querySelector('[role=alertdialog]') && srv.accounts.get(srv.userByEmail('p3@e.c').id).role === 'parent';
+  check('admin: demoting a teacher whose classes keep another teacher or have no unclaimed child asks nothing', noAsk1 && noAsk2, JSON.stringify({ noAsk1, noAsk2 }));
+}
+{
+  // deleting a class asks first (its linked children leave it and the families must share again)
+  let cid;
+  const { root, srv, doc } = await open('admin@e.c', (s) => { s.setRole('admin@e.c', 'admin'); cid = s.addClass('3A'); kid(s, 'k1', cid, true, 'Ana'); });
+  const del = () => byLabel(root, /^Borrar clase: 3A$/)[0];
+  await click(del());
+  const asked = !!root.querySelector('[role=alertdialog]') && srv.classes.has(cid) && root.querySelector('[role=alertdialog]').textContent.includes('3A') && doc.activeElement && doc.activeElement.textContent === t('cancel');
+  await click([...root.querySelectorAll('[role=alertdialog] button')].find((b) => b.textContent === t('cancel')));
+  const kept = srv.classes.has(cid) && !root.querySelector('[role=alertdialog]') && doc.activeElement === del();
+  await click(del());
+  await click([...root.querySelectorAll('[role=alertdialog] button')].find((b) => b.textContent === t('confirmDel')));
+  check('admin: "Borrar clase" asks first; cancel keeps the class, confirm deletes it and the child keeps no class', asked && kept && !srv.classes.has(cid) && srv.rows.get('k1').class_id === null && !root.querySelector('[role=alertdialog]'), JSON.stringify({ asked, kept }));
+}
+{
+  const { root } = await open('admin@e.c', (s) => { s.setRole('admin@e.c', 'admin'); s.addClass('3A'); s.addClass('4B'); });
+  const labels = [...root.querySelectorAll('input')].map((i) => i.getAttribute('aria-label')).filter((l) => /^Nuevo nombre de la clase/.test(l));
+  check('admin: each rename field names its class', labels.length === 2 && labels.includes('Nuevo nombre de la clase: 3A') && labels.includes('Nuevo nombre de la clase: 4B'), labels.join('|'));
+}
+{
+  // the sign-in path: email, code, admin UI; "Salir" stays after a refresh (outside the re-rendered root) and brings the form back
+  const srv = createFakeSupabase();
+  srv.setRole('admin@e.c', 'admin'); srv.addClass('3A');
+  const storage = memoryStorage();
+  const sync = createSync({ url: 'https://x.supabase.co', anonKey: 'anon', fetch: srv.fetch, storage });
+  const dom = new JSDOM('<h1>Administración</h1><main id="app"></main>');
+  const doc = dom.window.document, root = doc.getElementById('app');
+  await bootAdmin(doc, sync); await settle();
+  const mail = root.querySelector('input[type=email]'), code = () => root.querySelector('input[autocomplete=one-time-code]'), go = () => root.querySelector('button');
+  const formFirst = !!mail && code().hidden;
+  mail.value = 'admin@e.c'; await click(go());
+  const codeShown = !code().hidden;
+  code().value = '123456'; await click(go()); await settle();
+  const out = () => [...doc.querySelectorAll('button')].find((b) => b.textContent === t('signOut'));
+  const mounted = root.textContent.includes(t('classes')) && !!out() && !out().hidden;
+  const nc = [...root.querySelectorAll('input')].find((i) => i.getAttribute('aria-label') === t('newClass'));
+  nc.value = '4B'; await click([...root.querySelectorAll('button')].find((b) => b.textContent === t('create'))); // an action re-renders the root
+  const stays = root.textContent.includes('4B') && !!out() && !out().hidden && !root.contains(out());
+  await click(out());
+  check('admin: sign-in shows the code field, then the admin page; "Salir" survives a re-render and brings the form back',
+    formFirst && codeShown && mounted && stays && storage.getItem('leemos-auth') === null && !!root.querySelector('input[type=email]') && out().hidden, JSON.stringify({ formFirst, codeShown, mounted, stays }));
+}
+{
+  // a failure after the code (the admin page cannot load) is shown, not thrown
+  const srv = createFakeSupabase();
+  const storage = memoryStorage();
+  const sync = createSync({ url: 'https://x.supabase.co', anonKey: 'anon', fetch: srv.fetch, storage });
+  const dom = new JSDOM('<main id="app"></main>');
+  const doc = dom.window.document, root = doc.getElementById('app');
+  const errs = []; process.on('unhandledRejection', (e) => errs.push(String(e)));
+  await bootAdmin(doc, { ...sync, me: async () => ({ get role() { throw new Error('boom'); } }) }); await settle(); // mounting the page throws after the code
+  root.querySelector('input[type=email]').value = 'x@e.c'; await click(root.querySelector('button'));
+  root.querySelector('input[autocomplete=one-time-code]').value = '123456'; await click(root.querySelector('button')); await settle();
+  check('admin: a failure after signing in is shown on the page and never left unhandled', errs.length === 0 && root.textContent.includes(t('failed')), JSON.stringify({ errs, txt: root.textContent }));
+}
+{
+  const html = readFileSync(join(ROOT, 'tools/admin.html'), 'utf8');
+  check('admin: the page asks search engines not to index it', /<meta name="robots" content="noindex">/.test(html));
 }
 {
   const { root } = await open('admin@e.c', (s) => { s.setRole('admin@e.c', 'admin'); s.setRole('prof@e.c', 'teacher', { ack: true }); const c = s.addClass('3A'); s.addTeacher(c, 'prof@e.c'); s.addClass('4B'); });
