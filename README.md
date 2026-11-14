@@ -73,7 +73,57 @@ Sin configurar nada, la app funciona como siempre y no hace ninguna petición a 
 5. Añade `SUPABASE_URL`, `SUPABASE_ANON_KEY` y `SUPABASE_SERVICE_KEY` a `.env` y ejecuta `node scripts/check-rls.mjs`: todas las líneas deben salir `PASS` (comprueba que un usuario no puede leer ni tocar los datos de otro).
 6. El envío de emails incluido en Supabase está limitado a unos pocos por hora: para uso real configura SMTP propio (Authentication → SMTP Settings).
 
-El adulto inicia sesión desde «Para papá y mamá → Guardar mi progreso» (email, código de 6 dígitos y casilla de consentimiento). Antes de abrirlo a otras familias hacen falta la política de privacidad, exportar y borrar la cuenta (subproyecto 2).
+El adulto inicia sesión desde «Para papá y mamá → Guardar mi progreso» (email, código de 6 dígitos y casilla de consentimiento). Antes de abrirlo a otras familias hace falta la revisión legal de `privacy.html` (exportar y borrar la cuenta ya existen). Para el paso a producción de profesores y clases, ver la sección siguiente.
+
+## Profesores y clases: puesta en producción
+
+Orden obligatorio. La migración `supabase/migrations/20261113000000_teachers_classes.sql` cambia las políticas de `child_profiles`: no se aplica sin los pasos 1 a 3.
+
+1. Con Docker en marcha, `npm run test:rls` levanta un Supabase local, aplica todas las migraciones y ejecuta `scripts/check-rls.mjs`. Tiene que acabar con `All RLS checks passed`. Las claves de producción no van en `.env` para esto: el script inyecta las locales.
+2. Repite el paso 1 después de cualquier cambio en la migración.
+3. En producción, haz copia de seguridad de `child_profiles`: en el editor SQL `select * from child_profiles` y descarga el CSV.
+4. Aplica la migración en producción (editor SQL, pegando el archivo). Es una sola transacción: si falla, no queda nada a medias.
+5. Nombra al primer admin por SQL: `update public.accounts set role='admin' where user_id=(select id from auth.users where email='tu@email');`
+6. Comprueba a mano con tu cuenta real que los perfiles de Elsa y Leo siguen sincronizando (entrar, cambiar algo en un dispositivo, verlo en otro). **No ejecutes `scripts/check-rls.mjs` contra producción** (crea y borra usuarios de prueba): la base de datos se prueba en local, en el paso 1.
+7. Solo entonces, fusiona y publica.
+
+Antes de empezar, en Supabase Auth debe estar activado **Confirm email**: la invitación de un profesor casa con el email verificado.
+
+**Si el paso 6 falla (marcha atrás):** restaura la copia del paso 3 (reimporta el CSV en `child_profiles` si hiciera falta) y borra lo nuevo, en este orden:
+
+```sql
+begin;
+-- funciones públicas
+drop function if exists public.whoami(), public.ack_teacher(), public.create_invite(uuid, text), public.redeem_invite(text, uuid),
+  public.leave_class(uuid), public.unlink_me(uuid), public.delete_child(uuid), public.export_my_data(), public.delete_my_account(),
+  public.admin_list_accounts(), public.admin_list_classes(), public.admin_invite_teacher(text), public.admin_revoke_invite(text),
+  public.admin_demote_teacher(uuid), public.admin_create_class(text), public.admin_rename_class(uuid, text), public.admin_delete_class(uuid),
+  public.admin_assign_teacher(uuid, uuid), public.admin_unassign_teacher(uuid, uuid), public.has_parent(public.child_profiles);
+-- disparadores sobre tablas ajenas
+drop trigger if exists accounts_for_new_user on auth.users;
+drop trigger if exists child_profiles_link_creator on public.child_profiles;
+drop trigger if exists child_profiles_owner_limit on public.child_profiles;
+drop trigger if exists child_profiles_class_limit on public.child_profiles;
+-- tablas nuevas
+alter table public.child_profiles drop column if exists class_id;
+drop table if exists public.child_links, public.class_teachers, public.invites, public.invite_attempts, public.role_invites,
+  public.admin_log, public.deleted_children, public.classes, public.accounts cascade;
+drop schema if exists private cascade;
+-- los niños sin propietario (si los hay) hay que asignarlos o borrarlos antes de la siguiente línea
+alter table public.child_profiles alter column owner set not null;
+alter table public.child_profiles drop constraint child_profiles_owner_fkey;
+alter table public.child_profiles add constraint child_profiles_owner_fkey foreign key (owner) references auth.users(id) on delete cascade;
+commit;
+-- después, vuelve a crear las políticas y los grants de child_profiles tal como están en 20261017000000_child_profiles.sql
+```
+
+Revisa el SQL contra la migración antes de lanzarlo (si añadió o cambió algo, lo nuevo también hay que borrarlo). Para quitar un usuario de prueba usa `delete_my_account`, no `delete from auth.users` en el panel: dejaría niños de clase sin ningún vínculo.
+
+### Pendiente de revisión humana
+
+- **Revisión legal de `privacy.html`**: es un borrador con marcas PENDIENTE (responsable, base legal, plazos, proveedores).
+- **Revisión por un nativo de las cadenas en catalán** (claves de `i18n.ca.json`): `teachShareAsk`, `teachLeaveAskParent`, `teachTakeAsk`, `teachDeleteAsk`, `teachOrphan`, `teachCodeTeacher`, `teachCodeParent`, `teachRedeem`, `teachHaveCode`, `teachAckText`, `teachHasParent`, `teachDelForbidden`, `teachLimit`, `acctExported`, `acctDelAsk1`, `acctDelAsk2`, `acctDelYes1`, `acctDelYes2`, `acctDelNo`, `acctDeleted`, `acctLastAdmin`, `teachWipe`, `teachWipeAsk`, `teachWipeAskClass`, `teachWipeYes`, `teachWiped`, `teachDownload`, `acctExport`, y la parte catalana de `privacy.html` (aviso de «esborrany», «enganxines», «sobrenom»). Dudas de vocabulario: «mestre» frente a «docent», «infant» frente a «nen/nena».
+- **Autohospedar la fuente Andika** (OFL): la política de privacidad menciona que hoy se pide a Google Fonts.
 
 ## Publicar e instalar en la tablet
 Es un sitio estático: sirve cualquier hosting con **https** (Netlify, Cloudflare Pages, GitHub Pages…). Hace falta https para el micrófono y el modo offline. Una vez abierta en la tablet, «Añadir a pantalla de inicio» la instala; tras la primera visita con conexión, descarga los audios y funciona sin internet.
