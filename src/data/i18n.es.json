@@ -206,7 +206,7 @@
   "teachTakeAsk": "¿Sacar a {n} de la clase {c}? Dejará de aparecer aquí; su progreso no se borra.",
   "teachTakeYes": "Sí, sacarlo de la clase",
   "teachDelete": "Borrar",
-  "teachDeleteAsk": "¿Borrar a {n} para siempre? Se elimina su progreso del servidor y también de este dispositivo, y no se puede deshacer.",
+  "teachDeleteAsk": "¿Borrar a {n} para siempre? Se elimina su progreso del servidor y, si solo lo tenías por la clase, también de este dispositivo. No se puede deshacer.",
   "teachDeleteYes": "Sí, borrar",
   "teachHaveCode": "Tengo un código",
   "teachCodeHint": "Código de 8 letras y números",

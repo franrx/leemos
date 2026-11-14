@@ -755,7 +755,7 @@ async function syncAll({final=false}={}){
     try{s=await sync.session()}catch(e){if(e&&e.kind==='auth'&&!final)hideClassProfiles();renderAcct();return e&&e.kind||'error'}
     if(!s){if(!final)hideClassProfiles();return 'nosession'} // the session died outside a round (a panel request, another page): same as an auth error
     let last=null;try{last=localStorage.getItem(AUTH_USER_KEY)}catch(e){}
-    if(last&&s.user&&s.user.id&&last!==s.user.id)return 'skipped'; // a session of another account than the one this device was linked to: never send these profiles to it
+    if(last&&s.user&&s.user.id&&last!==s.user.id){if(!final)hideClassProfiles();return 'skipped'} // a session of another account than the one this device was linked to (e.g. the admin page signed in on this origin): never send these profiles to it, and the class children it does not vouch for are hidden (not deleted)
     syncState='syncing';renderAcct();
     const started=Date.now(); // the stamp of a complete round: progress made while it runs must not look sent
     const rank=k=>k==='auth'?3:k==='offline'?1:2;

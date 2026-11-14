@@ -2840,6 +2840,22 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     const m = profList(app).find((p) => p.id === 'mateo');
     check('final review: with no stored session at start the class profiles are hidden, not listed and not opened', !!m && m.hidden === true && !listed.some((x) => /Mateo/.test(x)) && app.$('hello').textContent === '¡Hola, Elsa!' && stOf(app, 'mateo').total === 5 && !profList(app).find((p) => p.id === 'ana').hidden, JSON.stringify({ m, listed, hello: app.$('hello').textContent }));
   }
+  // final review: another account's session replaced A's (the admin page signed in on this origin): A's class profiles are hidden, not deleted
+  {
+    const t = await teacherWorld();
+    const adm = await signedAuth(t.s, 'admin@example.com');
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': adm.auth, 'leemos-auth-user': t.uid, ...CLASS_PROFILES(), 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    await until(() => (profList(app).find((p) => p.id === 'mateo') || {}).hidden === true, 3000);
+    app.$('profileBtn').click();
+    const listed = [...app.d.querySelectorAll('#profileList .wbtn')].map((b) => b.textContent);
+    app.$('profilesClose').click();
+    const m = profList(app).find((p) => p.id === 'mateo');
+    const hiddenOk = !!m && m.hidden === true && m.rid === RID_B && !listed.some((x) => /Mateo/.test(x)) && stOf(app, 'mateo').total === 5 && !t.s.log.some((l) => /child_profiles/.test(l));
+    await signInUi(app, T_EMAIL);
+    await until(() => !(profList(app).find((p) => p.id === 'mateo') || {}).hidden, 3000); await sleep(60);
+    const back = profList(app).find((p) => p.id === 'mateo');
+    check('final review: a session of another account (admin page on this origin) hides the class profiles, and A signing in again unhides them', hiddenOk && !!back && !back.hidden && back.via === 'class' && stOf(app, 'mateo').total === 5, JSON.stringify({ m, listed, back }));
+  }
   // final review 3: a new profile never adopts a leftover saved state whose id it would take
   {
     const app = await boot({ storage: { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader' }] }, 'leemos-v1:ana': { name: 'Ana', total: 7 } } });

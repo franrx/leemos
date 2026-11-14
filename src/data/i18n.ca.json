@@ -206,7 +206,7 @@
   "teachTakeAsk": "Vols treure {n} de la classe {c}? Deixarà d'aparèixer aquí; el seu progrés no s'esborra.",
   "teachTakeYes": "Sí, treure'l de la classe",
   "teachDelete": "Esborrar",
-  "teachDeleteAsk": "Vols esborrar {n} per sempre? S'elimina el seu progrés del servidor i també d'aquest dispositiu, i no es pot desfer.",
+  "teachDeleteAsk": "Vols esborrar {n} per sempre? S'elimina el seu progrés del servidor i, si només el tenies per la classe, també d'aquest dispositiu. No es pot desfer.",
   "teachDeleteYes": "Sí, esborrar",
   "teachHaveCode": "Tinc un codi",
   "teachCodeHint": "Codi de 8 lletres i números",
