@@ -804,6 +804,44 @@ function hideClassProfiles(){
   m.forEach(p=>{p.hidden=true});
   if(PROFILES.list.find(p=>p.id===PROFILES.active).hidden)switchProfile(fallbackId());else saveProfiles();
 }
+// ---------- parent and teacher panel (src/teach.js) ----------
+// Loaded with import() the first time the parents' panel is open with a signed-in account (not only for teachers: parents share from it).
+let teach=null,teachP=null;
+function loadTeach(){
+  if(teach)return Promise.resolve(teach);
+  return teachP||(teachP=(async()=>{
+    try{
+      const m=await (window.__leemosImport||(p=>import(p)))('./teach.js');
+      teach=m.createTeach({doc:document,root:$('teach'),sync,t,lang:()=>S.lang,role:()=>ROLE,setRole:r=>{ROLE=r==='teacher'||r==='admin'?r:'parent'},profiles:PROFILES,uuid,pct:pctOfData,
+        openChild,syncNow:()=>syncAll(),confirm:(k,vars,yes)=>askChoice(k,yes||'teachYes','teachNo','teachConfirmTitle',vars)});
+      return teach;
+    }catch(e){teachP=null;return null}
+  })());
+}
+function showTeach(){if(sync&&$('parents').open&&sync.userId())loadTeach().then(x=>x&&x.refresh())}
+// Percentage of mastered items (syllables and words of every level) in the language on screen, for a child's server data.
+function pctOfData(data){
+  const st=(data&&data.stats)||{};let n=0,m=0;
+  LEVELS.forEach((_,i)=>[...itemsFor(i,'syl'),...itemsFor(i,'word')].forEach(x=>{n++;const v=st[x.key];if(v&&v.ok>=2&&v.ok>v.fail)m++}));
+  return n?Math.round(100*m/n):0;
+}
+// "Abrir aquí": the local profile of an account child, created on demand with the id of its row. A child the account is not linked to
+// (it reaches it through a class) is marked via:'class' so that signing out removes it from this tablet. stay: do not switch to it.
+function openChild(row,{stay=false}={}){
+  let p=PROFILES.list.find(x=>x.rid===row.id);
+  if(!p){
+    const rn=remoteName(row);if(!rn)return false;
+    const base=profileSlug(rn)||'nino';let id=base,i=2;
+    while(PROFILES.list.some(x=>x.id===id)||localStorage.getItem(keyFor(id))!==null)id=base+'-'+i++;
+    p={id,name:rn,kind:row.kind==='pre'?'pre':'reader',rid:row.id};
+    if(!row.linked)p.via='class';
+    PROFILES.list.push(p);
+    try{localStorage.setItem(keyFor(id),JSON.stringify(mergeMod.applySynced({},row.data)))}catch(e){}
+  }else delete p.hidden;
+  if(!saveProfiles())return false;
+  if(!stay)switchProfile(p.id);
+  return true;
+}
 // Progress of a profile newer than the last complete sync (a stamp from a faster clock only means one question too many).
 function unsent(p){
   let at=0;try{at=Number(localStorage.getItem(SYNC_AT_KEY))||0}catch(e){}
@@ -812,9 +850,9 @@ function unsent(p){
 }
 function hasProgress(p){const st=stateOf(p.id);return (Number(st.total)||0)>0||Object.keys(st.stats||{}).length>0}
 // Asks a yes/no question in the link sheet. Resolves true for yesKey; noKey, "Ahora no" and Escape resolve false.
-function askChoice(textKey,yesKey,noKey,titleKey='acctSignOut'){
+function askChoice(textKey,yesKey,noKey,titleKey='acctSignOut',vars){
   return new Promise(resolve=>{
-    $('linkTitle').textContent=t(titleKey);$('linkAsk').textContent=t(textKey);
+    $('linkTitle').textContent=t(titleKey);$('linkAsk').textContent=t(textKey,vars);
     const box=$('linkOpts');box.innerHTML='';
     const onKey=e=>{if(e.key==='Escape')done(false)};
     const done=v=>{document.removeEventListener('keydown',onKey);$('link').hidden=true;$('linkTitle').textContent=t('linkTitle');resolve(v)};
@@ -850,13 +888,13 @@ function renderAcct(){
   let email='';try{const s=JSON.parse(localStorage.getItem('leemos-auth'));email=s&&s.user&&s.user.email||''}catch(e){}
   const signedIn=!!email&&!!sync.userId();
   $('acctOut').hidden=signedIn;$('acctIn').hidden=!signedIn;
-  if(!signedIn)return;
+  if(!signedIn){if(teach)teach.render();return} // signed out: the panel forgets the account's children and codes
   $('acctWho').textContent=t('acctWho',{e:email});
   let at=0;try{at=Number(localStorage.getItem(SYNC_AT_KEY))||0}catch(err){}
   const mins=Math.max(0,Math.round((Date.now()-at)/60000));
   $('acctStatus').textContent=syncState==='syncing'?t('acctSyncing'):syncState==='offline'?t('acctOffline'):!at?t('acctNever'):t('acctSynced',{m:mins<1?t('acctJustNow'):t('acctMinAgo',{n:mins})});
 }
-$('parents').addEventListener('toggle',async()=>{if($('parents').open&&await syncInit())renderAcct()});
+$('parents').addEventListener('toggle',async()=>{if($('parents').open&&await syncInit()){renderAcct();showTeach()}});
 $('acctSend').onclick=async()=>{
   const email=$('acctEmail').value.trim();
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){acctMsg('acctBadEmail');return}
@@ -939,6 +977,7 @@ async function afterSignIn(user){
   }
   await syncAll();
   if(activeGone)switchProfile(fallbackId()); // the open profile was another account's class child
+  showTeach();
 }
 // A session from an earlier visit: sync at start (only if signed in; otherwise nothing is loaded or sent).
 try{if(localStorage.getItem('leemos-auth'))syncInit().then(async sy=>{if(sy){renderAcct();let last=null;try{last=localStorage.getItem(AUTH_USER_KEY)}catch(e){}
@@ -1453,6 +1492,7 @@ function applyLang(){
   });
   $('langBtn').textContent=S.lang==='ca'?'CA':'ES';
   updateHello();renderLevels();renderPath();renderMode();renderHard();renderSession();renderAlbum();renderWorlds();updateRecInfo();
+  if(teach)teach.render();
   if(hasTTS)pickVoice();
   if(phase==='read'||phase==='judge')$('hint').textContent=hintFor(phase);
 }

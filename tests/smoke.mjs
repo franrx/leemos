@@ -2822,5 +2822,198 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   check('i18n parity still holds', Object.keys(ies2).length === Object.keys(ica2).length && Object.keys(ies2).every((k) => k in ica2) && ['acctRevoked', 'acctUnsentAsk', 'acctUnsentOut', 'acctUnsentStay'].every((k) => typeof ies2[k] === 'string' && typeof ica2[k] === 'string'));
 }
 
+// ---------- parent and teacher UI (src/teach.js): sharing, code redeem, class panel ----------
+{
+  const P_EMAIL = 'mama@example.com', T_EMAIL = 'profe@example.com';
+  const RID_C = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const rpcAs = async (s, auth, name, args) => (await s.fetch('https://x/rest/v1/rpc/' + name, { method: 'POST', headers: { Authorization: 'Bearer ' + auth.access_token }, body: JSON.stringify(args) })).json();
+  // a project with a class 3A (teacher T), Mateo (RID_B, in 3A, nobody's link) and Elsa (RID_A, linked to the parent, in no class)
+  const world = async ({ who = 'parent', ack = true, teacher = true } = {}) => {
+    const s = createFakeSupabase();
+    const par = await signedAuth(s, P_EMAIL);
+    const tea = await signedAuth(s, T_EMAIL);
+    if (teacher) s.setRole(T_EMAIL, 'teacher', { ack });
+    const cls = s.addClass('3A'); if (teacher) s.addTeacher(cls, T_EMAIL);
+    s.rows.set(RID_A, { id: RID_A, owner: par.uid, class_id: null, name: 'Elsa', kind: 'reader', data: dat({ total: 4, name: 'Elsa', modAt: 2 }), version: 1 });
+    s.links.set(RID_A, new Set([par.uid]));
+    s.rows.set(RID_B, { id: RID_B, owner: null, class_id: cls, name: 'Mateo', kind: 'reader', data: dat({ total: 5, name: 'Mateo', modAt: 2, stats: { 's:ma': { ok: 3, fail: 0 }, 's:me': { ok: 2, fail: 0 } } }), version: 1 });
+    const me = who === 'parent' ? par : tea;
+    return { s, par, tea, me, cls };
+  };
+  const bootWorld = async (w, storage = {}, extra = {}) => {
+    const app = await boot({ supa: w.s, syncConfig: CFG, storage: { 'leemos-auth': w.me.auth, 'leemos-auth-user': w.me.uid, ...(w.me === w.par ? PROF_A : { 'leemos-profiles': { active: 'ana', list: [{ id: 'ana', name: 'Ana', kind: 'reader' }] } }), ...storage }, ...extra });
+    app.$('parents').open = true; app.$('parents').dispatchEvent(new app.w.Event('toggle'));
+    await until(() => !app.$('teach').hidden && app.$('teach').querySelector('[data-block]'), 4000);
+    await sleep(60);
+    return app;
+  };
+  const qs = (app, sel) => app.$('teach').querySelector(sel), qsa = (app, sel) => [...app.$('teach').querySelectorAll(sel)];
+  const msgOf = (app) => (app.$('teachMsg') || { textContent: '' }).textContent;
+  const confirmWith = async (app, yes) => { await until(() => !app.$('link').hidden, 2000); const ask = app.$('linkAsk').textContent; const b = [...app.$('linkOpts').querySelectorAll('button')]; (yes ? b[0] : b[1]).click(); await sleep(40); return ask; };
+  const type = (app, id, v) => { const i = app.$(id); i.value = v; i.dispatchEvent(new app.w.Event('input', { bubbles: true })); };
+  const imports = (w) => { const o = w.__leemosImport; w.__leemosImport = (p) => { (w.__imps ||= []).push(p); return o(p); }; };
+
+  {
+    const supa0 = createFakeSupabase();
+    const app = await boot({ supa: supa0, onDom: imports });
+    app.$('parents').open = true; app.$('parents').dispatchEvent(new app.w.Event('toggle')); await sleep(80);
+    check('teach: panels hidden with empty config', app.$('teach').hidden && app.$('teach').children.length === 0 && supa0.log.length === 0 && !(app.w.__imps || []).some((p) => /teach/.test(p)) && app.errors.length === 0, JSON.stringify(app.w.__imps));
+  }
+
+  {
+    const w = await world();
+    const app = await bootWorld(w, {}, { onDom: imports });
+    check('teach: a parent session sees the parent block and not the teacher block',
+      !!qs(app, '[data-block=parent]') && !!qs(app, '[data-act=share][data-child="' + RID_A + '"]') && !!app.$('teachRedeem') && !qs(app, '[data-block=teacher]') && !qs(app, '[data-act=open]') && (app.w.__imps || []).some((p) => /teach/.test(p)) && app.errors.length === 0, app.$('teach').textContent);
+  }
+
+  {
+    const w = await world({ who: 'teacher', ack: false });
+    const app = await bootWorld(w);
+    const only = !!app.$('teachAck') && !qs(app, '[data-act=open]') && !qs(app, '[data-act=newchild]') && !qs(app, '[data-roster]') && app.$('teachAck').textContent.includes(ies.teachAckText);
+    app.$('teachAckBtn').click();
+    await until(() => !!qs(app, '[data-roster]'), 3000);
+    check('teach: a teacher without acknowledgement sees only the acknowledgement', only && !!w.s.accounts.get(w.tea.uid).ack && !app.$('teachAck') && !!qs(app, '[data-act=open][data-child="' + RID_B + '"]'), app.$('teach').textContent);
+  }
+
+  {
+    const w = await world();
+    const app = await bootWorld(w);
+    qs(app, '[data-act=share]').click();
+    const askNo = await confirmWith(app, false);
+    const none = w.s.invites.length === 0;
+    qs(app, '[data-act=share]').click();
+    await confirmWith(app, true);
+    await until(() => !!qs(app, '[data-code]'), 3000);
+    const code = qs(app, '[data-code]').textContent;
+    const inv = w.s.invites[0];
+    const exp = qs(app, '[data-expiry]').textContent;
+    const day = new Date(inv.exp).toLocaleDateString('es', { day: 'numeric', month: 'long' });
+    check('teach: sharing shows an 8-character code and its expiry after confirming',
+      none && askNo.includes('Elsa') && /nombre|progreso/i.test(askNo) && /^[A-Z2-9]{8}$/.test(code) && inv.code === code && inv.kind === 'to_class' && exp.includes(day) && !!qs(app, '[data-act=copy]') && app.$('teach').querySelectorAll('button').length > 0,
+      JSON.stringify({ askNo, code, exp, day }));
+  }
+
+  {
+    const w = await world();
+    const app = await bootWorld(w);
+    type(app, 'teachCode', 'ZZZZ2222'); app.$('teachRedeem').click();
+    await until(() => msgOf(app).length > 0, 3000);
+    const m1 = msgOf(app);
+    const own = await rpcAs(w.s, w.par.auth, 'create_invite', { p_child: RID_A, p_kind: 'to_class' });
+    type(app, 'teachCode', own.code); app.$('teachRedeem').click();
+    await until(() => w.s.log.filter((l) => /redeem_invite/.test(l)).length >= 2 && !app.$('teachRedeem').disabled, 3000); await sleep(40);
+    const m2 = msgOf(app);
+    check('teach: redeeming a wrong code shows one generic message', m1 === ies.teachBadCode && m2 === ies.teachBadCode && w.s.rows.get(RID_A).class_id === null, JSON.stringify({ m1, m2 }));
+  }
+
+  {
+    const w = await world({ who: 'teacher' });
+    const app = await bootWorld(w);
+    type(app, 'teachNewName-' + w.cls, 'Nuria');
+    qs(app, '[data-act=newchild][data-class="' + w.cls + '"]').click();
+    await until(() => [...w.s.rows.values()].some((r) => r.name === 'Nuria'), 3000); await sleep(100);
+    const row = [...w.s.rows.values()].find((r) => r.name === 'Nuria');
+    const local = profList(app).find((p) => p.rid === (row && row.id));
+    check('teach: "New child in this class" creates the row with class_id and marks via:class',
+      !!row && row.class_id === w.cls && !(w.s.links.get(row.id) || new Set()).size && !!local && local.via === 'class' && local.name === 'Nuria' && local.kind === 'reader' && !!qs(app, '[data-roster] [data-child="' + row.id + '"]') && w.s.log.some((l) => l === 'POST /rest/v1/child_profiles') && app.errors.length === 0,
+      JSON.stringify({ row, local, errors: app.errors }));
+  }
+
+  {
+    const w = await world({ who: 'teacher' });
+    const app = await bootWorld(w);
+    const leave = qs(app, '[data-act=leave][data-child="' + RID_B + '"]'), del = qs(app, '[data-act=delete][data-child="' + RID_B + '"]');
+    leave.click(); const askLeave = await confirmWith(app, false);
+    const intact1 = w.s.rows.get(RID_B).class_id === w.cls;
+    qs(app, '[data-act=delete][data-child="' + RID_B + '"]').click(); const askDel = await confirmWith(app, false);
+    const intact2 = w.s.rows.has(RID_B);
+    qs(app, '[data-act=delete][data-child="' + RID_B + '"]').click(); await confirmWith(app, true);
+    await until(() => !w.s.rows.has(RID_B), 3000); await sleep(60);
+    check('teach: delete and take-out are different buttons and each asks to confirm',
+      !!leave && !!del && leave !== del && leave.textContent !== del.textContent && askLeave !== askDel && /Mateo/.test(askLeave) && /Mateo/.test(askDel) && intact1 && intact2 && !w.s.rows.has(RID_B) && w.s.tombstones.has(RID_B) && !qs(app, '[data-roster] [data-child="' + RID_B + '"]'),
+      JSON.stringify({ askLeave, askDel }));
+  }
+
+  {
+    const w = await world({ who: 'teacher' });
+    const own = await rpcAs(w.s, w.par.auth, 'create_invite', { p_child: RID_A, p_kind: 'to_class' });
+    const app = await bootWorld(w);
+    app.$('teachPick').value = w.cls;
+    type(app, 'teachClassCode', own.code); app.$('teachClassRedeem').click();
+    await until(() => w.s.rows.get(RID_A).class_id === w.cls, 3000); await sleep(100);
+    check('teach: redeeming a valid to_class code as a teacher puts the child in the chosen class', w.s.rows.get(RID_A).class_id === w.cls && msgOf(app) === ies.teachRedeemedClass && !!qs(app, '[data-roster] [data-child="' + RID_A + '"]'), msgOf(app));
+  }
+
+  {
+    const w = await world();
+    const inv = await rpcAs(w.s, w.tea.auth, 'create_invite', { p_child: RID_B, p_kind: 'to_parent' });
+    const app = await bootWorld(w);
+    type(app, 'teachCode', inv.code.slice(0, 4).toLowerCase() + '-' + inv.code.slice(4)); app.$('teachRedeem').click();
+    await until(() => w.s.links.get(RID_B) && w.s.links.get(RID_B).has(w.par.uid), 3000); await sleep(100);
+    const local = profList(app).find((p) => p.rid === RID_B);
+    check('teach: redeeming a valid to_parent code as a parent links the child', w.s.links.get(RID_B).has(w.par.uid) && msgOf(app) === ies.teachRedeemedParent && !!qs(app, '[data-block=parent] [data-child="' + RID_B + '"]') && !!local && !local.via, JSON.stringify({ msg: msgOf(app), local }));
+  }
+
+  {
+    const w = await world({ who: 'teacher' });
+    const app = await bootWorld(w);
+    qs(app, '[data-act=open][data-child="' + RID_B + '"]').click();
+    await until(() => profList(app).some((p) => p.rid === RID_B), 3000); await sleep(60);
+    const p = profList(app).find((x) => x.rid === RID_B);
+    const pf = JSON.parse(app.w.localStorage.getItem('leemos-profiles'));
+    check('teach: Open here creates the local profile with rid and via:class',
+      !!p && p.via === 'class' && p.name === 'Mateo' && p.kind === 'reader' && pf.active === p.id && JSON.parse(app.w.localStorage.getItem('leemos-v1:' + p.id)).total === 5, JSON.stringify(pf));
+  }
+
+  {
+    const w = await world();
+    w.s.rows.get(RID_A).class_id = w.cls;
+    const app = await bootWorld(w);
+    const label = qs(app, '[data-block=parent] [data-child="' + RID_A + '"]').textContent;
+    qs(app, '[data-act=leave][data-child="' + RID_A + '"]').click();
+    await confirmWith(app, true);
+    await until(() => w.s.rows.get(RID_A).class_id === null, 3000); await sleep(100);
+    check('teach: a parent takes the child out of the class and the roster updates', /3A/.test(label) && w.s.rows.get(RID_A).class_id === null && !qs(app, '[data-act=leave]') && !!qs(app, '[data-act=share][data-child="' + RID_A + '"]') && !/3A/.test(qs(app, '[data-block=parent]').textContent), label);
+  }
+
+  {
+    const w = await world({ who: 'teacher' });
+    const app = await bootWorld(w);
+    qs(app, '[data-act=leave][data-child="' + RID_B + '"]').click();
+    await confirmWith(app, true);
+    await until(() => msgOf(app).length > 0, 3000); await sleep(40);
+    check('teach: leaving a class with an unclaimed child shows the orphan message', msgOf(app) === ies.teachOrphan && w.s.rows.get(RID_B).class_id === w.cls && !!qs(app, '[data-roster] [data-child="' + RID_B + '"]'), msgOf(app));
+  }
+
+  {
+    const w = await world();
+    const inv = await rpcAs(w.s, w.tea.auth, 'create_invite', { p_child: RID_B, p_kind: 'to_parent' });
+    const app = await bootWorld(w);
+    w.s.setOffline(true);
+    const before = JSON.stringify(w.s.invites);
+    type(app, 'teachCode', inv.code); app.$('teachRedeem').click();
+    await until(() => msgOf(app).length > 0, 3000);
+    const m1 = msgOf(app);
+    qs(app, '[data-act=share]').click(); await confirmWith(app, true);
+    await until(() => msgOf(app) === ies.acctNetwork && !qs(app, '[data-code]'), 3000); await sleep(40);
+    const untouched = JSON.stringify(w.s.invites) === before && !qs(app, '[data-code]'); // nothing was consumed or created while offline
+    w.s.setOffline(false);
+    type(app, 'teachCode', inv.code); app.$('teachRedeem').click();
+    await until(() => w.s.links.get(RID_B) && w.s.links.get(RID_B).has(w.par.uid), 3000);
+    check('teach: offline code actions show the network message and consume nothing', m1 === ies.acctNetwork && untouched && w.s.links.get(RID_B).has(w.par.uid), m1);
+  }
+
+  {
+    const es = readJSON('src/data/i18n.es.json'), ca = readJSON('src/data/i18n.ca.json');
+    // every key the panel code names exists in both files (a literal key in teach.js is t('key') or a table value)
+    const src = existsSync(join(ROOT, 'src/teach.js')) ? readFileSync(join(ROOT, 'src/teach.js'), 'utf8') : '';
+    const ids = new Set(['teacher', 'teachCode', 'teachAck', 'teachAckBtn', 'teachPick', 'teachClassCode', 'teachClassRedeem', 'teachRedeem', 'teachMsg']); // element ids, not strings
+    const named = [...new Set([...src.matchAll(/'((?:teach|acct)[A-Za-z]+)'/g)].map((m) => m[1]))].filter((k) => !ids.has(k));
+    const esK = Object.keys(es), caK = Object.keys(ca);
+    check('i18n: es and ca have the same keys', esK.length === caK.length && esK.every((k) => k in ca) && caK.every((k) => k in es) && named.length > 30 && named.every((k) => k in es && k in ca) && ['teachBadCode', 'teachOrphan', 'teachShareAsk', 'teachAckText'].every((k) => typeof es[k] === 'string' && typeof ca[k] === 'string' && es[k] !== ca[k]), named.filter((k) => !(k in es && k in ca)).join(','));
+  }
+}
+
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

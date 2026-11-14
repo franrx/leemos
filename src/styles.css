@@ -390,6 +390,27 @@ html.listen .session,html.listen #goal,html.listen #tiles,html.listen #pic,html.
 .acct input[type=email],.acct input[type=text]{flex:1;min-width:0;min-height:44px;padding:8px 10px;font:inherit;border:2px solid var(--line);border-radius:12px;background:var(--panel);color:inherit}
 .acct-consent{align-items:flex-start;gap:10px;min-height:44px}
 .acct-consent input{width:24px;height:24px;flex:none;margin-top:2px}
+/* parent and teacher panel (src/teach.js): the same tokens and the progress bar of the level cards */
+.teach{margin-top:10px}
+.teach-block{margin-top:12px;padding-top:8px;border-top:1px solid var(--line)}
+.teach-h{font-size:1.05rem;margin:6px 0}
+.teach-ch{font-size:1rem;margin:12px 0 6px}
+.teach-row{padding:8px 0;border-bottom:1px solid var(--line)}
+.teach-top{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.teach-name{font-size:1.05rem}
+.teach-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.teach-acts .icon-btn,.teach-form .icon-btn,.teach-ack .icon-btn,.teach-code .icon-btn{min-width:44px;min-height:44px}
+.icon-btn.danger{border-color:var(--retry);color:var(--retry)}
+.icon-btn:disabled{opacity:.55}
+.teach-bar{flex:1;min-width:80px;max-width:200px;height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+.teach-bar i{display:block;height:100%;background:var(--ok)}
+.teach-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px;margin-top:10px}
+.teach-field{display:flex;flex-direction:column;gap:2px;flex:1;min-width:160px}
+.teach-field label{font-size:.85rem;color:var(--muted)}
+.teach input[type=text],.teach select{min-height:44px;padding:8px 10px;font:inherit;border:2px solid var(--line);border-radius:12px;background:var(--panel);color:inherit}
+.teach-code{margin-top:8px;padding:10px;border:2px dashed var(--c2);border-radius:14px;background:var(--bg)}
+.teach-code-big{font-size:2rem;font-weight:700;letter-spacing:.25em;margin:4px 0;font-family:"Andika","Comic Sans MS",sans-serif;user-select:all;word-break:break-all}
+.teach-ack{padding:10px;border:2px solid var(--line);border-radius:14px}
 .mode.dim{opacity:.45}
 .path{margin-top:14px;padding-top:12px;border-top:2px dashed var(--line)}
 .path-row{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
