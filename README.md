@@ -89,35 +89,18 @@ Orden obligatorio. La migración `supabase/migrations/20261113000000_teachers_cl
 
 Antes de empezar, en Supabase Auth debe estar activado **Confirm email**: la invitación de un profesor casa con el email verificado.
 
-**Si el paso 6 falla (marcha atrás):** restaura la copia del paso 3 (reimporta el CSV en `child_profiles` si hiciera falta) y borra lo nuevo, en este orden:
+**Si el paso 6 falla (marcha atrás):** el archivo `supabase/rollback/20261113000000_teachers_classes.down.sql` deshace la migración y deja `child_profiles` como la dejó `20261017000000_child_profiles.sql` (está probado en local con `npm run test:rollback`, que no forma parte de `npm test`; nunca lo apliques contra producción desde el script). **No borra filas de `child_profiles`** (solo faltarán los niños que se borraron con `delete_child` después de publicar): no vacíes la tabla. La copia del paso 3 es solo para una recuperación excepcional.
 
-```sql
-begin;
--- funciones públicas
-drop function if exists public.whoami(), public.ack_teacher(), public.create_invite(uuid, text), public.redeem_invite(text, uuid),
-  public.leave_class(uuid), public.unlink_me(uuid), public.delete_child(uuid), public.export_my_data(), public.delete_my_account(),
-  public.admin_list_accounts(), public.admin_list_classes(), public.admin_invite_teacher(text), public.admin_revoke_invite(text),
-  public.admin_demote_teacher(uuid), public.admin_create_class(text), public.admin_rename_class(uuid, text), public.admin_delete_class(uuid),
-  public.admin_assign_teacher(uuid, uuid), public.admin_unassign_teacher(uuid, uuid), public.has_parent(public.child_profiles);
--- disparadores sobre tablas ajenas
-drop trigger if exists accounts_for_new_user on auth.users;
-drop trigger if exists child_profiles_link_creator on public.child_profiles;
-drop trigger if exists child_profiles_owner_limit on public.child_profiles;
-drop trigger if exists child_profiles_class_limit on public.child_profiles;
--- tablas nuevas
-alter table public.child_profiles drop column if exists class_id;
-drop table if exists public.child_links, public.class_teachers, public.invites, public.invite_attempts, public.role_invites,
-  public.admin_log, public.deleted_children, public.classes, public.accounts cascade;
-drop schema if exists private cascade;
--- los niños sin propietario (si los hay) hay que asignarlos o borrarlos antes de la siguiente línea
-alter table public.child_profiles alter column owner set not null;
-alter table public.child_profiles drop constraint child_profiles_owner_fkey;
-alter table public.child_profiles add constraint child_profiles_owner_fkey foreign key (owner) references auth.users(id) on delete cascade;
-commit;
--- después, vuelve a crear las políticas y los grants de child_profiles tal como están en 20261017000000_child_profiles.sql
-```
+1. Busca niños sin propietario (el esquema antiguo exige uno): `select id, name from public.child_profiles where owner is null;`. Si no sale nada, sigue en el 2. Si salen filas, asigna un propietario a las que quieras conservar y borra el resto, ANTES de ejecutar el archivo (el archivo borra `child_links`):
+   ```sql
+   update public.child_profiles c set owner = (select user_id from public.child_links l where l.child_id = c.id limit 1) where owner is null;
+   delete from public.child_profiles where owner is null;
+   ```
+   (Si no lo haces, el archivo aborta con un mensaje que dice cuántas filas faltan y no cambia nada.)
+2. Pega el archivo en el editor SQL de producción y ejecútalo (una sola transacción).
+3. Comprueba: `select policyname from pg_policies where tablename='child_profiles';` debe dar las cuatro `owner reads/inserts/updates/deletes`, y los perfiles de Elsa y Leo deben volver a sincronizar con la app anterior.
 
-Revisa el SQL contra la migración antes de lanzarlo (si añadió o cambió algo, lo nuevo también hay que borrarlo). Para quitar un usuario de prueba usa `delete_my_account`, no `delete from auth.users` en el panel: dejaría niños de clase sin ningún vínculo.
+Para quitar un usuario de prueba usa `delete_my_account`, no `delete from auth.users` en el panel: dejaría niños de clase sin ningún vínculo.
 
 ### Pendiente de revisión humana
 
