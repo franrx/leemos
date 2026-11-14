@@ -63,6 +63,9 @@ function fallbackId(){
   PROFILES.list.push({id,name:'Elsa',kind:'reader'});
   return id;
 }
+// No stored session (it died outside a sync round, or the admin page signed out on this origin): nobody can vouch for the class
+// profiles, so they are hidden until the same account signs in again (a different account drops them).
+try{if(!localStorage.getItem('leemos-auth')&&PROFILES.list.some(x=>x.via==='class'&&!x.hidden)){PROFILES.list.forEach(x=>{if(x.via==='class')x.hidden=true});saveProfiles()}}catch(e){}
 if(PROFILES.list.find(x=>x.id===PROFILES.active).hidden){PROFILES.active=fallbackId();saveProfiles()} // a hidden profile is never opened
 const PROFILE=PROFILES.list.find(x=>x.id===PROFILES.active);
 let purgedActive=false; // the open profile was purged: its state must not be written back before the reload
@@ -71,7 +74,7 @@ const profileSlug=n=>n.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,
 function switchProfile(id){PROFILES.active=id;saveProfiles();location.reload()}
 function addProfile(name,kind){
   const base=profileSlug(name)||'nino';let id=base,i=2;
-  while(PROFILES.list.some(x=>x.id===id))id=base+'-'+i++;
+  while(PROFILES.list.some(x=>x.id===id)||localStorage.getItem(keyFor(id))!==null)id=base+'-'+i++; // never adopt a leftover saved state (same rule as openChild)
   PROFILES.list.push({id,name:name.trim(),kind:kind==='pre'?'pre':'reader'});
   switchProfile(id);
 }
@@ -750,7 +753,7 @@ async function syncAll({final=false}={}){
   try{
     let s=null;
     try{s=await sync.session()}catch(e){if(e&&e.kind==='auth'&&!final)hideClassProfiles();renderAcct();return e&&e.kind||'error'}
-    if(!s)return 'nosession';
+    if(!s){if(!final)hideClassProfiles();return 'nosession'} // the session died outside a round (a panel request, another page): same as an auth error
     let last=null;try{last=localStorage.getItem(AUTH_USER_KEY)}catch(e){}
     if(last&&s.user&&s.user.id&&last!==s.user.id)return 'skipped'; // a session of another account than the one this device was linked to: never send these profiles to it
     syncState='syncing';renderAcct();
@@ -762,6 +765,7 @@ async function syncAll({final=false}={}){
       try{
         const dirty=!!p.kindDirty; // the adult switched the kind on this device: push it once, then the server's kind wins
         const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:mergeMod.pickSynced(stateOf(p.id)),kindChanged:dirty});
+        if(!PROFILES.list.includes(p))continue; // removed from this device while the request was in flight (purged, deleted): nothing is written back
         if(r.revoked){delete p.rid;p.noSync=true;saveProfiles();acctMsg('acctRevoked',{n:p.name});continue} // removed from the class or deleted by someone else: local progress stays
         let ch=false;
         if(dirty&&p.kind===r.kind){delete p.kindDirty;ch=true} // pushed (unless the adult switched it again meanwhile)
@@ -904,7 +908,7 @@ function forgetRid(id){
 // "Volver a guardar en la cuenta": the adult's explicit choice to upload a profile whose server copy was deleted.
 function resyncProfile(id){
   const p=PROFILES.list.find(x=>x.id===id);if(!p||!p.noSync)return false;
-  delete p.noSync;p.rid=uuid();saveProfiles();syncAll();return true;
+  delete p.noSync;p.rid=uuid();saveProfiles();syncAll().then(r=>{if(r==='busy')schedSync()});return true; // a round in flight already passed this profile: go again after it
 }
 async function exportMine(){
   if(!sync||!sync.userId())return;

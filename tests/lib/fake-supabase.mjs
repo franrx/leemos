@@ -281,7 +281,8 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
       const f = filters(u);
       if (u.pathname === '/rest/v1/classes' && method === 'GET') {
         const seen = (c) => isAdmin(uid) || isTeacher(uid, c.id) || [...rows.values()].some((r) => r.class_id === c.id && canSee(uid, r));
-        return res(200, [...classes.values()].filter((c) => seen(c) && (!f.id || c.id === f.id)).sort((a, b) => a.name.localeCompare(b.name)).map((c) => ({ ...c })));
+        const embed = String(u.searchParams.get('select') || '').includes('class_teachers('); // RLS on class_teachers: only the caller's own rows
+        return res(200, [...classes.values()].filter((c) => seen(c) && (!f.id || c.id === f.id)).sort((a, b) => a.name.localeCompare(b.name)).map((c) => ({ ...c, ...(embed ? { class_teachers: teachers.has(c.id + '|' + uid) ? [{ teacher_id: uid }] : [] } : {}) })));
       }
       if (u.pathname !== '/rest/v1/child_profiles') return res(404, { message: 'not found: ' + u.pathname });
       // the embedded child_links(user_id): RLS returns only the caller's own link

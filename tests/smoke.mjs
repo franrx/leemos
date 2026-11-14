@@ -2818,6 +2818,36 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('role is read at app start with a stored session', s.log.includes('POST /rest/v1/rpc/whoami') && s.accounts.get(uid).role === 'teacher', s.log.join(' | '));
   }
 
+  // final review 1: the session dies outside syncAll (a request from the panel refreshes and fails): the next round hides the class profiles
+  {
+    const { s, app } = await signedTeacherBoot();
+    s.expireAccessTokens(); s.revokeRefreshTokens();
+    app.$('parents').open = true; app.$('parents').dispatchEvent(new app.w.Event('toggle')); // the panel's first request refreshes, gets a 400, clears the session
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000);
+    const cleared = app.w.localStorage.getItem('leemos-auth') === null;
+    Object.defineProperty(app.d, 'hidden', { value: true, configurable: true });
+    app.d.dispatchEvent(new app.w.Event('visibilitychange'));
+    await until(() => (profList(app).find((p) => p.id === 'mateo') || {}).hidden === true, 2000);
+    const m = profList(app).find((p) => p.id === 'mateo');
+    check('final review: a session cleared outside syncAll makes the next round hide the class profiles', cleared && !!m && m.hidden === true && stOf(app, 'mateo').total === 5 && profList(app).some((p) => p.id === 'ana' && !p.hidden), JSON.stringify({ cleared, m }));
+  }
+  // final review 1: no stored session at start (expired before the reload, or the admin page's "Salir" on the same origin): hidden, not listed, not opened
+  {
+    const app = await boot({ supa: createFakeSupabase(), syncConfig: CFG, storage: { ...CLASS_PROFILES({ active: 'mateo' }), 'leemos-auth-user': 'user-1', 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    app.$('profileBtn').click();
+    const listed = [...app.d.querySelectorAll('#profileList .wbtn')].map((b) => b.textContent);
+    app.$('profilesClose').click();
+    const m = profList(app).find((p) => p.id === 'mateo');
+    check('final review: with no stored session at start the class profiles are hidden, not listed and not opened', !!m && m.hidden === true && !listed.some((x) => /Mateo/.test(x)) && app.$('hello').textContent === '¡Hola, Elsa!' && stOf(app, 'mateo').total === 5 && !profList(app).find((p) => p.id === 'ana').hidden, JSON.stringify({ m, listed, hello: app.$('hello').textContent }));
+  }
+  // final review 3: a new profile never adopts a leftover saved state whose id it would take
+  {
+    const app = await boot({ storage: { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader' }] }, 'leemos-v1:ana': { name: 'Ana', total: 7 } } });
+    app.$('pfName').value = 'Ana'; app.$('pfKind').value = 'reader'; app.$('pfAdd').click();
+    const a = profList(app).find((p) => p.name === 'Ana');
+    check('final review: adding "Ana" next to a leftover leemos-v1:ana takes another id', !!a && a.id !== 'ana' && JSON.parse(app.w.localStorage.getItem('leemos-v1:ana')).total === 7, JSON.stringify(profList(app)));
+  }
+
   const ies2 = readJSON('src/data/i18n.es.json'), ica2 = readJSON('src/data/i18n.ca.json');
   check('i18n parity still holds', Object.keys(ies2).length === Object.keys(ica2).length && Object.keys(ies2).every((k) => k in ica2) && ['acctRevoked', 'acctUnsentAsk', 'acctUnsentOut', 'acctUnsentStay'].every((k) => typeof ies2[k] === 'string' && typeof ica2[k] === 'string'));
 }
@@ -3037,6 +3067,63 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     type(app, 'teachCode', inv.code); app.$('teachRedeem').click();
     await until(() => w.s.links.get(RID_B) && w.s.links.get(RID_B).has(w.par.uid), 3000);
     check('teach: offline code actions show the network message and consume nothing', m1 === ies.acctNetwork && untouched && w.s.links.get(RID_B).has(w.par.uid), m1);
+  }
+
+  // final review: a fetch wrapper that holds the first GET of one child's row until release() (a slow round in flight)
+  const holdRow = (s, rid) => {
+    const h = { held: false, release: null };
+    const gate = new Promise((r) => { h.release = r; });
+    h.s = { ...s, fetch: async (u, o = {}) => { const r = await s.fetch(u, o); if (!h.held && (o.method || 'GET') === 'GET' && String(u).includes('child_profiles') && String(u).includes('id=eq.' + rid)) { h.held = true; await gate; } return r; } };
+    return h;
+  };
+
+  {
+    // final review 2: a teacher whose own child is in a colleague's class does not get that class as one of theirs
+    const w = await world({ who: 'teacher' });
+    w.s.setRole('colega@example.com', 'teacher', { ack: true });
+    const k2 = w.s.addClass('4B'); w.s.addTeacher(k2, 'colega@example.com');
+    w.s.rows.set(RID_C, { id: RID_C, owner: w.tea.uid, class_id: k2, name: 'Pau', kind: 'reader', data: dat({ total: 1, name: 'Pau', modAt: 2 }), version: 1 });
+    w.s.links.set(RID_C, new Set([w.tea.uid]));
+    const app = await bootWorld(w);
+    const blocks = qsa(app, '[data-block=teacher] .teach-class').map((e) => e.dataset.class);
+    const opts = [...app.$('teachPick').options].map((o) => o.value);
+    const own = qs(app, '[data-block=parent] [data-child="' + RID_C + '"]');
+    check('final review: a colleague\'s class (seen through the teacher\'s own child) is not in the teacher block nor in the picker, and still names the chip',
+      blocks.join() === w.cls && opts.join() === w.cls && !qs(app, '[data-act=newchild][data-class="' + k2 + '"]') && !!own && /4B/.test(own.textContent) && app.errors.length === 0, JSON.stringify({ blocks, opts, k2, own: own && own.textContent }));
+  }
+
+  {
+    // final review 3: a round that finishes after the child left this device writes nothing back
+    const w = await world({ who: 'teacher' });
+    const h = holdRow(w.s, RID_B);
+    const profs = { 'leemos-profiles': { active: 'ana', list: [{ id: 'ana', name: 'Ana', kind: 'reader' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 } };
+    const app = await bootWorld({ ...w, s: h.s }, profs);
+    await until(() => h.held, 3000); // the start-up round now waits on Mateo's read
+    qs(app, '[data-act=delete][data-child="' + RID_B + '"]').click(); await confirmWith(app, true);
+    await until(() => !profList(app).some((p) => p.id === 'mateo'), 3000);
+    const gone = app.w.localStorage.getItem('leemos-v1:mateo') === null;
+    h.release(); await sleep(200);
+    check('final review: a sync round resolving after the class child was removed does not write its state back', h.held && gone && app.w.localStorage.getItem('leemos-v1:mateo') === null && !profList(app).some((p) => p.id === 'mateo') && app.errors.length === 0, JSON.stringify({ gone, after: app.w.localStorage.getItem('leemos-v1:mateo') }));
+  }
+
+  {
+    // final review 6: "Volver a guardar" while a round is in flight syncs once that round ends
+    const RID_C2 = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const w = await world();
+    w.s.rows.delete(RID_A); w.s.links.delete(RID_A); // Elsa's server copy was deleted
+    w.s.rows.set(RID_C2, { id: RID_C2, owner: w.par.uid, class_id: null, name: 'Ana', kind: 'reader', data: dat({ total: 2, name: 'Ana', modAt: 2 }), version: 1 });
+    w.s.links.set(RID_C2, new Set([w.par.uid]));
+    const h = holdRow(w.s, RID_C2);
+    const profs = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', noSync: true }, { id: 'ana', name: 'Ana', kind: 'reader', rid: RID_C2 }] }, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 5 }, 'leemos-v1:ana': { name: 'Ana', total: 2, modAt: 2 } };
+    const app = await bootWorld({ ...w, s: h.s }, profs);
+    await until(() => h.held, 3000); // a round is in flight (Elsa was already skipped: no rid yet)
+    qs(app, '[data-act=resync][data-child="elsa"]').click();
+    await until(() => !!profList(app).find((x) => x.id === 'elsa').rid, 2000); await sleep(40);
+    const mark = w.s.log.length;
+    h.release();
+    await until(() => [...w.s.rows.values()].some((r) => r.name === 'Elsa'), 8000);
+    const row = [...w.s.rows.values()].find((r) => r.name === 'Elsa');
+    check('final review: "Volver a guardar" during a round in flight is synced when that round ends', !!row && row.data.total === 4 && row.id === profList(app).find((x) => x.id === 'elsa').rid && w.s.log.slice(mark).includes('POST /rest/v1/child_profiles') && app.errors.length === 0, JSON.stringify({ row: row && row.id, log: w.s.log.slice(mark) }));
   }
 
   // ---------- privacy: page, export, deletion (spec §8) ----------

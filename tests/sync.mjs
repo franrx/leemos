@@ -310,7 +310,14 @@ const as = async (srv, email) => { const storage = memoryStorage(); const sync =
   const raw = await t.sync.rpc('admin_list_classes');
   check('sync: admin rpcs answer forbidden to a non-admin as a value', adm === null && raw.error === 'forbidden');
   const lc = await t.sync.listClasses();
-  check('sync: listClasses returns id and name', lc.length === 1 && lc[0].id === cls && lc[0].name === '3A');
+  check('sync: listClasses returns id, name and teaches (the caller teaches it)', lc.length === 1 && lc[0].id === cls && lc[0].name === '3A' && lc[0].teaches === true && !('class_teachers' in lc[0]));
+  { // a parent sees the class only through its child: listed, but not taught
+    const K = '55555555-5555-4555-8555-555555555555';
+    srv.rows.set(K, { id: K, owner: null, class_id: cls, name: 'Kim', kind: 'reader', data: data(), version: 1 }); srv.links.set(K, new Set([srv.userByEmail('p@e.c').id]));
+    const pc = await p.sync.listClasses();
+    check('sync: a class seen only through the caller\'s own child has teaches:false', pc.length === 1 && pc[0].id === cls && pc[0].teaches === false, JSON.stringify(pc));
+    srv.rows.delete(K); srv.links.delete(K);
+  }
   await p.sync.deleteMyAccount();
   const gone = await rejects(p.sync.rpc('whoami'));
   check('sync: deleteMyAccount ends the account (its token stops working)', gone instanceof SyncError && gone.kind === 'auth', gone && gone.kind);

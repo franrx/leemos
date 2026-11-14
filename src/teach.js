@@ -12,7 +12,7 @@
 //   download(filename, obj)  saves JSON in the browser (nothing is sent); forgetRid(id) drops the local profile's rid, keeping its progress
 export function createTeach(ctx) {
   const { doc, root, sync, t, lang } = ctx;
-  let rows = null, classes = [], me = null;
+  let rows = null, classes = [], me = null; // classes: every class the account can see (for names); taught() only the ones it teaches
   let msg = null, busy = false;
   const codes = {};               // child id -> {code, expires_at} shown in its row
   const hasParent = new Set();    // roster children the server said already have a parent (no parent code for them)
@@ -33,6 +33,7 @@ export function createTeach(ctx) {
   const el = (tag, cls, text) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
   const clean = (s, n = 40) => (typeof s === 'string' ? s.trim().slice(0, n) : '');
   const nameOf = (r) => clean(r && r.name, 20) || '?';
+  const taught = () => classes.filter((c) => c.teaches);
   const className = (id) => { const c = classes.find((x) => x.id === id); return clean(c && c.name, 40) || '…'; };
   const btn = (key, onClick, { act, child, cls = 'icon-btn', name, extra } = {}) => {
     const b = el('button', cls, t(key));
@@ -244,7 +245,8 @@ export function createTeach(ctx) {
   const redeemClass = () => act(async () => {
     const code = draft.classCode.trim();
     if (!code) { setMsg('teachNeedCode'); return; }
-    const cls = draft.pick && classes.some((c) => c.id === draft.pick) ? draft.pick : classes[0] && classes[0].id;
+    const mine = taught();
+    const cls = draft.pick && mine.some((c) => c.id === draft.pick) ? draft.pick : mine[0] && mine[0].id;
     const res = await sync.redeemInvite(code, cls);
     draft.classCode = '';
     await load();
@@ -291,15 +293,16 @@ export function createTeach(ctx) {
       box.append(ack);
       return box;
     }
-    if (!classes.length) { box.append(el('p', 'small', t('teachNoClasses'))); return box; }
-    classes.forEach((c) => box.append(classBlock(c)));
+    const mine = taught();
+    if (!mine.length) { box.append(el('p', 'small', t('teachNoClasses'))); return box; }
+    mine.forEach((c) => box.append(classBlock(c)));
     const form = el('div', 'teach-form');
     form.append(el('strong', null, t('teachEnterCode')));
     const pickWrap = el('div', 'teach-field');
     const lab = el('label', null, t('teachPickClass')); lab.htmlFor = 'teachPick';
     const sel = el('select'); sel.id = 'teachPick';
-    classes.forEach((c) => { const o = el('option', null, clean(c.name, 40)); o.value = c.id; sel.append(o); });
-    if (draft.pick && classes.some((c) => c.id === draft.pick)) sel.value = draft.pick;
+    mine.forEach((c) => { const o = el('option', null, clean(c.name, 40)); o.value = c.id; sel.append(o); });
+    if (draft.pick && mine.some((c) => c.id === draft.pick)) sel.value = draft.pick;
     sel.addEventListener('change', () => { draft.pick = sel.value; });
     pickWrap.append(lab, sel);
     form.append(pickWrap);

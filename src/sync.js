@@ -95,10 +95,12 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
   }
   const me = () => call('whoami');
   const ackTeacher = () => call('ack_teacher');
+  // `teaches`: the caller teaches the class (RLS on class_teachers returns only the caller's own rows). A class seen only through the
+  // caller's own child in a colleague's class is listed (its name names the chip) but is not one of theirs.
   async function listClasses() {
-    const r = await api('classes?select=id,name&order=name');
+    const r = await api('classes?select=id,name,class_teachers(teacher_id)&order=name');
     if (!r.ok) throw new SyncError('http', 'could not list classes', r.status);
-    return rows(r);
+    return (await rows(r)).map(({ class_teachers, ...c }) => ({ ...c, teaches: Array.isArray(class_teachers) && class_teachers.length > 0 }));
   }
   const createInvite = (childId, kind) => call('create_invite', { p_child: childId, p_kind: kind });
   const redeemInvite = (code, classId) => call('redeem_invite', { p_code: code, p_class: classId || null });
