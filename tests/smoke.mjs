@@ -2734,6 +2734,23 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
       && app.$('acctMsg').textContent === ies.acctRevokedClass.replace('{n}', 'Mateo') && app.errors.length === 0, JSON.stringify({ pf, msg: app.$('acctMsg').textContent, e: app.errors }));
   }
 
+  // fix iteration 3 (F001): a class child revoked in the final sign-out round must not make the round skip the next class child
+  {
+    const RID_L = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    const t = await teacherWorld();
+    t.s.rows.set(RID_L, { id: RID_L, owner: null, class_id: t.cls, name: 'Lucía', kind: 'reader', data: dat({ total: 2, name: 'Lucía', modAt: 2 }), version: 1 });
+    const profiles = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'lucia', name: 'Lucía', kind: 'reader', rid: RID_L, via: 'class' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] } };
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...profiles, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 }, 'leemos-v1:lucia': { name: 'Lucía', total: 2, modAt: 2 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 } } });
+    await until(() => t.s.log.filter((l) => l.startsWith('GET /rest/v1/child_profiles')).length >= 3, 3000); await sleep(80); // the start-up sync read the three linked rows
+    t.s.hideRow(RID_L); // the family takes Lucía out of the class just before the teacher signs out
+    app.w.localStorage.setItem('leemos-v1:mateo', JSON.stringify({ ...stOf(app, 'mateo'), total: 9, modAt: Date.now() + 1000 })); // played just before signing out
+    app.$('acctOutBtn').click();
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null || !app.$('link').hidden, 3000); await sleep(40);
+    check('sign-out: a class child revoked in the final round does not skip the next one (its progress is sent before the purge)',
+      t.s.rows.get(RID_B).data.total === 9 && !profList(app).some((p) => p.id === 'lucia' || p.id === 'mateo') && app.errors.length === 0,
+      JSON.stringify({ server: t.s.rows.get(RID_B).data.total, list: profList(app).map((p) => p.id), e: app.errors }));
+  }
+
   // fix round 1: the session dies during the final sync and the adult stays: the class profiles are hidden
   {
     const { s, app } = await signedTeacherBoot();

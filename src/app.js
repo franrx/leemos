@@ -764,7 +764,7 @@ async function syncAll({final=false}={}){
     const started=Date.now(); // the stamp of a complete round: progress made while it runs must not look sent
     const rank=k=>k==='auth'?3:k==='offline'?1:2;
     let worst=null,again=false;
-    for(const p of PROFILES.list){
+    for(const p of [...PROFILES.list]){ // a copy: a revoked class child leaves PROFILES.list mid-round, and iterating the live array would skip the next profile
       if(!p.rid||p.hidden)continue;
       try{
         const dirty=!!p.kindDirty; // the adult switched the kind on this device: push it once, then the server's kind wins
