@@ -132,6 +132,15 @@ check('rpc: admin_demote_teacher and delete_my_account are never refused for orp
 // accounts.role is assigned only by the invitation claim and by demotion (the first admin is set by hand, in a comment).
 const setsRole = (b) => [...b.matchAll(/update public\.accounts\b[^;]*?\bset\b((?:(?!\bwhere\b)[^;])*)/gi)].some((m) => /\brole\s*=/.test(m[1])) || /insert into public\.accounts\s*\([^)]*\brole\b/.test(b);
 check('rpc: only private.claim_role and public.admin_demote_teacher assign accounts.role', fns.filter((f) => setsRole(f.body)).map((f) => f.name).sort().join() === 'private.claim_role,public.admin_demote_teacher', fns.filter((f) => setsRole(f.body)).map((f) => f.name).join());
+{ const lockAt = redeem.indexOf('from public.child_profiles c where c.id = v_inv.child_id for update'), recheck = redeem.search(/perform 1 from public\.invites i where i\.id = v_inv\.id and i\.used_at is null and i\.expires_at > now\(\);\s*if not found then v_err := 'invalid'; exit checks; end if;/);
+  check('rpc: redeem_invite re-checks the code right after locking the child, before any class or link check (the concurrent loser gets invalid)', lockAt > 0 && recheck > lockAt && ['already_in_class', 'has_parent', 'is_class_teacher('].every((s) => redeem.indexOf(s) > recheck) && !/from public\.invites i\s+where[^;]*for update/.test(redeem)); }
+check('rpc: create_invite refuses to_class for a child already in a class (already_in_class)', /if v_class is not null then return jsonb_build_object\('error', 'already_in_class'\)/.test(create));
+check('rpc: admin input validation answers bad_input, never invalid (a wrong-code message)', ['public.admin_invite_teacher', 'public.admin_create_class', 'public.admin_rename_class'].every((n) => /'bad_input'/.test(bodyOf(n)) && !/'invalid'/.test(bodyOf(n))));
+{ const b = bodyOf('public.admin_delete_class'), lk = b.indexOf('from public.child_profiles c where c.class_id = p_class order by c.id for update');
+  check('rpc: admin_delete_class locks the class children (by id) before the class lock and the unclaimed count', lk > 0 && lk < b.indexOf('pg_advisory_xact_lock') && lk < b.indexOf('select count(*)')); }
+{ const b = bodyOf('public.delete_my_account'), lk = b.search(/from public\.child_profiles c where c\.id in \(select l\.child_id from public\.child_links l where l\.user_id = v_uid\) order by c\.id for update/);
+  check('rpc: delete_my_account locks its linked children before unlinking or deleting them', lk > 0 && lk < b.indexOf('delete from public.child_profiles') && lk < b.indexOf('delete from public.child_links')); }
+check('rpc: claim_role logs claim_teacher only when the role actually changed', /set role = 'teacher'[^;]*;\s*(--[^\n]*\n\s*)*if found then\s+insert into public\.admin_log/.test(bodyOf('private.claim_role')));
 check('rpc: current_role is always called as private.current_role() (bare current_role is the SQL keyword)', fns.every((f) => !/(?<!private\.)\bcurrent_role\b/.test(f.body) && !/private\.current_role(?!\(\))/.test(f.body)));
 
 const jwtRole = k => { try { return JSON.parse(Buffer.from(String(k).split('.')[1], 'base64url').toString()).role; } catch (e) { return null; } };

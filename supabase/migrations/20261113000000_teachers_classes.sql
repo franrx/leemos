@@ -316,7 +316,7 @@ revoke all on sequence public.admin_log_id_seq, public.invite_attempts_id_seq fr
 -- ---------------------------------------------------------------------------------------------------------------------------------
 -- RPCs (public, security definer). Each one checks the caller inside the function and fails closed. Expected failures are a value,
 -- {"error":"<code>"}, never a raised error; success is {"ok":true,...}. Codes: forbidden, invalid, rate, already_in_class, has_parent,
--- orphan, orphans, limit, not_found, last_admin. A child the caller cannot see answers not_found, like a child that does not exist.
+-- orphan, orphans, limit, not_found, last_admin, bad_input. A child the caller cannot see answers not_found, like a child that does not exist.
 -- ---------------------------------------------------------------------------------------------------------------------------------
 
 -- The teacher invitation claim (section 1). Called only from whoami(): no grant. The verified email of the signed-in user (auth.users,
@@ -334,8 +334,11 @@ begin
   delete from public.role_invites r where r.email = v_email and r.expires_at > now() returning r.* into v_inv;
   if v_inv.email is null then return; end if;
   update public.accounts a set role = 'teacher' where a.user_id = v_uid and a.role = 'parent';
-  insert into public.admin_log (actor, action, detail)
-    values (v_uid, 'claim_teacher', jsonb_build_object('email', v_inv.email, 'invited_by', v_inv.created_by));
+  -- Logged only when the role changed (an admin who was also invited keeps their role; the invitation is still consumed).
+  if found then
+    insert into public.admin_log (actor, action, detail)
+      values (v_uid, 'claim_teacher', jsonb_build_object('email', v_inv.email, 'invited_by', v_inv.created_by));
+  end if;
 end $$;
 revoke execute on function private.claim_role() from public, anon;
 
@@ -385,8 +388,8 @@ begin
   select c.class_id into v_class from public.child_profiles c where c.id = p_child;
   if not found or not (private.has_link(p_child) or private.is_class_teacher(v_class)) then return jsonb_build_object('error', 'not_found'); end if;
   if p_kind = 'to_class' then
-    -- A child already in a class is refused at redeem time (already_in_class), where it is checked anyway.
     if not private.has_link(p_child) then return jsonb_build_object('error', 'forbidden'); end if;
+    if v_class is not null then return jsonb_build_object('error', 'already_in_class'); end if;
   else
     if not private.is_class_teacher(v_class) then return jsonb_build_object('error', 'forbidden'); end if;
     if private.has_any_link(p_child) then return jsonb_build_object('error', 'has_parent'); end if;
@@ -438,6 +441,10 @@ begin
     if v_inv.id is null or v_inv.created_by = v_uid then v_err := 'invalid'; exit checks; end if;
     select c.* into v_child from public.child_profiles c where c.id = v_inv.child_id for update;
     if v_child.id is null then v_err := 'invalid'; exit checks; end if;
+    -- Re-check the code under the child lock: a concurrent redeem of the same code that won while we waited has moved or linked the
+    -- child, and the loser must get the uniform 'invalid', not a class or link error. Lock order: child, then invite.
+    perform 1 from public.invites i where i.id = v_inv.id and i.used_at is null and i.expires_at > now();
+    if not found then v_err := 'invalid'; exit checks; end if;
     -- Void: the creator lost the right to make this code.
     if v_inv.kind = 'to_class' and not exists (select 1 from public.child_links l where l.child_id = v_child.id and l.user_id = v_inv.created_by) then
       v_err := 'invalid'; exit checks;
@@ -572,6 +579,8 @@ begin
   if private.current_role() = 'admin' and (select count(*) from public.accounts a where a.role = 'admin') <= 1 then
     return jsonb_build_object('error', 'last_admin');
   end if;
+  -- Lock the linked children first (same order as the other functions) so none changes class or links while it is unlinked.
+  perform 1 from public.child_profiles c where c.id in (select l.child_id from public.child_links l where l.user_id = v_uid) order by c.id for update;
   insert into public.deleted_children (id)
     select c.id from public.child_profiles c join public.child_links l on l.child_id = c.id
     where l.user_id = v_uid and c.class_id is null
@@ -627,7 +636,7 @@ declare
   v_exp timestamptz := now() + interval '30 days';
 begin
   if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
-  if position('@' in v_email) <= 1 or char_length(v_email) > 254 then return jsonb_build_object('error', 'invalid'); end if;
+  if position('@' in v_email) <= 1 or char_length(v_email) > 254 then return jsonb_build_object('error', 'bad_input'); end if;
   insert into public.role_invites (email, created_by, created_at, expires_at) values (v_email, auth.uid(), now(), v_exp)
     on conflict (email) do update set created_by = excluded.created_by, created_at = excluded.created_at, expires_at = excluded.expires_at;
   insert into public.admin_log (actor, action, detail) values (auth.uid(), 'invite_teacher', jsonb_build_object('email', v_email));
@@ -673,7 +682,7 @@ declare
   v_id uuid;
 begin
   if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
-  if char_length(v_name) not between 1 and 40 then return jsonb_build_object('error', 'invalid'); end if;
+  if char_length(v_name) not between 1 and 40 then return jsonb_build_object('error', 'bad_input'); end if;
   insert into public.classes (name) values (v_name) returning id into v_id;
   insert into public.admin_log (actor, action, detail) values (auth.uid(), 'create_class', jsonb_build_object('class_id', v_id, 'name', v_name));
   return jsonb_build_object('ok', true, 'id', v_id, 'name', v_name);
@@ -687,7 +696,7 @@ declare
   v_name text := trim(coalesce(p_name, ''));
 begin
   if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
-  if char_length(v_name) not between 1 and 40 then return jsonb_build_object('error', 'invalid'); end if;
+  if char_length(v_name) not between 1 and 40 then return jsonb_build_object('error', 'bad_input'); end if;
   update public.classes k set name = v_name where k.id = p_class;
   if not found then return jsonb_build_object('error', 'not_found'); end if;
   insert into public.admin_log (actor, action, detail) values (auth.uid(), 'rename_class', jsonb_build_object('class_id', p_class, 'name', v_name));
@@ -704,6 +713,8 @@ declare
   v_unclaimed int;
 begin
   if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
+  -- Lock order as everywhere else: the children first (so none gains or loses a link meanwhile), then the class.
+  perform 1 from public.child_profiles c where c.class_id = p_class order by c.id for update;
   perform pg_advisory_xact_lock(hashtext('class:' || p_class::text));
   perform 1 from public.classes k where k.id = p_class for update;
   if not found then return jsonb_build_object('error', 'not_found'); end if;

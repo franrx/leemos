@@ -153,7 +153,8 @@ try {
   await t('two concurrent redeem_invite calls: exactly one wins', async () => {
     const PC = await mk('pc'), KC = await mkKid(PC), c = await code(PC, KC, 'to_class');
     const rs = await Promise.all([redeem(T1, c, C1), redeem(T2, c, C2)]);
-    return [rs.filter(okr).length === 1 && [C1, C2].includes((await kidRow(KC)).class_id), rs.map((r) => JSON.stringify(r.body)).join(' ')];
+    const lost = rs.filter((r) => !okr(r)); // the loser gets the uniform error, not a class or link error
+    return [rs.filter(okr).length === 1 && lost.length === 1 && JSON.stringify(lost[0].body) === JSON.stringify({ error: 'invalid' }) && [C1, C2].includes((await kidRow(KC)).class_id), rs.map((r) => JSON.stringify(r.body)).join(' ')];
   });
   await t('the 11th wrong code in an hour is rate limited', async () => {
     const TR = await mkRole('tr', 'teacher', { ack: true }), CR = await mkClass('rls rate ' + stamp); await teach(CR, TR);
@@ -176,7 +177,15 @@ try {
     const a = await redeem(TC, await code(TC, mine, 'to_class'), CC), b = await redeem(TC, await code(TC, ours, 'to_parent'));
     return [errOf(a) === 'invalid' && errOf(b) === 'invalid' && !(await kidRow(mine)).class_id, `${errOf(a)} ${errOf(b)}`];
   });
-  await t('a teacher cannot create a to_parent code for a child that already has a parent', async () => refused(await rpc(T1, 'create_invite', { p_child: K1, p_kind: 'to_parent' })) && okr(await rpc(PA, 'create_invite', { p_child: K1, p_kind: 'to_class' })));
+  await t('a teacher cannot create a to_parent code for a child that already has a parent', async () => refused(await rpc(T1, 'create_invite', { p_child: K1, p_kind: 'to_parent' })) && okr(await rpc(PA, 'create_invite', { p_child: await mkKid(PA), p_kind: 'to_class' })));
+  await t('a to_class code for a child already in a class is refused at creation (already_in_class)', async () => {
+    const r = await rpc(PA, 'create_invite', { p_child: K1, p_kind: 'to_class' }), ctl = await rpc(PA, 'create_invite', { p_child: await mkKid(PA), p_kind: 'to_class' });
+    return [(await classOfK1()) === C1 && errOf(r) === 'already_in_class' && okr(ctl), `${JSON.stringify(r.body)} ${JSON.stringify(ctl.body)}`];
+  });
+  await t('admin input errors answer bad_input (never the wrong-code invalid)', async () => {
+    const rs = [await rpc(AD, 'admin_invite_teacher', { p_email: 'no-at-sign' }), await rpc(AD, 'admin_create_class', { p_name: '' }), await rpc(AD, 'admin_rename_class', { p_class: C1, p_name: 'x'.repeat(41) })];
+    return [rs.every((r) => errOf(r) === 'bad_input'), rs.map(errOf).join()];
+  });
 
   // Leaving, removing, deleting.
   await t('leave_class works for the parent and the teacher loses access at once', async () => {
