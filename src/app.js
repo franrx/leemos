@@ -47,7 +47,7 @@ const cleanProfiles=p=>{
       // via:'class' = reached this device through a class (purged at sign-out); kindDirty = kind changed here, not pushed yet; noSync = its server copy was deleted or revoked: never uploaded again unless the adult chooses; hidden = class profile after an auth error
       ...(x.via==='class'?{via:'class'}:{}),...(x.kindDirty===true?{kindDirty:true}:{}),...(x.hidden===true?{hidden:true}:{}),...(x.noSync===true?{noSync:true}:{})});
   });
-  return list.some(x=>x.id===p.active)?{active:p.active,list}:null;
+  return list.some(x=>x.id===p.active)?{active:p.active,list,...(p.kindSynced===true?{kindSynced:true}:{})}:null;
 };
 const loadProfiles=()=>{
   try{const c=cleanProfiles(JSON.parse(localStorage.getItem(PKEY)));if(c)return c}catch(e){}
@@ -55,6 +55,9 @@ const loadProfiles=()=>{
 };
 const PROFILES=loadProfiles();
 const saveProfiles=()=>{try{localStorage.setItem(PKEY,JSON.stringify(PROFILES));return true}catch(e){return false}};
+// Upgrade, once per device (kindSynced): before this version the kind was local only and the server row kept its creation kind, so each
+// linked profile pushes the kind it has here (kindDirty) instead of adopting that stale value. Class profiles did not exist then.
+if(!PROFILES.kindSynced){PROFILES.list.forEach(x=>{if(x.rid&&x.via!=='class')x.kindDirty=true});PROFILES.kindSynced=true;saveProfiles()}
 // Where the app goes when the open profile is purged or hidden: the first one that did not come through a class, else a new default reader.
 function fallbackId(){
   const f=PROFILES.list.find(x=>x.via!=='class'&&!x.hidden);

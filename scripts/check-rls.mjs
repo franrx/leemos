@@ -295,6 +295,12 @@ try {
     const r = await rpc(DU, 'delete_my_account');
     return [okr(r) && (await kidRow(classed) || {}).class_id === C1 && !(await linksOf(classed)).length && !(await kidRow(alone)), JSON.stringify(r.body)];
   });
+  await t('a user deleted outside the app (Auth admin API) loses their class-less child with a tombstone; a classed one stays in its class', async () => {
+    const DX = await mk('dx'), classed = await mkKid(DX), alone = await mkKid(DX); await share(DX, classed, T1, C1);
+    const r = await fetch(`${url}/auth/v1/admin/users/${DX.id}`, { method: 'DELETE', headers: j({ apikey: service, Authorization: 'Bearer ' + service }) });
+    const tomb = (await json(await svc(`deleted_children?id=eq.${alone}&select=id`))) || [];
+    return [r.status < 300 && !(await kidRow(alone)) && tomb.length === 1 && (await kidRow(classed) || {}).class_id === C1 && !(await linksOf(classed)).length, `${r.status} tomb=${tomb.length}`];
+  });
   await t('a parent claims a teacher-created child and takes it out of the class: the teacher can no longer read or edit it', async () => {
     const PD = await mk('pd5'), kid = await claim(T1, C1, PD), saw = await seen(T1, kid), r = await rpc(PD, 'leave_class', { p_child: kid });
     const edit = await json(await rest(T1, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ name: 'Teacher' }) }));

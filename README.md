@@ -97,7 +97,7 @@ Orden obligatorio. La migración `supabase/migrations/20261113000000_teachers_cl
 2. Pega el archivo en el editor SQL de producción y ejecútalo (una sola transacción).
 3. Comprueba: `select policyname from pg_policies where tablename='child_profiles';` debe dar las cuatro `owner reads/inserts/updates/deletes`, y los perfiles de Elsa y Leo deben volver a sincronizar con la app anterior.
 
-Para quitar un usuario de prueba usa `delete_my_account`, no `delete from auth.users` en el panel: dejaría niños de clase sin ningún vínculo.
+Borrar un usuario desde el panel de Supabase o con la API de administración de Auth (lo habitual para atender una petición de borrado por email) hace lo mismo que `delete_my_account`, gracias al disparador `children_of_deleted_user` (`before delete` en `auth.users`): sus niños sin clase se borran con lápida y los que están en una clase se quedan en ella sin vínculo (un profesor de la clase puede borrarlos). Lo único que el panel no hace es negarse a borrar al último admin: compruébalo tú antes.
 
 ### Pendiente de revisión humana
 

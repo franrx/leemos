@@ -62,6 +62,9 @@ check('teachers: every function has exactly one revoke execute from public, anon
 check('teachers: the trigger that writes child_links is security definer', fns.some((f) => /insert into public\.child_links/.test(f.body)) && fns.filter((f) => /insert into public\.child_links/.test(f.body)).every(definer));
 check('teachers: the trigger that writes accounts is security definer', fns.some((f) => /insert into public\.accounts/.test(f.body)) && fns.filter((f) => /insert into public\.accounts/.test(f.body)).every(definer));
 check('teachers: a new auth user gets an accounts row (trigger on auth.users)', /after insert on auth\.users\s+for each row execute function private\.\w+\(\)/.test(tc));
+{ const del = (/before delete on auth\.users\s+for each row execute function (private\.\w+)\(\)/.exec(tc) || [])[1], f = del && fn(del), b = (f && f.body) || '';
+  // a user deleted outside the app (dashboard, Auth admin API) must not leave their class-less children with no owner, class or link
+  check('teachers: a user deleted outside the app loses their class-less children with tombstones (before delete trigger on auth.users)', !!f && definer(f) && /class_id is null/.test(b) && /insert into public\.deleted_children/.test(b) && b.indexOf('insert into public.deleted_children') < b.indexOf('delete from public.child_profiles') && /for update/.test(b), del || 'no trigger'); }
 check('teachers: a class-less child gets a link for its creator (after insert trigger)', /after insert on public\.child_profiles\s+for each row execute function private\.\w+\(\)/.test(tc) && fns.some((f) => /insert into public\.child_links/.test(f.body) && /class_id is null/.test(f.body)));
 check('teachers: accounts.role defaults to parent and is limited to admin, teacher, parent', /role\s+text not null default 'parent' check \(role in \('admin','teacher','parent'\)\)/.test(tc));
 

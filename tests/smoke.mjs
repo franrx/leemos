@@ -2808,6 +2808,20 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('kind switched here is pushed once (kindDirty) and then adopted from the server', dirty && pushed && profList(app)[0].kind === 'reader' && s.rows.get(RID_A).kind === 'reader' && app.errors.length === 0, JSON.stringify({ dirty, pushed, list: profList(app), server: s.rows.get(RID_A).kind }));
   }
 
+  // upgrade: before this version the kind was local only, so the server row may still hold the creation kind. The device's kind is
+  // pushed once on the first sync of this version, never replaced by that stale value.
+  {
+    const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);
+    s.rows.set(RID_A, { id: RID_A, owner: uid, class_id: null, name: 'Elsa', kind: 'reader', data: dat({ total: 1, name: 'Elsa' }), version: 1 });
+    s.links.set(RID_A, new Set([uid]));
+    const app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'pre', rid: RID_A }] }, 'leemos-v1': { name: 'Elsa', total: 1, modAt: 10 } } });
+    await until(() => s.log.some((l) => l.startsWith('GET /rest/v1/child_profiles')), 3000); await sleep(80);
+    const after = profList(app)[0];
+    const again = await boot({ supa: s, syncConfig: CFG, storage: dump(app.w) }); // a later start: the migration runs once
+    await sleep(80);
+    check('upgrade: a kind switched before this version is pushed once, not replaced by the server\'s stale kind', after.kind === 'pre' && !after.kindDirty && s.rows.get(RID_A).kind === 'pre' && profList(again)[0].kind === 'pre' && !profList(again)[0].kindDirty && app.errors.length === 0, JSON.stringify({ after, server: s.rows.get(RID_A).kind, again: profList(again) }));
+  }
+
   // the role is read at start when a session is stored (whoami also claims a pending teacher invitation)
   {
     const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s, T_EMAIL);

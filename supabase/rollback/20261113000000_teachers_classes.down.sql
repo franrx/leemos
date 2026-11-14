@@ -28,6 +28,7 @@ drop policy "creator inserts" on public.child_profiles;
 
 -- Triggers added by the new migration.
 drop trigger accounts_for_new_user on auth.users;
+drop trigger children_of_deleted_user on auth.users;
 drop trigger child_profiles_link_creator on public.child_profiles;
 drop trigger child_profiles_owner_limit on public.child_profiles;
 drop trigger child_profiles_class_limit on public.child_profiles;
@@ -71,6 +72,7 @@ drop function private.child_profiles_class_limit();
 drop function private.child_links_limit();
 drop function private.child_links_clear_owner();
 drop function private.accounts_for_new_user();
+drop function private.children_of_deleted_user();
 drop function private.claim_role();
 drop schema private; -- no cascade: an omission above fails loudly
 

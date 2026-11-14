@@ -282,6 +282,28 @@ revoke execute on function private.accounts_for_new_user() from public, anon;
 create trigger accounts_for_new_user after insert on auth.users
   for each row execute function private.accounts_for_new_user();
 
+-- A user deleted outside the app (the Supabase dashboard, the Auth admin API: the usual way to answer an emailed erasure request) gets
+-- what delete_my_account does: their linked children without a class are deleted with tombstones; classed ones stay in their class,
+-- unlinked (the links cascade). Without it those children would be left with no owner, class or link, unreachable by anyone.
+-- delete_my_account has already done this when it deletes the user, so there it finds nothing. security definer: auth deletes the user.
+create function private.children_of_deleted_user() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform 1 from public.child_profiles c where c.id in (select l.child_id from public.child_links l where l.user_id = old.id) order by c.id for update;
+  insert into public.deleted_children (id)
+    select c.id from public.child_profiles c join public.child_links l on l.child_id = c.id
+    where l.user_id = old.id and c.class_id is null
+      and not exists (select 1 from public.child_links o where o.child_id = c.id and o.user_id <> old.id)
+    on conflict do nothing;
+  delete from public.child_profiles c using public.child_links l
+    where l.child_id = c.id and l.user_id = old.id and c.class_id is null
+      and not exists (select 1 from public.child_links o where o.child_id = c.id and o.user_id <> old.id);
+  return old;
+end $$;
+revoke execute on function private.children_of_deleted_user() from public, anon;
+create trigger children_of_deleted_user before delete on auth.users
+  for each row execute function private.children_of_deleted_user();
+
 -- ---------------------------------------------------------------------------------------------------------------------------------
 -- New tables: RLS on, all default privileges revoked, then only the select grants of section 3. No client writes anywhere.
 -- ---------------------------------------------------------------------------------------------------------------------------------

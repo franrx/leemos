@@ -54,7 +54,7 @@ const run = () => {
   check('public functions: only the old two (limit, touch)', same(lines(q(`select proname from pg_proc where pronamespace='public'::regnamespace`)), ['child_profiles_limit', 'child_profiles_touch']));
   check('child_profiles policies are exactly the four old ones', same(lines(q(`select policyname from pg_policies where tablename='child_profiles'`)), ['owner reads', 'owner inserts', 'owner updates', 'owner deletes']));
   check('child_profiles triggers are the old two (limit, touch)', same(lines(q(`select tgname from pg_trigger where tgrelid='public.child_profiles'::regclass and not tgisinternal`)), ['child_profiles_limit', 'child_profiles_touch']));
-  check('no trigger of the new migration on auth.users', q(`select count(*) from pg_trigger where tgrelid='auth.users'::regclass and tgname='accounts_for_new_user'`) === '0');
+  check('no trigger of the new migration on auth.users', q(`select count(*) from pg_trigger where tgrelid='auth.users'::regclass and tgname in ('accounts_for_new_user','children_of_deleted_user')`) === '0');
   check('child_profiles has no class_id column', q(`select count(*) from information_schema.columns where table_schema='public' and table_name='child_profiles' and column_name='class_id'`) === '0');
   check('owner is NOT NULL with a cascade foreign key', q(`select is_nullable from information_schema.columns where table_schema='public' and table_name='child_profiles' and column_name='owner'`) === 'NO'
     && q(`select confdeltype from pg_constraint where conname='child_profiles_owner_fkey'`) === 'c');
