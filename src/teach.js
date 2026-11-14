@@ -74,7 +74,7 @@ export function createTeach(ctx) {
   // One action at a time (a double tap must not send two requests). Any failure becomes a message; the lists reload either way.
   async function act(fn, forbidden) {
     if (busy) return;
-    busy = true; setMsg(null); want = keyOf(clicked || doc.activeElement); clicked = null; render();
+    busy = true; setMsg(null); want = keyOf(clicked) || keyOf(doc.activeElement); clicked = null; render();
     try { await fn(); }
     catch (e) {
       const key = errKey(e, forbidden);
@@ -297,7 +297,7 @@ export function createTeach(ctx) {
     const text = msg ? t(msg.key, msg.vars) : '';
     if (msgEl.textContent !== text) msgEl.textContent = text;
     root.hidden = false;
-    if (key) { let f = null; try { f = root.querySelector(key); } catch (e) { /* a key that is not a selector */ } if (f && !f.disabled) f.focus(); else if (want) root.focus(); } // the control is gone (left, deleted): the panel itself
+    if (key) { let f = null; try { f = root.querySelector(key); } catch (e) { /* a key that is not a selector */ } if (f && !f.disabled) f.focus(); else if (want && !busy) root.focus(); } // the control is gone (left, deleted): the panel itself
   }
 
   return { render, refresh };

@@ -150,11 +150,13 @@ grant execute on function private.has_any_link(uuid) to authenticated;
 
 -- A computed column of child_profiles (PostgREST: select=...,has_parent): a boolean per row the caller can already read, so a teacher
 -- knows whether a child still needs a code for the parents. It never says who the parent is. The row is looked up again and the
--- read policy repeated, because /rpc/has_parent can also be called with a made-up row and must not answer for an unreadable child.
+-- predicate of the child_profiles select policy is repeated EXACTLY (link, class teacher, or the creator's one-shot clause), because
+-- /rpc/has_parent can also be called with a made-up row and a demoted teacher must get nothing. Keep it identical to that policy.
 create function public.has_parent(public.child_profiles) returns boolean
 language sql stable security definer set search_path = '' as $$
   select coalesce((select private.has_any_link(c.id) from public.child_profiles c
-    where c.id = $1.id and (private.has_link(c.id) or private.is_class_teacher(c.class_id) or c.owner = (select auth.uid()))), false);
+    where c.id = $1.id and (private.has_link(c.id) or private.is_class_teacher(c.class_id)
+      or (c.owner = (select auth.uid()) and c.class_id is null and not private.has_any_link(c.id)))), false);
 $$;
 revoke execute on function public.has_parent(public.child_profiles) from public, anon;
 grant execute on function public.has_parent(public.child_profiles) to authenticated;

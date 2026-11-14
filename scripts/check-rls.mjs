@@ -160,8 +160,21 @@ try {
     const KU = await mkKid(T1, { class_id: C1 }), KCl = await claim(T1, C1, await mk('pcl'));
     const flag = async (u, id) => { const b = await json(await rest(u, `child_profiles?id=eq.${id}&select=id,has_parent`)); return Array.isArray(b) && b[0] ? b[0].has_parent : undefined; };
     const links = await json(await rest(T1, `child_links?child_id=eq.${KCl}`));
-    const fake = await rpc(T2, 'has_parent', { child_profiles: { id: K1 } }); // a made-up row for a child T2 cannot read must not answer true
-    return [(await flag(T1, KU)) === false && (await flag(T1, KCl)) === true && (await flag(T1, K1)) === true && Array.isArray(links) && links.length === 0 && fake.body !== true, `${await flag(T1, KU)} ${await flag(T1, KCl)} ${JSON.stringify(links)} ${fake.status} ${JSON.stringify(fake.body)}`];
+    const stranger = await json(await rest(PB, `child_profiles?id=eq.${KCl}&select=id,has_parent`)); // a stranger sees no row at all
+    return [(await flag(T1, KU)) === false && (await flag(T1, KCl)) === true && (await flag(T1, K1)) === true && Array.isArray(links) && links.length === 0 && Array.isArray(stranger) && stranger.length === 0, `${await flag(T1, KU)} ${await flag(T1, KCl)} ${JSON.stringify(links)} ${JSON.stringify(stranger)}`];
+  });
+  await t('has_parent gives nothing to a teacher who lost access (unassigned, or demoted) and cannot tell claimed from unclaimed', async () => {
+    const TH = await mkRole('th', 'teacher', { ack: true }), CH = await mkClass('rls hp ' + stamp); await teach(CH, TH);
+    const KUn = await mkKid(TH, { class_id: CH }), KCl2 = await claim(TH, CH, await mk('pcl2')); // TH is the creator (owner) of both
+    const flag = async (u, id) => { const b = await json(await rest(u, `child_profiles?id=eq.${id}&select=id,has_parent`)); return Array.isArray(b) ? (b[0] ? b[0].has_parent : 'none') : 'err'; };
+    const control = (await flag(TH, KUn)) === false && (await flag(TH, KCl2)) === true; // positive control: while a teacher of the class the flag reads correctly
+    await rpc(AD, 'admin_unassign_teacher', { p_class: CH, p_user: TH.id });
+    const unassigned = [await flag(TH, KUn), await flag(TH, KCl2)];
+    await teach(CH, TH); // back in the class, then demoted
+    const back = (await flag(TH, KCl2)) === true;
+    await rpc(AD, 'admin_demote_teacher', { p_user: TH.id });
+    const demoted = [await flag(TH, KUn), await flag(TH, KCl2)];
+    return [control && unassigned.every((x) => x === 'none') && back && demoted.every((x) => x === 'none'), JSON.stringify({ control, unassigned, back, demoted })];
   });
   await t('a to_parent code typed into the class box is refused (invalid), links nobody, and still works for the family', async () => {
     const KP = await mkKid(T1, { class_id: C1 }), cd = await code(T1, KP, 'to_parent');
