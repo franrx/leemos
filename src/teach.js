@@ -9,6 +9,7 @@
 //   pct(data)   percentage of mastered items for a server row's data
 //   openChild(row, {stay})  creates (or finds) the local profile with the row's id as rid (marked via:'class' when the account is not linked to it)
 //   confirm(textKey, vars, yesKey) -> Promise<boolean>
+//   download(filename, obj)  saves JSON in the browser (nothing is sent); forgetRid(id) drops the local profile's rid, keeping its progress
 export function createTeach(ctx) {
   const { doc, root, sync, t, lang } = ctx;
   let rows = null, classes = [], me = null;
@@ -141,6 +142,8 @@ export function createTeach(ctx) {
     if (r.class_id) acts.append(btn('teachLeave', () => leaveAsParent(r), { act: 'leave', child: r.id, name: nameOf(r) }));
     else acts.append(btn('teachShare', () => share(r), { act: 'share', child: r.id, name: nameOf(r) }));
     if (!isLocal(r)) acts.append(btn('teachOpen', () => open(r), { act: 'open', child: r.id, name: nameOf(r), extra: { own: '1' } }));
+    acts.append(btn('teachDownload', () => download(r), { act: 'download', child: r.id, name: nameOf(r) }));
+    acts.append(btn('teachWipe', () => wipe(r), { act: 'wipe', child: r.id, name: nameOf(r), cls: 'icon-btn danger' }));
     li.append(acts);
     const cb = codeBox(r, 'to_class'); if (cb) li.append(cb);
     return li;
@@ -184,9 +187,26 @@ export function createTeach(ctx) {
   const remove = (r) => act(async () => {
     if (!await ctx.confirm('teachDeleteAsk', { n: nameOf(r) }, 'teachDeleteYes')) return;
     await sync.deleteChild(r.id);
+    if (ctx.forgetRid) ctx.forgetRid(r.id);
     delete codes[r.id];
     await load();
   }, 'teachDelForbidden');
+  // A family deletes its child's data from the server (the local progress stays on this device).
+  const wipe = (r) => act(async () => {
+    if (!await ctx.confirm(r.class_id ? 'teachWipeAskClass' : 'teachWipeAsk', { n: nameOf(r), c: className(r.class_id) }, 'teachWipeYes')) return;
+    await sync.deleteChild(r.id);
+    if (ctx.forgetRid) ctx.forgetRid(r.id);
+    delete codes[r.id];
+    await load();
+    setMsg('teachWiped');
+  }, 'teachDelForbidden');
+  // One child's data, taken from the account's export (never from another account's rows).
+  const download = (r) => act(async () => {
+    const d = await sync.exportMyData();
+    const c = (d && Array.isArray(d.children) ? d.children : []).find((x) => x && x.id === r.id);
+    if (!c) throw { kind: 'http', message: 'not_found' };
+    ctx.download('leemos-nino-' + String(r.id).slice(0, 8) + '.json', { exported_at: new Date().toISOString(), child: c });
+  });
   const parentCode = (r) => act(async () => {
     try { const inv = await sync.createInvite(r.id, 'to_parent'); codes[r.id] = { code: inv.code, expires_at: inv.expires_at }; }
     catch (e) { if (e && e.message === 'has_parent') hasParent.add(r.id); throw e; } // somebody already claimed it: no code, and no button next time
@@ -205,6 +225,7 @@ export function createTeach(ctx) {
     const nm = nameOf(r);
     acts.append(btn('teachOpen', () => open(r), { act: 'open', child: r.id, name: nm }));
     if (!r.linked && !r.has_parent && !hasParent.has(r.id)) acts.append(btn('teachParentCode', () => parentCode(r), { act: 'parentcode', child: r.id, name: nm }));
+    acts.append(btn('teachDownload', () => download(r), { act: 'download', child: r.id, name: nm }));
     acts.append(btn('teachTake', () => takeOut(r), { act: 'leave', child: r.id, name: nm }));
     acts.append(btn('teachDelete', () => remove(r), { act: 'delete', child: r.id, name: nm, cls: 'icon-btn danger' }));
     li.append(acts);

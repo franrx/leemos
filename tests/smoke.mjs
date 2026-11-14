@@ -3039,6 +3039,118 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('teach: offline code actions show the network message and consume nothing', m1 === ies.acctNetwork && untouched && w.s.links.get(RID_B).has(w.par.uid), m1);
   }
 
+  // ---------- privacy: page, export, deletion (spec §8) ----------
+  const captureDownloads = (w) => {
+    w.__dl = []; w.__rev = [];
+    w.URL.createObjectURL = (b) => { const u = 'blob:t' + w.__dl.length; w.__dl.push({ blob: b, url: u }); return u; };
+    w.URL.revokeObjectURL = (u) => { w.__rev.push(u); };
+    w.HTMLAnchorElement.prototype.click = function () { const d = w.__dl.find((x) => x.url === this.href || x.url === this.getAttribute('href')); if (d) d.name = this.download; };
+  };
+  const blobJSON = (w, b) => new Promise((res, rej) => { const f = new w.FileReader(); f.onload = () => { try { res(JSON.parse(f.result)); } catch (e) { rej(e); } }; f.onerror = () => rej(f.error); f.readAsText(b); });
+
+  {
+    const app = await boot({});
+    const a1 = app.$('acctConsentLink'), a2 = app.$('acctPrivacy');
+    const t1 = app.$('acctOut').contains(a1), t2 = app.$('acctIn').contains(a2);
+    check('privacy: the consent line and the account block link to privacy.html',
+      !!a1 && !!a2 && t1 && t2 && a1.getAttribute('href') === 'privacy.html' && a2.getAttribute('href') === 'privacy.html' && existsSync(join(ROOT, 'privacy.html')) && a1.textContent.length > 3 && a2.textContent.length > 3, [a1 && a1.outerHTML, a2 && a2.outerHTML].join(' '));
+  }
+
+  {
+    const w = await world();
+    const RID_Z = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    const other = await signedAuth(w.s, 'otra@example.com');
+    w.s.rows.set(RID_Z, { id: RID_Z, owner: other.uid, class_id: null, name: 'Zoe', kind: 'reader', data: dat({ total: 1, name: 'Zoe', modAt: 2 }), version: 1 });
+    w.s.links.set(RID_Z, new Set([other.uid]));
+    const app = await bootWorld(w, {}, { onDom: captureDownloads });
+    const reqs = w.s.log.length;
+    app.$('acctExport').click();
+    await until(() => app.w.__dl.length === 1, 3000); await sleep(40);
+    const dl = app.w.__dl[0], j = await blobJSON(app.w, dl.blob);
+    const names = (j.children || []).map((c) => c.name);
+    const after = w.s.log.slice(reqs);
+    check('export: "Download my data" produces JSON with the account\'s children and no other account\'s',
+      names.join(',') === 'Elsa' && !JSON.stringify(j).includes('Zoe') && !JSON.stringify(j).includes(RID_Z) && j.children[0].id === RID_A && dl.name === 'leemos-mis-datos.json' && /json/.test(dl.blob.type) && app.w.__rev.includes(dl.url) && after.filter((l) => /export_my_data/.test(l)).length === 1 && after.every((l) => !/^(PUT|PATCH|DELETE)/.test(l)) && app.errors.length === 0,
+      JSON.stringify({ names, name: dl.name, rev: app.w.__rev, after }));
+    // a child's own download: only that child
+    const b = qs(app, '[data-act=download][data-child="' + RID_A + '"]');
+    b.click(); await until(() => app.w.__dl.length === 2, 3000); await sleep(40);
+    const j2 = await blobJSON(app.w, app.w.__dl[1].blob);
+    check('export: a child\'s "Download" has that child only', !!b && j2.child && j2.child.id === RID_A && j2.child.name === 'Elsa' && !JSON.stringify(j2).includes('Zoe') && !/Elsa|Mateo/.test(app.w.__dl[1].name || ''), JSON.stringify(j2).slice(0, 200));
+  }
+
+  {
+    const RID_C2 = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const w = await world();
+    w.s.rows.set(RID_C2, { id: RID_C2, owner: w.par.uid, class_id: null, name: 'Ana', kind: 'reader', data: dat({ total: 2, name: 'Ana', modAt: 2 }), version: 1 });
+    w.s.links.set(RID_C2, new Set([w.par.uid]));
+    const profs = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'ana', name: 'Ana', kind: 'reader', rid: RID_C2 }] }, 'leemos-v1': { name: 'Elsa', total: 4 }, 'leemos-v1:ana': { name: 'Ana', total: 2 } };
+    const app = await bootWorld(w, profs);
+    qs(app, '[data-act=wipe][data-child="' + RID_A + '"]').click();
+    const askNo = await confirmWith(app, false);
+    const intact = w.s.rows.has(RID_A);
+    qs(app, '[data-act=wipe][data-child="' + RID_A + '"]').click(); await confirmWith(app, true);
+    await until(() => !w.s.rows.has(RID_A), 3000); await sleep(100);
+    const list = profList(app);
+    const elsa = list.find((p) => p.id === 'elsa'), ana = list.find((p) => p.id === 'ana');
+    check('delete: deleting a child calls deleteChild and removes only its rid',
+      /Elsa/.test(askNo) && intact && w.s.log.filter((l) => /delete_child/.test(l)).length === 1 && w.s.tombstones.has(RID_A) && w.s.rows.has(RID_C2) && !!elsa && elsa.rid === undefined && !!ana && ana.rid === RID_C2 && JSON.parse(app.w.localStorage.getItem('leemos-v1')).total === 4 && !qs(app, '[data-block=parent] [data-child="' + RID_A + '"]') && !!qs(app, '[data-block=parent] [data-child="' + RID_C2 + '"]') && app.errors.length === 0,
+      JSON.stringify({ askNo, list, tomb: [...w.s.tombstones] }));
+    // a child in a class gets a different question (the class teachers lose it too)
+    w.s.rows.get(RID_C2).class_id = w.cls;
+    app.$('acctSync').click(); await sleep(80);
+    await app.$('parents').dispatchEvent(new app.w.Event('toggle')); await sleep(120);
+    const wb = qs(app, '[data-act=wipe][data-child="' + RID_C2 + '"]');
+    wb.click(); const askClass = await confirmWith(app, false);
+    check('delete: a child in a class asks a different confirmation than a class-less one', !!wb && askClass !== askNo && /Ana/.test(askClass) && askClass.includes('3A') && w.s.rows.has(RID_C2), askClass);
+  }
+
+  {
+    const w = await world();
+    const profs = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'ana', name: 'Ana', kind: 'reader' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] }, 'leemos-v1': { name: 'Elsa', total: 4 }, 'leemos-v1:ana': { name: 'Ana', total: 3 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5 }, 'leemos-sync-at': '123' };
+    const app = await bootWorld(w, profs);
+    const ls = app.w.localStorage;
+    ls.setItem('leemos-sync-at', String(Date.now())); // a round has run
+    const keysBefore = Object.keys(ls).filter((k) => !/^leemos-(auth|auth-user|sync-at)$/.test(k)).sort();
+    const asks = [];
+    const ask = async (yes) => { asks.push(await confirmWith(app, yes)); };
+    app.$('acctDelete').click(); await ask(false); await sleep(60);
+    const afterNo1 = w.s.log.filter((l) => /delete_my_account/.test(l)).length;
+    app.$('acctDelete').click(); await ask(true); await ask(false); await sleep(60);
+    const afterNo2 = w.s.log.filter((l) => /delete_my_account/.test(l)).length;
+    const stillIn = ls.getItem('leemos-auth') !== null;
+    app.$('acctDelete').click(); await ask(true); await ask(true);
+    await until(() => ls.getItem('leemos-auth') === null, 3000); await sleep(100);
+    const list = profList(app);
+    const keysAfter = Object.keys(ls).filter((k) => !/^leemos-(auth|auth-user|sync-at)$/.test(k)).sort();
+    check('delete account: asks twice, clears the auth keys and keeps local progress',
+      afterNo1 === 0 && afterNo2 === 0 && stillIn && asks.length === 5 && asks[1] !== '' && asks[2] !== asks[1] && w.s.log.filter((l) => /delete_my_account/.test(l)).length === 1 && !w.s.accounts.has(w.par.uid)
+      && ls.getItem('leemos-auth') === null && ls.getItem('leemos-auth-user') === null && ls.getItem('leemos-sync-at') === null
+      && list.every((p) => p.rid === undefined) && list.map((p) => p.id).join(',') === 'elsa,ana' && JSON.parse(ls.getItem('leemos-v1')).total === 4 && JSON.parse(ls.getItem('leemos-v1:ana')).total === 3
+      && app.$('acctOut').hidden === false && app.$('acctIn').hidden === true && app.$('teach').hidden && app.errors.length === 0,
+      JSON.stringify({ afterNo1, afterNo2, asks, list, keys: Object.keys(ls) }));
+    check('delete account: via:class profiles are purged', !profList(app).some((p) => p.id === 'mateo' || p.via === 'class') && ls.getItem('leemos-v1:mateo') === null && keysBefore.filter((k) => k !== 'leemos-v1:mateo').join() === keysAfter.join(), JSON.stringify({ keysBefore, keysAfter }));
+  }
+
+  {
+    const w = await world();
+    const app = await bootWorld(w, {}, {});
+    w.s.setOffline(true);
+    app.$('acctDelete').click(); await confirmWith(app, true); await confirmWith(app, true);
+    await until(() => app.$('acctMsg').textContent.length > 0, 3000);
+    check('delete account: offline keeps the session and says there is no connection', app.$('acctMsg').textContent === ies.acctNetwork && app.w.localStorage.getItem('leemos-auth') !== null && w.s.accounts.has(w.par.uid), app.$('acctMsg').textContent);
+  }
+
+  {
+    const page = existsSync(join(ROOT, 'privacy.html')) ? readFileSync(join(ROOT, 'privacy.html'), 'utf8') : '';
+    const text = page.replace(/<style[\s\S]*?<\/style>/g, '');
+    const marks = ['responsable', 'correo', 'región'].map((w2) => new RegExp('PENDIENTE[^<]{0,80}' + w2, 'i').test(text));
+    const marksCa = (text.match(/PENDENT|PENDIENTE/g) || []).length;
+    check('privacy.html contains the PENDIENTE markers',
+      page.length > 2000 && (text.match(/PENDIENTE/g) || []).length >= 6 && marks.every(Boolean) && /borrador sin revisi[oó]n legal/i.test(text) && /borrador sense revisi[oó] legal/i.test(text) && /lang="es"/.test(page) && /lang="ca"/.test(page) && /prefers-color-scheme:\s*dark/.test(page) && /name="viewport"/.test(page) && !new RegExp('service' + '_role').test(page) && !/[\w.-]+@[\w-]+\.[a-z]{2,}/i.test(text) && !/(href|src)="(\/|https?:)/.test(page.replace(/https:\/\/(fonts\.googleapis\.com|fonts\.gstatic\.com)[^"]*/g, '')) && marksCa >= 6,
+      JSON.stringify({ n: (text.match(/PENDIENTE/g) || []).length, marks, len: page.length }));
+  }
+
   {
     const es = readJSON('src/data/i18n.es.json'), ca = readJSON('src/data/i18n.ca.json');
     // every key the panel code names exists in both files (a literal key in teach.js is t('key') or a table value)

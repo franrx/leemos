@@ -813,7 +813,7 @@ function loadTeach(){
     try{
       const m=await (window.__leemosImport||(p=>import(p)))('./teach.js');
       teach=m.createTeach({doc:document,root:$('teach'),sync,t,lang:()=>S.lang,role:()=>ROLE,setRole:r=>{ROLE=r==='teacher'||r==='admin'?r:'parent'},profiles:PROFILES,uuid,pct:pctOfData,
-        openChild,syncNow:()=>syncAll(),confirm:(k,vars,yes)=>askChoice(k,yes||'teachYes','teachNo','teachConfirmTitle',vars)});
+        openChild,syncNow:()=>syncAll(),download:downloadJSON,forgetRid,confirm:(k,vars,yes)=>askChoice(k,yes||'teachYes','teachNo','teachConfirmTitle',vars)});
       return teach;
     }catch(e){teachP=null;return null}
   })());
@@ -882,6 +882,33 @@ async function signOutAndClean(){
   renderAcct();
 }
 function acctMsg(key,vars){$('acctMsg').textContent=key?t(key,vars):''}
+// ---------- privacy: export and deletion (spec section 8). The export is built in the browser: nothing is sent anywhere. ----------
+function downloadJSON(name,obj){
+  const url=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));
+  const a=document.createElement('a');a.href=url;a.download=name;a.hidden=true;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+const acctErrKey=e=>e&&e.kind==='offline'?'acctNetwork':e&&e.kind==='auth'?'acctExpired':e&&e.message==='last_admin'?'acctLastAdmin':'acctError';
+// A child that was deleted on the server loses its link here; its local progress stays (it is the family's own copy).
+function forgetRid(id){const p=PROFILES.list.find(x=>x.rid===id);if(p){delete p.rid;saveProfiles()}}
+async function exportMine(){
+  if(!sync||!sync.userId())return;
+  try{const d=await sync.exportMyData();downloadJSON('leemos-mis-datos.json',{exported_at:new Date().toISOString(),...d});acctMsg('acctExported')}
+  catch(e){acctMsg(acctErrKey(e))}
+}
+// Two confirmations. Afterwards this device keeps the family's own progress; the class children it only held for a teacher go.
+async function deleteAccount(){
+  if(!sync||!sync.userId())return;
+  if(!await askChoice('acctDelAsk1','acctDelYes1','acctDelNo','acctDelTitle'))return;
+  if(!await askChoice('acctDelAsk2','acctDelYes2','acctDelNo','acctDelTitle'))return;
+  try{await sync.deleteMyAccount()}catch(e){acctMsg(acctErrKey(e));return}
+  [AUTH_USER_KEY,SYNC_AT_KEY,'leemos-auth'].forEach(k=>{try{localStorage.removeItem(k)}catch(e){}});
+  PROFILES.list.forEach(p=>{delete p.rid;delete p.hidden});
+  saveProfiles();
+  ROLE='parent';syncState='idle';
+  await purgeClassProfiles();
+  renderAcct();acctMsg('acctDeleted');
+}
 function renderAcct(){
   if(!sync)return;
   $('acct').hidden=false;
@@ -913,6 +940,8 @@ $('acctVerify').onclick=async()=>{
 };
 $('acctSync').onclick=()=>syncAll();
 $('acctOutBtn').onclick=()=>signOutAndClean();
+$('acctExport').onclick=()=>exportMine();
+$('acctDelete').onclick=()=>deleteAccount();
 // Asks which account profile (if any) a local profile is. Resolves with a remote id, or null for "add as a new child".
 // Closing the dialog ("Ahora no") rejects, and the caller leaves everything as it was.
 const remoteName=r=>typeof(r&&r.name)==='string'?r.name.trim().slice(0,20):''; // account data is untrusted: only a real, short string is a name
