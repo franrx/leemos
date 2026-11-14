@@ -36,11 +36,12 @@ const rpc = async (u, name, args = {}) => { // u = null calls it with only the p
   return { status: r.status, body: await json(r) };
 };
 const okr = (r) => r.status < 300 && !(r.body && r.body.error); // an RPC refuses with an HTTP error or with {error:'…'}
+const refused = (r) => r.status !== 404 && !okr(r); // 404 is a missing function or a wrong signature, never a refusal
 const errOf = (r) => (r.body && r.body.error) || '';
 // A user with a role; `ack` also sets the teacher acknowledgement (accounts has no client write: only the service key sets these).
 const mkRole = async (tag, role, { ack = false } = {}) => {
   const u = await mk(tag);
-  if (role !== 'parent' || ack) await svc(`accounts?user_id=eq.${u.id}`, { method: 'PATCH', body: JSON.stringify({ role, teacher_ack_at: ack ? new Date().toISOString() : null }) });
+  if (role !== 'parent' || ack) { const row = await one(await svc(`accounts?user_id=eq.${u.id}`, { method: 'PATCH', body: JSON.stringify({ role, teacher_ack_at: ack ? new Date().toISOString() : null }) })); check(`setup: ${tag} has role ${role}`, !!row && row.role === role); }
   return u;
 };
 const whoami = async (u) => { const r = await rpc(u, 'whoami'); return (Array.isArray(r.body) ? r.body[0] : r.body) || {}; };
@@ -79,9 +80,6 @@ try {
   check("A cannot hand a profile to B by changing 'owner'", own.status >= 400 || ((await own.json()).every((r) => r.owner === A.id)), String(own.status));
   const idc = await rest(A, `child_profiles?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ id: uuid() }) });
   check("A cannot change a profile's id", idc.status >= 400 || ((await idc.json()).every((r) => r.id === id)), String(idc.status));
-  let created = 1;
-  for (let i = 0; i < 9; i++) { const r = await rest(A, 'child_profiles', { method: 'POST', body: JSON.stringify({ id: uuid(), name: 'P' + i, kind: 'pre' }) }); if (r.status === 201) created++; }
-  check('an account is limited to 8 profiles', created === 8, String(created));
   const v = await (await rest(A, `child_profiles?id=eq.${id}&version=eq.5`, { method: 'PATCH', body: JSON.stringify({ name: 'Stale', version: 6 }) })).json();
   check('a write with a wrong version changes nothing (optimistic concurrency)', Array.isArray(v) && v.length === 0);
 
@@ -96,9 +94,9 @@ try {
   const classOfK1 = async () => (await kidRow(K1) || {}).class_id;
 
   await t('the sharing fixture works (PA puts K1 in C1, T1 redeems)', async () => [okr(sh) && (await classOfK1()) === C1, JSON.stringify(sh.body)]);
-  await t("a parent does not see another family's child", async () => !(await seen(PB, K1)));
+  await t("a parent does not see another family's child", async () => okr(sh) && (await seen(PA, K1)) && !(await seen(PB, K1)));
   await t("a teacher sees the children of their classes and only those", async () => (await seen(T1, K1)) && !(await seen(T1, K2)) && !(await seen(T1, id)));
-  await t('a teacher of another class sees nothing', async () => !(await seen(T2, K1)) && (await seen(T2, K2)));
+  await t('a teacher of another class sees nothing', async () => okr(sh) && (await classOfK1()) === C1 && !(await seen(T2, K1)) && (await seen(T2, K2)));
   await t('a teacher without acknowledgement sees nothing', async () => (await whoami(T3)).role === 'teacher' && !(await seen(T3, K1)));
   await t('an admin cannot read any child', async () => (await whoami(AD)).role === 'admin' && !(await seen(AD, K1)) && !(await seen(AD, K2)));
 
@@ -107,14 +105,16 @@ try {
   await teach(CV, V);
   await t('a parent cannot update accounts', async () => {
     const r = await rest(PM, `accounts?user_id=eq.${PM.id}`, { method: 'PATCH', body: JSON.stringify({ role: 'admin' }) });
-    return [(r.status >= 400 || !(await json(r)).length) && (await whoami(PM)).role === 'parent', String(r.status)];
+    return [r.status !== 404 && (r.status >= 400 || !(await json(r)).length) && (await whoami(PM)).role === 'parent', String(r.status)];
   });
   await t('a parent cannot call any admin_* function', async () => {
+    emails.push(`x-${stamp}@example.com`);
     const calls = [['admin_list_accounts', {}], ['admin_list_classes', {}], ['admin_invite_teacher', { p_email: `x-${stamp}@example.com` }], ['admin_revoke_invite', { p_email: 'x@example.com' }],
       ['admin_demote_teacher', { p_user: V.id }], ['admin_create_class', { p_name: 'Hack' }], ['admin_rename_class', { p_class: CV, p_name: 'Hack' }], ['admin_delete_class', { p_class: CV }],
       ['admin_assign_teacher', { p_class: CV, p_user: PM.id }], ['admin_unassign_teacher', { p_class: CV, p_user: V.id }]];
-    const res = []; for (const [n, a] of calls) res.push(okr(await rpc(PM, n, a)));
-    const still = (await whoami(V)).role === 'teacher' && !!(await one(await svc(`classes?id=eq.${CV}`))) && res.every((x) => !x);
+    const res = []; for (const [n, a] of calls) res.push(refused(await rpc(PM, n, a)));
+    const ctl = okr(await rpc(AD, 'admin_list_accounts')) && okr(await rpc(AD, 'admin_rename_class', { p_class: CV, p_name: 'rls victim ' + stamp })); // the same functions work for an admin
+    const still = ctl && (await whoami(V)).role === 'teacher' && !!(await one(await svc(`classes?id=eq.${CV}`))) && res.every(Boolean);
     return [still && (await json(await svc(`class_teachers?class_id=eq.${CV}`))).length === 1, res.join()];
   });
   await t("a parent cannot claim a role with someone else's invitation", async () => {
@@ -153,7 +153,7 @@ try {
   await t('two concurrent redeem_invite calls: exactly one wins', async () => {
     const PC = await mk('pc'), KC = await mkKid(PC), c = await code(PC, KC, 'to_class');
     const rs = await Promise.all([redeem(T1, c, C1), redeem(T2, c, C2)]);
-    return [rs.filter(okr).length === 1, rs.map((r) => JSON.stringify(r.body)).join(' ')];
+    return [rs.filter(okr).length === 1 && [C1, C2].includes((await kidRow(KC)).class_id), rs.map((r) => JSON.stringify(r.body)).join(' ')];
   });
   await t('the 11th wrong code in an hour is rate limited', async () => {
     const TR = await mkRole('tr', 'teacher', { ack: true }), CR = await mkClass('rls rate ' + stamp); await teach(CR, TR);
@@ -168,7 +168,7 @@ try {
     const KT = await mkKid(TT, { class_id: CT }), c2 = await code(TT, KT, 'to_parent');
     await svc(`class_teachers?class_id=eq.${CT}&teacher_id=eq.${TT.id}`, { method: 'DELETE' }); // TT lost the class
     const r2 = await redeem(await mk('pv'), c2);
-    return [!okr(r1) && !okr(r2) && !!errOf(r1) && !!errOf(r2) && !(await kidRow(KL) || {}).class_id, `${errOf(r1)} ${errOf(r2)}`];
+    return [refused(r1) && refused(r2) && !!errOf(r1) && !!errOf(r2) && !(await kidRow(KL) || {}).class_id, `${errOf(r1)} ${errOf(r2)}`];
   });
   await t('a code cannot be redeemed by its creator in either direction', async () => {
     const TC = await mkRole('tc', 'teacher', { ack: true }), CC = await mkClass('rls own ' + stamp); await teach(CC, TC);
@@ -176,7 +176,7 @@ try {
     const a = await redeem(TC, await code(TC, mine, 'to_class'), CC), b = await redeem(TC, await code(TC, ours, 'to_parent'));
     return [errOf(a) === 'invalid' && errOf(b) === 'invalid' && !(await kidRow(mine)).class_id, `${errOf(a)} ${errOf(b)}`];
   });
-  await t('a teacher cannot create a to_parent code for a child that already has a parent', async () => !okr(await rpc(T1, 'create_invite', { p_child: K1, p_kind: 'to_parent' })));
+  await t('a teacher cannot create a to_parent code for a child that already has a parent', async () => refused(await rpc(T1, 'create_invite', { p_child: K1, p_kind: 'to_parent' })) && okr(await rpc(PA, 'create_invite', { p_child: K1, p_kind: 'to_class' })));
 
   // Leaving, removing, deleting.
   await t('leave_class works for the parent and the teacher loses access at once', async () => {
@@ -191,7 +191,7 @@ try {
   await t('admin_delete_class is refused while the class holds an unclaimed child', async () => {
     const CO = await mkClass('rls orphan ' + stamp), TO = await mkRole('to', 'teacher', { ack: true }); await teach(CO, TO); await mkKid(TO, { class_id: CO });
     const r = await rpc(AD, 'admin_delete_class', { p_class: CO });
-    return [!okr(r) && !!(await one(await svc(`classes?id=eq.${CO}`))), JSON.stringify(r.body)];
+    return [refused(r) && !!(await one(await svc(`classes?id=eq.${CO}`))), JSON.stringify(r.body)];
   });
   await t('a class holding only linked children can be deleted and the children keep their parent', async () => {
     const CD = await mkClass('rls del ' + stamp), TD = await mkRole('td', 'teacher', { ack: true }), PD = await mk('pd'); await teach(CD, TD);
@@ -219,7 +219,7 @@ try {
   });
   await t('a teacher cannot delete a child that has a parent link', async () => {
     const r = await rpc(T1, 'delete_child', { p_child: K1 });
-    return [!okr(r) && !!(await kidRow(K1)), JSON.stringify(r.body)];
+    return [refused(r) && !!(await kidRow(K1)), JSON.stringify(r.body)];
   });
   await t('a parent can delete a teacher-created child once claimed', async () => {
     const PD = await mk('pd3'), kid = await claim(T1, C1, PD), before = await seen(PD, kid), r = await rpc(PD, 'delete_child', { p_child: kid });
@@ -231,7 +231,7 @@ try {
   });
   await t('an account without a link cannot delete anything and cannot tell a hidden child from a missing one', async () => {
     const r = await rpc(PB, 'delete_child', { p_child: K1 }), none = await rpc(PB, 'delete_child', { p_child: uuid() });
-    return [!okr(r) && !okr(none) && JSON.stringify(r.body) === JSON.stringify(none.body) && !!(await kidRow(K1)), `${JSON.stringify(r.body)} ${JSON.stringify(none.body)}`];
+    return [refused(r) && refused(none) && JSON.stringify(r.body) === JSON.stringify(none.body) && !!(await kidRow(K1)), `${JSON.stringify(r.body)} ${JSON.stringify(none.body)}`];
   });
   await t('a tombstoned id cannot be re-inserted', async () => {
     const PT = await mk('pt'), kid = await mkKid(PT), d = await rpc(PT, 'delete_child', { p_child: kid });
@@ -268,15 +268,20 @@ try {
     const row = ((await json(u)) || [])[0];
     return [p.status === 201 && u.status === 200 && row && row.name === 'Old2' && row.version === 2, `${p.status} ${u.status}`];
   });
-  await t('the helper functions are not callable at /rest/v1/rpc', async () => {
-    const sts = []; for (const n of ['is_admin', 'current_role', 'is_class_teacher', 'has_link', 'is_tombstoned']) sts.push((await rpc(T1, n, { class_id: C1, child_id: K1, id: K1 })).status);
-    return [sts.every((x) => x === 404 || x === 403), sts.join()];
+  await t('the helper functions are not callable at /rest/v1/rpc (and they do exist: the policies and whoami depend on them)', async () => {
+    const sts = []; for (const n of ['is_admin', 'current_role', 'is_class_teacher', 'has_link', 'is_tombstoned']) sts.push((await rpc(T1, n, { p_class: C1, p_child: K1, p_id: K1 })).status);
+    const control = (await seen(T1, K1)) && (await whoami(T1)).role === 'teacher' && (await whoami(AD)).role === 'admin'; // positive control: only works with the helpers in place
+    return [control && sts.every((x) => x === 404 || x === 403), sts.join()];
   });
-  await t('anon cannot call any RPC', async () => {
-    const names = ['whoami', 'ack_teacher', 'create_invite', 'redeem_invite', 'leave_class', 'unlink_me', 'delete_child', 'export_my_data', 'delete_my_account', 'admin_list_accounts', 'admin_list_classes',
-      'admin_invite_teacher', 'admin_revoke_invite', 'admin_demote_teacher', 'admin_create_class', 'admin_rename_class', 'admin_delete_class', 'admin_assign_teacher', 'admin_unassign_teacher'];
-    const sts = []; for (const n of names) sts.push((await rpc(null, n)).status);
-    return [sts.every((x) => x >= 400), sts.join()];
+  await t('anon cannot call any RPC (the same call works signed in)', async () => {
+    const CT = await mk('ctl'), x = uuid();
+    const calls = [['whoami', {}], ['ack_teacher', {}], ['create_invite', { p_child: x, p_kind: 'to_class' }], ['redeem_invite', { p_code: 'ZZZZZZZZ', p_class: x }], ['leave_class', { p_child: x }], ['unlink_me', { p_child: x }],
+      ['delete_child', { p_child: x }], ['export_my_data', {}], ['admin_list_accounts', {}], ['admin_list_classes', {}], ['admin_invite_teacher', { p_email: 'anon@example.com' }], ['admin_revoke_invite', { p_email: 'anon@example.com' }],
+      ['admin_demote_teacher', { p_user: x }], ['admin_create_class', { p_name: 'Anon' }], ['admin_rename_class', { p_class: x, p_name: 'Anon' }], ['admin_delete_class', { p_class: x }],
+      ['admin_assign_teacher', { p_class: x, p_user: x }], ['admin_unassign_teacher', { p_class: x, p_user: x }], ['delete_my_account', {}]];
+    const bad = []; // last, delete_my_account removes CT: its control runs after the others
+    for (const [n, a] of calls) { const an = await rpc(null, n, a), au = await rpc(CT, n, a); if (!(an.status === 401 || an.status === 403) || au.status === 404) bad.push(`${n}:${an.status}/${au.status}`); }
+    return [!bad.length, bad.join(' ')];
   });
 
   // Limits (fresh accounts, so the earlier fixtures do not count).
@@ -300,11 +305,11 @@ try {
     const TL = await mkRole('lim4', 'teacher', { ack: true }), CL = await mkClass('rls link ' + stamp), P1 = await mk('lim4a'), P2 = await mk('lim4b'); await teach(CL, TL);
     const kid = await mkKid(TL, { class_id: CL }), c1 = await code(TL, kid, 'to_parent'), c2 = await code(TL, kid, 'to_parent');
     const a = await redeem(P1, c1), b = await redeem(P2, c2);
-    return [okr(a) && !okr(b) && (await linksOf(kid)).length === 1, `${JSON.stringify(a.body)} ${JSON.stringify(b.body)}`];
+    return [okr(a) && refused(b) && (await linksOf(kid)).length === 1, `${JSON.stringify(a.body)} ${JSON.stringify(b.body)}`];
   });
 } finally {
   // Children first (owner is informational, so they outlive their creator), then classes and invitations, then the users.
-  const inl = (a) => `in.(${a.join(',')})`, del = (p) => svc(p, { method: 'DELETE' }).catch(() => {});
+  const inl = (a) => `in.(${a.join(',')})`, del = async (p) => { try { const r = await svc(p, { method: 'DELETE' }); if (!r.ok) console.log('cleanup: ' + p.split('?')[0] + ' -> ' + r.status); } catch (e) { console.log('cleanup: ' + p.split('?')[0] + ' threw'); } };
   if (made.length) await del(`child_profiles?owner=${inl(made.map((u) => u.id))}`);
   if (kids.length) { await del(`child_profiles?id=${inl(kids)}`); await del(`deleted_children?id=${inl(kids)}`); }
   if (classes.length) await del(`classes?id=${inl(classes)}`);
