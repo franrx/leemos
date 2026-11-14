@@ -1,16 +1,23 @@
 -- Leemos: rollback of 20261113000000_teachers_classes.sql. Lives OUTSIDE supabase/migrations so `db reset` and `db push` never apply it.
--- It does NOT delete child_profiles rows (children deleted through delete_child after the rollout stay deleted).
--- Run it once, in the SQL editor, after checking for rows without an owner (see README). One transaction: a failure leaves nothing half undone.
--- Tested against a local Supabase by `npm run test:rollback` (never run against production by the test).
+-- It does NOT delete child_profiles rows. One transaction: a failure leaves nothing half undone.
+-- Lost BY DESIGN: tombstones (an old client that still has a deleted child locally can insert it again), teachers' access to classes,
+-- parent links, invites and the admin log. Children with a parent link are handed back to that parent (owner = the linked parent).
+-- If you roll back after publishing the new client, un-publish it first: it calls whoami and the other RPCs, which disappear here.
+-- Tested against a local Supabase by `npm run test:rollback` (the script only ever talks to the local Docker database).
 begin;
 
--- Guard: the old schema requires an owner on every child. Assign or delete these rows BEFORE running this file (the README says how).
+-- The old policies give a child to its owner, so a child with a parent link goes back to that parent (v1: at most one link per child).
+-- Without this, a class child created by a teacher (owner = teacher) and claimed by a parent would stay with the teacher.
+update public.child_profiles c set owner = l.user_id from public.child_links l where l.child_id = c.id and c.owner is distinct from l.user_id;
+
+-- Guard: the old schema requires an owner on every child. Rows still without one are unlinked: assign an owner or delete them
+-- BEFORE running this file (the README says how).
 do $$
 declare n integer;
 begin
   select count(*) into n from public.child_profiles where owner is null;
   if n > 0 then
-    raise exception 'rollback aborted: % child_profiles row(s) have no owner. Assign an owner or delete them first (see README).', n;
+    raise exception 'rollback aborted: % child_profiles row(s) have no owner and no parent link. Assign an owner or delete them first (see README).', n;
   end if;
 end $$;
 
@@ -52,7 +59,20 @@ drop policy "admin, teacher or family reads" on public.classes; -- reads child_p
 alter table public.child_profiles drop column class_id;
 drop table public.invites, public.invite_attempts, public.child_links, public.class_teachers, public.role_invites,
   public.admin_log, public.deleted_children, public.classes, public.accounts;
-drop schema private cascade;
+drop function private.is_admin();
+drop function private.current_role();
+drop function private.is_class_teacher(uuid);
+drop function private.has_link(uuid);
+drop function private.has_any_link(uuid);
+drop function private.is_tombstoned(uuid);
+drop function private.child_profiles_link_creator();
+drop function private.child_profiles_owner_limit();
+drop function private.child_profiles_class_limit();
+drop function private.child_links_limit();
+drop function private.child_links_clear_owner();
+drop function private.accounts_for_new_user();
+drop function private.claim_role();
+drop schema private; -- no cascade: an omission above fails loudly
 
 -- child_profiles exactly as 20261017000000_child_profiles.sql left it.
 alter table public.child_profiles drop constraint child_profiles_owner_fkey;
@@ -61,8 +81,7 @@ alter table public.child_profiles add constraint child_profiles_owner_fkey forei
 
 revoke all on public.child_profiles from anon;
 revoke all on public.child_profiles from authenticated;
--- Supabase's default privileges gave authenticated everything except what the old migration revoked (update at table level).
-grant select, insert, delete, references, trigger, truncate on public.child_profiles to authenticated;
+grant select, insert, delete on public.child_profiles to authenticated;
 grant update (name, data, version) on public.child_profiles to authenticated;
 
 create policy "owner reads" on public.child_profiles for select to authenticated

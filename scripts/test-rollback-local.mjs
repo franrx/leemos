@@ -1,7 +1,7 @@
-// Tests supabase/rollback/20261113000000_teachers_classes.down.sql against a LOCAL Supabase in Docker (never a real project):
+// Tests supabase/rollback/20261113000000_teachers_classes.down.sql against the LOCAL Supabase stack in Docker (never a real project):
 //   npm run test:rollback   start, db reset (every migration), seed, apply the down file, assert the old state, stop
-// SQL goes through `docker exec psql` in the local db container; the local keys come from `supabase status` at runtime
-// and live only in this process (never on disk).
+// Everything goes through `docker exec psql` into the local db container (supabase_db_<project_id>), and `supabase start/db reset/stop`
+// act on the local stack only. Nothing here uses --linked or any remote host, and no keys are read or written.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
@@ -22,12 +22,25 @@ const run = () => {
   for (const args of [['start'], ['db', 'reset']]) if (cli(args, { stdio: 'inherit' }).status !== 0) { console.error(`supabase ${args.join(' ')} falló`); return 2; }
 
   // Guard: a row without owner aborts the file, with a clear message, and nothing changes.
-  q(`insert into auth.users (id, instance_id, aud, role, email) values ('00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-000000000000','authenticated','authenticated','a@example.test');
-     insert into public.child_profiles (id, owner, name, kind) values ('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000a1','Uno','reader'),
-       ('00000000-0000-0000-0000-0000000000c2',null,'SinDueno','reader');`);
+  const U = (n) => `00000000-0000-0000-0000-0000000000a${n}`;
+  const C = (n) => `00000000-0000-0000-0000-0000000000c${n}`;
+  q(`insert into auth.users (id, instance_id, aud, role, email) values
+       ('${U(1)}','00000000-0000-0000-0000-000000000000','authenticated','authenticated','a1@example.test'),
+       ('${U(2)}','00000000-0000-0000-0000-000000000000','authenticated','authenticated','teacher@example.test'),
+       ('${U(3)}','00000000-0000-0000-0000-000000000000','authenticated','authenticated','parent@example.test');
+     update public.accounts set role='teacher', teacher_ack_at=now() where user_id='${U(2)}';
+     insert into public.classes (id, name) values ('00000000-0000-0000-0000-0000000000d1','Clase');
+     insert into public.class_teachers (class_id, teacher_id) values ('00000000-0000-0000-0000-0000000000d1','${U(2)}');
+     insert into public.child_profiles (id, owner, name, kind) values ('${C(1)}','${U(1)}','Uno','reader'), ('${C(2)}',null,'SinDueno','reader');
+     -- a class child created by the teacher (owner = teacher), later claimed by a parent through a code: only a link is added
+     insert into public.child_profiles (id, owner, name, kind, class_id) values ('${C(5)}','${U(2)}','DeClase','reader','00000000-0000-0000-0000-0000000000d1');
+     insert into public.child_links (child_id, user_id) values ('${C(5)}','${U(3)}');
+     insert into public.invites (code_hash, kind, child_id, created_by, expires_at) values ('h1','to_parent','${C(5)}','${U(2)}', now() + interval '1 day');
+     insert into public.admin_log (action) values ('seed');
+     insert into public.deleted_children (id) values ('${C(9)}');`);
   const down = readFileSync('supabase/rollback/20261113000000_teachers_classes.down.sql', 'utf8');
   const guarded = psql(down);
-  check('the guard aborts the rollback while a child has no owner, saying how many', guarded.status !== 0 && /1 child_profiles row\(s\) have no owner/.test(guarded.stderr), guarded.stderr);
+  check('the guard aborts the rollback while an unlinked child has no owner, saying how many', guarded.status !== 0 && /1 child_profiles row\(s\) have no owner and no parent link/.test(guarded.stderr), guarded.stderr);
   check('an aborted rollback changes nothing (the new tables are still there)', q(`select to_regclass('public.accounts') is not null`) === 't');
 
   // Now clear the owner-less row (the README tells the adult to do this) and apply the file.
@@ -46,32 +59,30 @@ const run = () => {
   check('owner is NOT NULL with a cascade foreign key', q(`select is_nullable from information_schema.columns where table_schema='public' and table_name='child_profiles' and column_name='owner'`) === 'NO'
     && q(`select confdeltype from pg_constraint where conname='child_profiles_owner_fkey'`) === 'c');
   check('RLS is still enabled on child_profiles', q(`select relrowsecurity from pg_class where oid='public.child_profiles'::regclass`) === 't');
-  check('table grants: anon none; authenticated select/insert/delete (and the default references/trigger/truncate), no table-level update',
+  check('table grants: anon none; authenticated select/insert/delete and no table-level update (other privileges are Supabase defaults, not asserted)',
     q(`select count(*) from information_schema.role_table_grants where table_name='child_profiles' and table_schema='public' and grantee='anon'`) === '0'
-    && same(lines(q(`select privilege_type from information_schema.role_table_grants where table_name='child_profiles' and table_schema='public' and grantee='authenticated'`)), ['SELECT', 'INSERT', 'DELETE', 'REFERENCES', 'TRIGGER', 'TRUNCATE']));
+    && same(lines(q(`select privilege_type from information_schema.role_table_grants where table_name='child_profiles' and table_schema='public' and grantee='authenticated' and privilege_type in ('SELECT','INSERT','UPDATE','DELETE')`)), ['SELECT', 'INSERT', 'DELETE']));
   check('column grants: authenticated may update name, data and version only (not kind, owner or id)',
     same(lines(q(`select column_name from information_schema.column_privileges where table_name='child_profiles' and table_schema='public' and grantee='authenticated' and privilege_type='UPDATE'`)), ['name', 'data', 'version']));
-  check('the existing child survived (the rollback deletes no rows)', q(`select count(*) from public.child_profiles where id='00000000-0000-0000-0000-0000000000c1'`) === '1');
+  check('the rollback deleted no child rows (c1 and the class child are still there)', q(`select count(*) from public.child_profiles where id in ('${C(1)}','${C(5)}')`) === '2');
+  check('the class child claimed by a parent now belongs to that parent', q(`select owner from public.child_profiles where id='${C(5)}'`) === U(3));
 
-  // Functional smoke with the old semantics, as an authenticated owner through RLS (set role + jwt claim).
-  const asOwner = (sql) => q(`begin; set local role authenticated; select set_config('request.jwt.claims','{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}',true); ${sql} rollback;`);
-  check('an owner reads, inserts, updates (name) and deletes their own row with the old semantics', (() => {
-    try {
-      const out = asOwner(`select count(*) from public.child_profiles;
-        insert into public.child_profiles (id, name, kind) values ('00000000-0000-0000-0000-0000000000c3','Dos','pre');
-        update public.child_profiles set name='Dos b' where id='00000000-0000-0000-0000-0000000000c3';
-        delete from public.child_profiles where id='00000000-0000-0000-0000-0000000000c3';`);
-      return /(^|\n)1(\n|$)/.test(out);
-    } catch (e) { console.log(String(e)); return false; }
+  // Functional checks with the old semantics, as an authenticated user through RLS (set role + jwt claim).
+  const as = (u, sql) => `begin; set local role authenticated; select set_config('request.jwt.claims','{"sub":"${u}","role":"authenticated"}',true); ${sql} rollback;`;
+  const count = (u, sql) => { const r = psql(as(u, `with x as (${sql}) select 'N=' || count(*) from x;`)); return r.status === 0 ? (/N=(\d+)/.exec(r.stdout) || [])[1] : `error: ${r.stderr}`; };
+  check('an owner reads only their own rows (c1; not the teacher\'s or the parent\'s)', count(U(1), `select 1 from public.child_profiles`) === '1');
+  check('an owner inserts a row', count(U(1), `insert into public.child_profiles (id, name, kind) values ('${C(3)}','Dos','pre') returning 1`) === '1');
+  check('an owner updates their row (name) and exactly one row changes', count(U(1), `update public.child_profiles set name='Uno b' where id='${C(1)}' returning 1`) === '1');
+  check('an owner deletes their row and exactly one row goes', count(U(1), `delete from public.child_profiles where id='${C(1)}' returning 1`) === '1');
+  check('an owner cannot update or delete someone else\'s row (0 rows)', count(U(1), `update public.child_profiles set name='x' where id='${C(5)}' returning 1`) === '0' && count(U(1), `delete from public.child_profiles where id='${C(5)}' returning 1`) === '0');
+  check('an owner cannot insert a row owned by another EXISTING user', (() => {
+    const r = psql(as(U(1), `insert into public.child_profiles (id, owner, name, kind) values ('${C(4)}','${U(2)}','X','reader');`));
+    return r.status !== 0 && /row-level security/.test(r.stderr);
   })());
-  check('an owner cannot insert a row for someone else, nor see theirs', (() => {
-    const bad = psql(`begin; set local role authenticated; select set_config('request.jwt.claims','{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}',true);
-      insert into public.child_profiles (id, owner, name, kind) values ('00000000-0000-0000-0000-0000000000c4','00000000-0000-0000-0000-0000000000ff','X','reader'); rollback;`);
-    return bad.status !== 0;
-  })());
+  check('the parent reads and updates the handed-back class child under the old policies', count(U(3), `select 1 from public.child_profiles where id='${C(5)}'`) === '1' && count(U(3), `update public.child_profiles set name='DeClase b' where id='${C(5)}' returning 1`) === '1');
+  check('the teacher no longer sees the class child (class access is lost by design)', count(U(2), `select 1 from public.child_profiles where id='${C(5)}'`) === '0');
   check('the old 8-profile limit is back', (() => {
-    const r = psql(`begin; set local role authenticated; select set_config('request.jwt.claims','{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}',true);
-      insert into public.child_profiles (id, name, kind) select gen_random_uuid(), 'n'||g, 'reader' from generate_series(1,8) g; rollback;`);
+    const r = psql(as(U(1), `insert into public.child_profiles (id, name, kind) select gen_random_uuid(), 'n'||g, 'reader' from generate_series(1,8) g;`));
     return r.status !== 0 && /profile limit reached/.test(r.stderr);
   })());
   return failures ? 1 : 0;

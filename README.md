@@ -89,14 +89,11 @@ Orden obligatorio. La migración `supabase/migrations/20261113000000_teachers_cl
 
 Antes de empezar, en Supabase Auth debe estar activado **Confirm email**: la invitación de un profesor casa con el email verificado.
 
-**Si el paso 6 falla (marcha atrás):** el archivo `supabase/rollback/20261113000000_teachers_classes.down.sql` deshace la migración y deja `child_profiles` como la dejó `20261017000000_child_profiles.sql` (está probado en local con `npm run test:rollback`, que no forma parte de `npm test`; nunca lo apliques contra producción desde el script). **No borra filas de `child_profiles`** (solo faltarán los niños que se borraron con `delete_child` después de publicar): no vacíes la tabla. La copia del paso 3 es solo para una recuperación excepcional.
+**Si el paso 6 falla (marcha atrás):** el archivo `supabase/rollback/20261113000000_teachers_classes.down.sql` deshace la migración y deja `child_profiles` como la dejó `20261017000000_child_profiles.sql` (está probado en local con `npm run test:rollback`, que no forma parte de `npm test` y solo habla con el Supabase local en Docker; nunca lo apliques contra producción desde un script). **No borra filas de `child_profiles`** (solo faltarán los niños que se borraron con `delete_child` después de publicar): no vacíes la tabla. Los niños con un padre vinculado vuelven a ser de ese padre. La copia del paso 3 es solo para una recuperación excepcional.
 
-1. Busca niños sin propietario (el esquema antiguo exige uno): `select id, name from public.child_profiles where owner is null;`. Si no sale nada, sigue en el 2. Si salen filas, asigna un propietario a las que quieras conservar y borra el resto, ANTES de ejecutar el archivo (el archivo borra `child_links`):
-   ```sql
-   update public.child_profiles c set owner = (select user_id from public.child_links l where l.child_id = c.id limit 1) where owner is null;
-   delete from public.child_profiles where owner is null;
-   ```
-   (Si no lo haces, el archivo aborta con un mensaje que dice cuántas filas faltan y no cambia nada.)
+**Se pierde por diseño:** las lápidas (un cliente antiguo que aún tenga en local un niño borrado puede volver a subirlo), el acceso de los profesores a sus clases, los vínculos de padres, los códigos y el registro del admin. Si haces la marcha atrás después del paso 7, retira antes de publicar el cliente nuevo (llama a `whoami` y a las demás funciones, que desaparecen).
+
+1. Busca niños sin propietario ni vínculo de padre (el esquema antiguo exige propietario): `select id, name from public.child_profiles where owner is null and id not in (select child_id from public.child_links);`. Si no sale nada, sigue en el 2. Si salen filas, asigna a mano un propietario (`update public.child_profiles set owner = '<uuid del usuario>' where id = '<id>';`) o bórralas, ANTES de ejecutar el archivo. Si no lo haces, el archivo aborta diciendo cuántas faltan y no cambia nada.
 2. Pega el archivo en el editor SQL de producción y ejecútalo (una sola transacción).
 3. Comprueba: `select policyname from pg_policies where tablename='child_profiles';` debe dar las cuatro `owner reads/inserts/updates/deletes`, y los perfiles de Elsa y Leo deben volver a sincronizar con la app anterior.
 
