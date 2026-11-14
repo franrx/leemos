@@ -474,6 +474,9 @@ begin
       if not private.is_class_teacher(p_class) then v_err := 'forbidden'; exit checks; end if;
       if v_child.class_id is not null then v_err := 'already_in_class'; exit checks; end if;
       perform pg_advisory_xact_lock(hashtext('class:' || p_class::text));
+      -- Re-check under the class lock: the class may have been deleted (or the caller unassigned) while we waited. Uniform answer,
+      -- never a foreign key error from the move below.
+      if not private.is_class_teacher(p_class) or not exists (select 1 from public.classes k where k.id = p_class) then v_err := 'invalid'; exit checks; end if;
       if (select count(*) from public.child_profiles c where c.class_id = p_class) >= 60 then v_err := 'limit'; exit checks; end if;
     else
       if private.has_any_link(v_child.id) then v_err := 'has_parent'; exit checks; end if;
@@ -729,9 +732,11 @@ declare
   v_unclaimed int;
 begin
   if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
-  -- Lock order as everywhere else: the children first (so none gains or loses a link meanwhile), then the class.
-  perform 1 from public.child_profiles c where c.class_id = p_class order by c.id for update;
+  -- The class lock first: a redeem that holds a class-less child and waits on it cannot slip that child in after the children below
+  -- were locked (it re-checks the class after the lock and answers invalid). Then the children (none gains or loses a link meanwhile),
+  -- then the class row. No cycle: a redeem waits on this lock only for a child with no class, which this function never locks.
   perform pg_advisory_xact_lock(hashtext('class:' || p_class::text));
+  perform 1 from public.child_profiles c where c.class_id = p_class order by c.id for update;
   perform 1 from public.classes k where k.id = p_class for update;
   if not found then return jsonb_build_object('error', 'not_found'); end if;
   select count(*) into v_unclaimed from public.child_profiles c

@@ -99,6 +99,10 @@ try {
   await t('a teacher of another class sees nothing', async () => okr(sh) && (await classOfK1()) === C1 && !(await seen(T2, K1)) && (await seen(T2, K2)));
   await t('a teacher without acknowledgement sees nothing', async () => (await whoami(T3)).role === 'teacher' && !(await seen(T3, K1)));
   await t('an admin cannot read any child', async () => (await whoami(AD)).role === 'admin' && !(await seen(AD, K1)) && !(await seen(AD, K2)));
+  await t("the class list embeds only the caller's own class_teachers rows (a parent sees its child's class as not taught)", async () => {
+    const q = `classes?select=id,name,class_teachers(teacher_id)&id=eq.${C1}`, p = await json(await rest(PA, q)), te = await json(await rest(T1, q));
+    return [Array.isArray(p) && p.length === 1 && Array.isArray(p[0].class_teachers) && p[0].class_teachers.length === 0 && Array.isArray(te) && te.length === 1 && te[0].class_teachers.length === 1 && te[0].class_teachers[0].teacher_id === T1.id, JSON.stringify([p, te])];
+  });
 
   // A parent cannot give themselves a role. V and CV are a sacrificial teacher and class: they must still be there afterwards.
   const PM = await mk('pm'), V = await mkRole('v', 'teacher', { ack: true }), CV = await mkClass('rls victim ' + stamp);
@@ -235,6 +239,14 @@ try {
     const r = await rpc(AD, 'admin_delete_class', { p_class: CD });
     const row = await kidRow(KD);
     return [okr(r) && !(await one(await svc(`classes?id=eq.${CD}`))) && !!row && !row.class_id && await seen(PD, KD), JSON.stringify(r.body)];
+  });
+  await t('redeeming into a class that was deleted answers with a value (no HTTP error) and consumes nothing', async () => {
+    const CX = await mkClass('rls gone ' + stamp), TX = await mkRole('tgone', 'teacher', { ack: true }), PX = await mk('pgone'); await teach(CX, TX);
+    const KX = await mkKid(PX), c = await code(PX, KX, 'to_class');
+    const d = await rpc(AD, 'admin_delete_class', { p_class: CX });
+    const r = await redeem(TX, c, CX);
+    const later = await redeem(T1, c, C1); // the code is still valid for a class that exists
+    return [okr(d) && r.status === 200 && ['invalid', 'forbidden'].includes(errOf(r)) && okr(later) && (await kidRow(KX)).class_id === C1, `${r.status} ${JSON.stringify(r.body)} ${JSON.stringify(later.body)}`];
   });
   await t('demoting the last teacher of a class with an unclaimed child succeeds and the child survives', async () => {
     const TL = await mkRole('tl', 'teacher', { ack: true }), CL = await mkClass('rls last ' + stamp); await teach(CL, TL);
