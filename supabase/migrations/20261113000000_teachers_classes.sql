@@ -314,7 +314,439 @@ revoke all on public.admin_log from anon, authenticated;
 revoke all on sequence public.admin_log_id_seq, public.invite_attempts_id_seq from anon, authenticated;
 
 -- ---------------------------------------------------------------------------------------------------------------------------------
--- RPCs (public, security definer): next section.
+-- RPCs (public, security definer). Each one checks the caller inside the function and fails closed. Expected failures are a value,
+-- {"error":"<code>"}, never a raised error; success is {"ok":true,...}. Codes: forbidden, invalid, rate, already_in_class, has_parent,
+-- orphan, orphans, limit, not_found, last_admin. A child the caller cannot see answers not_found, like a child that does not exist.
 -- ---------------------------------------------------------------------------------------------------------------------------------
+
+-- The teacher invitation claim (section 1). Called only from whoami(): no grant. The verified email of the signed-in user (auth.users,
+-- confirmed) is matched lower-cased against a pending, unexpired invitation; a parent becomes teacher and the invitation is deleted.
+create function private.claim_role() returns void
+language plpgsql volatile security definer set search_path = '' as $$
+declare
+  v_uid uuid := auth.uid();
+  v_email text;
+  v_inv public.role_invites;
+begin
+  if v_uid is null then return; end if;
+  select lower(u.email) into v_email from auth.users u where u.id = v_uid and u.email_confirmed_at is not null;
+  if v_email is null then return; end if;
+  delete from public.role_invites r where r.email = v_email and r.expires_at > now() returning r.* into v_inv;
+  if v_inv.email is null then return; end if;
+  update public.accounts a set role = 'teacher' where a.user_id = v_uid and a.role = 'parent';
+  insert into public.admin_log (actor, action, detail)
+    values (v_uid, 'claim_teacher', jsonb_build_object('email', v_inv.email, 'invited_by', v_inv.created_by));
+end $$;
+revoke execute on function private.claim_role() from public, anon;
+
+-- Volatile: it may claim an invitation. The client calls it after every sign-in and at app start.
+create function public.whoami() returns jsonb
+language plpgsql volatile security definer set search_path = '' as $$
+declare
+  v_res jsonb;
+begin
+  if auth.uid() is null then return jsonb_build_object('error', 'forbidden'); end if;
+  perform private.claim_role();
+  select jsonb_build_object('role', a.role, 'teacher_ack_at', a.teacher_ack_at) into v_res from public.accounts a where a.user_id = auth.uid();
+  return coalesce(v_res, jsonb_build_object('role', 'parent', 'teacher_ack_at', null));
+end $$;
+revoke execute on function public.whoami() from public, anon;
+grant execute on function public.whoami() to authenticated;
+
+-- The teacher acknowledgement (section 8.2): until it is set, is_class_teacher() is false and the teacher reads no class child.
+create function public.ack_teacher() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_at timestamptz;
+begin
+  if private.current_role() is distinct from 'teacher' then return jsonb_build_object('error', 'forbidden'); end if;
+  update public.accounts a set teacher_ack_at = coalesce(a.teacher_ack_at, now()) where a.user_id = auth.uid() returning a.teacher_ack_at into v_at;
+  return jsonb_build_object('ok', true, 'teacher_ack_at', v_at);
+end $$;
+revoke execute on function public.ack_teacher() from public, anon;
+grant execute on function public.ack_teacher() to authenticated;
+
+-- An invitation code (section 4): to_class by the linked parent of a class-less child, to_parent by a teacher of the child's class for a
+-- child with no parent link. 8 characters from 32 unambiguous ones (256 is a multiple of 32: no bias), 7 days, at most 5 pending per
+-- child. Only the SHA-256 hash is stored; the code is returned once.
+create function public.create_invite(p_child uuid, p_kind text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_uid uuid := auth.uid();
+  v_alpha constant text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  v_class uuid;
+  v_bytes bytea;
+  v_code text;
+  v_id uuid;
+  v_exp timestamptz := now() + interval '7 days';
+begin
+  if v_uid is null or p_kind is null or p_kind not in ('to_class', 'to_parent') then return jsonb_build_object('error', 'forbidden'); end if;
+  perform pg_advisory_xact_lock(hashtext('invite:' || p_child::text));
+  select c.class_id into v_class from public.child_profiles c where c.id = p_child;
+  if not found or not (private.has_link(p_child) or private.is_class_teacher(v_class)) then return jsonb_build_object('error', 'not_found'); end if;
+  if p_kind = 'to_class' then
+    -- A child already in a class is refused at redeem time (already_in_class), where it is checked anyway.
+    if not private.has_link(p_child) then return jsonb_build_object('error', 'forbidden'); end if;
+  else
+    if not private.is_class_teacher(v_class) then return jsonb_build_object('error', 'forbidden'); end if;
+    if private.has_any_link(p_child) then return jsonb_build_object('error', 'has_parent'); end if;
+  end if;
+  if (select count(*) from public.invites i where i.child_id = p_child and i.used_at is null and i.expires_at > now()) >= 5 then
+    return jsonb_build_object('error', 'limit');
+  end if;
+  loop
+    v_bytes := extensions.gen_random_bytes(8);
+    v_code := '';
+    for i in 0..7 loop
+      v_code := v_code || substr(v_alpha, (get_byte(v_bytes, i) % 32) + 1, 1);
+    end loop;
+    insert into public.invites (code_hash, kind, child_id, created_by, expires_at)
+      values (encode(extensions.digest(v_code, 'sha256'), 'hex'), p_kind, p_child, v_uid, v_exp)
+      on conflict (code_hash) do nothing returning id into v_id;
+    exit when v_id is not null;
+  end loop;
+  return jsonb_build_object('ok', true, 'code', v_code, 'expires_at', v_exp);
+end $$;
+revoke execute on function public.create_invite(uuid, text) from public, anon;
+grant execute on function public.create_invite(uuid, text) to authenticated;
+
+-- Redeems a code (section 4). Order: rate limit; find the code (wrong, used, expired, void and own codes all answer 'invalid'); the
+-- role, class, ownership and limit checks; and only then the single-statement consume, so a refused redeem never uses up a code.
+-- Every failure is recorded in invite_attempts and returned as a value: an error would roll the record back with the transaction.
+-- The child row is locked (for update) so two codes for one child cannot both move it.
+create function public.redeem_invite(p_code text, p_class uuid default null) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_uid uuid := auth.uid();
+  v_inv public.invites;
+  v_child public.child_profiles;
+  v_used uuid;
+  v_err text;
+begin
+  if v_uid is null then return jsonb_build_object('error', 'forbidden'); end if;
+  perform pg_advisory_xact_lock(hashtext('redeem:' || v_uid::text));
+  delete from public.invite_attempts t where t.user_id = v_uid and t.at < now() - interval '1 hour';
+  if (select count(*) from public.invite_attempts t where t.user_id = v_uid and t.at > now() - interval '1 hour') >= 10 then
+    return jsonb_build_object('error', 'rate');
+  end if;
+
+  <<checks>>
+  begin
+    select i.* into v_inv from public.invites i
+      where i.code_hash = encode(extensions.digest(upper(regexp_replace(coalesce(p_code, ''), '[^A-Za-z0-9]', '', 'g')), 'sha256'), 'hex')
+        and i.used_at is null and i.expires_at > now();
+    if v_inv.id is null or v_inv.created_by = v_uid then v_err := 'invalid'; exit checks; end if;
+    select c.* into v_child from public.child_profiles c where c.id = v_inv.child_id for update;
+    if v_child.id is null then v_err := 'invalid'; exit checks; end if;
+    -- Void: the creator lost the right to make this code.
+    if v_inv.kind = 'to_class' and not exists (select 1 from public.child_links l where l.child_id = v_child.id and l.user_id = v_inv.created_by) then
+      v_err := 'invalid'; exit checks;
+    end if;
+    if v_inv.kind = 'to_parent' and not exists (
+      select 1 from public.class_teachers ct join public.accounts a on a.user_id = ct.teacher_id
+      where ct.class_id = v_child.class_id and ct.teacher_id = v_inv.created_by and a.role = 'teacher' and a.teacher_ack_at is not null) then
+      v_err := 'invalid'; exit checks;
+    end if;
+    if v_inv.kind = 'to_class' then
+      if not private.is_class_teacher(p_class) then v_err := 'forbidden'; exit checks; end if;
+      if v_child.class_id is not null then v_err := 'already_in_class'; exit checks; end if;
+      perform pg_advisory_xact_lock(hashtext('class:' || p_class::text));
+      if (select count(*) from public.child_profiles c where c.class_id = p_class) >= 60 then v_err := 'limit'; exit checks; end if;
+    else
+      if private.has_any_link(v_child.id) then v_err := 'has_parent'; exit checks; end if;
+      -- The redeemer's own 8: a parent links at most 8 children (the same per-account lock as the creation limit).
+      perform pg_advisory_xact_lock(hashtext(v_uid::text));
+      if (select count(*) from public.child_links l where l.user_id = v_uid) >= 8 then v_err := 'limit'; exit checks; end if;
+    end if;
+    update public.invites i set used_at = now(), used_by = v_uid
+      where i.id = v_inv.id and i.used_at is null and i.expires_at > now() returning i.id into v_used;
+    if v_used is null then v_err := 'invalid'; exit checks; end if;
+  end checks;
+
+  if v_err is not null then
+    insert into public.invite_attempts (user_id) values (v_uid);
+    return jsonb_build_object('error', v_err);
+  end if;
+  if v_inv.kind = 'to_class' then
+    update public.child_profiles c set class_id = p_class where c.id = v_child.id;
+  else
+    insert into public.child_links (child_id, user_id) values (v_child.id, v_uid);
+  end if;
+  return jsonb_build_object('ok', true, 'child_id', v_child.id);
+end $$;
+revoke execute on function public.redeem_invite(text, uuid) from public, anon;
+grant execute on function public.redeem_invite(text, uuid) to authenticated;
+
+-- Takes a child out of its class (section 5): its linked parent or a teacher of the class. Refused for a child with no parent link
+-- (nobody could see it afterwards). Deletes the child's pending codes.
+create function public.leave_class(p_child uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_class uuid;
+begin
+  if auth.uid() is null then return jsonb_build_object('error', 'forbidden'); end if;
+  select c.class_id into v_class from public.child_profiles c where c.id = p_child for update;
+  if not found or not (private.has_link(p_child) or private.is_class_teacher(v_class)) then return jsonb_build_object('error', 'not_found'); end if;
+  if v_class is null then return jsonb_build_object('ok', true); end if;
+  if not private.has_any_link(p_child) then return jsonb_build_object('error', 'orphan'); end if;
+  update public.child_profiles c set class_id = null where c.id = p_child;
+  delete from public.invites i where i.child_id = p_child and i.used_at is null;
+  return jsonb_build_object('ok', true);
+end $$;
+revoke execute on function public.leave_class(uuid) from public, anon;
+grant execute on function public.leave_class(uuid) to authenticated;
+
+-- Removes the caller's own parent link and the child's pending codes. A child left with no link and no class is deleted (tombstone).
+create function public.unlink_me(p_child uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_class uuid;
+  v_deleted boolean := false;
+begin
+  if auth.uid() is null then return jsonb_build_object('error', 'forbidden'); end if;
+  select c.class_id into v_class from public.child_profiles c where c.id = p_child for update;
+  if not found or not private.has_link(p_child) then return jsonb_build_object('error', 'not_found'); end if;
+  delete from public.child_links l where l.child_id = p_child and l.user_id = auth.uid();
+  delete from public.invites i where i.child_id = p_child and i.used_at is null;
+  if v_class is null and not private.has_any_link(p_child) then
+    insert into public.deleted_children (id) values (p_child) on conflict do nothing;
+    delete from public.child_profiles c where c.id = p_child;
+    v_deleted := true;
+  end if;
+  return jsonb_build_object('ok', true, 'deleted', v_deleted);
+end $$;
+revoke execute on function public.unlink_me(uuid) from public, anon;
+grant execute on function public.unlink_me(uuid) to authenticated;
+
+-- Deletes a child and writes its tombstone (section 5): a child with a parent link only by that parent; one with none only by a
+-- teacher of its class.
+create function public.delete_child(p_child uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_class uuid;
+begin
+  if auth.uid() is null then return jsonb_build_object('error', 'forbidden'); end if;
+  select c.class_id into v_class from public.child_profiles c where c.id = p_child for update;
+  if not found or not (private.has_link(p_child) or private.is_class_teacher(v_class)) then return jsonb_build_object('error', 'not_found'); end if;
+  if private.has_any_link(p_child) then
+    if not private.has_link(p_child) then return jsonb_build_object('error', 'forbidden'); end if;
+  elsif not private.is_class_teacher(v_class) then
+    return jsonb_build_object('error', 'forbidden');
+  end if;
+  insert into public.deleted_children (id) values (p_child) on conflict do nothing;
+  delete from public.child_profiles c where c.id = p_child;
+  return jsonb_build_object('ok', true);
+end $$;
+revoke execute on function public.delete_child(uuid) from public, anon;
+grant execute on function public.delete_child(uuid) to authenticated;
+
+-- Everything the caller can see (section 8.3): the account, its classes (taught, or of a linked child) and every accessible child.
+create function public.export_my_data() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then return jsonb_build_object('error', 'forbidden'); end if;
+  return jsonb_build_object(
+    'account', (select jsonb_build_object('email', u.email, 'role', a.role) from auth.users u left join public.accounts a on a.user_id = u.id where u.id = v_uid),
+    'classes', coalesce((select jsonb_agg(jsonb_build_object('id', k.id, 'name', k.name) order by k.name) from public.classes k
+      where private.is_class_teacher(k.id)
+         or exists (select 1 from public.child_profiles c join public.child_links l on l.child_id = c.id where c.class_id = k.id and l.user_id = v_uid)), '[]'::jsonb),
+    'children', coalesce((select jsonb_agg(jsonb_build_object('id', c.id, 'name', c.name, 'kind', c.kind, 'class_id', c.class_id,
+        'linked', private.has_link(c.id), 'data', c.data) order by c.name) from public.child_profiles c
+      where private.has_link(c.id) or private.is_class_teacher(c.class_id)), '[]'::jsonb));
+end $$;
+revoke execute on function public.export_my_data() from public, anon;
+grant execute on function public.export_my_data() to authenticated;
+
+-- Deletes the caller's account (section 8.5). Refused for the last admin. Linked children in a class stay there, unlinked (the class
+-- teachers can delete them under the no-parent rule); linked children without a class are deleted with tombstones. Children the
+-- account only created keep going (owner is set null by the foreign key). Then the auth user goes, and its rows cascade.
+create function public.delete_my_account() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then return jsonb_build_object('error', 'forbidden'); end if;
+  perform pg_advisory_xact_lock(hashtext('admins'));
+  if private.current_role() = 'admin' and (select count(*) from public.accounts a where a.role = 'admin') <= 1 then
+    return jsonb_build_object('error', 'last_admin');
+  end if;
+  insert into public.deleted_children (id)
+    select c.id from public.child_profiles c join public.child_links l on l.child_id = c.id
+    where l.user_id = v_uid and c.class_id is null
+      and not exists (select 1 from public.child_links o where o.child_id = c.id and o.user_id <> v_uid)
+    on conflict do nothing;
+  delete from public.child_profiles c using public.child_links l
+    where l.child_id = c.id and l.user_id = v_uid and c.class_id is null
+      and not exists (select 1 from public.child_links o where o.child_id = c.id and o.user_id <> v_uid);
+  delete from public.child_links l where l.user_id = v_uid;
+  delete from auth.users u where u.id = v_uid;
+  return jsonb_build_object('ok', true);
+end $$;
+revoke execute on function public.delete_my_account() from public, anon;
+grant execute on function public.delete_my_account() to authenticated;
+
+-- ---- Admin (section 3). Each starts with private.is_admin(). No function returns a child or a parent's email.
+
+create function public.admin_list_accounts() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
+  return jsonb_build_object(
+    'accounts', coalesce((select jsonb_agg(jsonb_build_object('user_id', a.user_id, 'email', u.email, 'role', a.role) order by a.role, u.email)
+      from public.accounts a join auth.users u on u.id = a.user_id where a.role in ('teacher', 'admin')), '[]'::jsonb),
+    'invites', coalesce((select jsonb_agg(jsonb_build_object('email', r.email, 'expires_at', r.expires_at) order by r.email)
+      from public.role_invites r where r.expires_at > now()), '[]'::jsonb));
+end $$;
+revoke execute on function public.admin_list_accounts() from public, anon;
+grant execute on function public.admin_list_accounts() to authenticated;
+
+-- Classes with their teachers and two counts (children, and those with no parent link); never a child's name.
+create function public.admin_list_classes() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
+  return jsonb_build_object('classes', coalesce((select jsonb_agg(jsonb_build_object(
+      'id', k.id, 'name', k.name,
+      'teachers', coalesce((select jsonb_agg(jsonb_build_object('user_id', ct.teacher_id, 'email', u.email) order by u.email)
+        from public.class_teachers ct join auth.users u on u.id = ct.teacher_id where ct.class_id = k.id), '[]'::jsonb),
+      'children', (select count(*) from public.child_profiles c where c.class_id = k.id),
+      'unclaimed', (select count(*) from public.child_profiles c where c.class_id = k.id
+        and not exists (select 1 from public.child_links l where l.child_id = c.id))) order by k.name)
+    from public.classes k), '[]'::jsonb));
+end $$;
+revoke execute on function public.admin_list_classes() from public, anon;
+grant execute on function public.admin_list_classes() to authenticated;
+
+-- A teacher invitation by email (section 1), valid 30 days; inviting again renews it. The answer never says whether the email has an account.
+create function public.admin_invite_teacher(p_email text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_email text := lower(trim(coalesce(p_email, '')));
+  v_exp timestamptz := now() + interval '30 days';
+begin
+  if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
+  if position('@' in v_email) <= 1 or char_length(v_email) > 254 then return jsonb_build_object('error', 'invalid'); end if;
+  insert into public.role_invites (email, created_by, created_at, expires_at) values (v_email, auth.uid(), now(), v_exp)
+    on conflict (email) do update set created_by = excluded.created_by, created_at = excluded.created_at, expires_at = excluded.expires_at;
+  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'invite_teacher', jsonb_build_object('email', v_email));
+  return jsonb_build_object('ok', true, 'email', v_email, 'expires_at', v_exp);
+end $$;
+revoke execute on function public.admin_invite_teacher(text) from public, anon;
+grant execute on function public.admin_invite_teacher(text) to authenticated;
+
+create function public.admin_revoke_invite(p_email text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_email text := lower(trim(coalesce(p_email, '')));
+begin
+  if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
+  delete from public.role_invites r where r.email = v_email;
+  if not found then return jsonb_build_object('error', 'not_found'); end if;
+  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'revoke_invite', jsonb_build_object('email', v_email));
+  return jsonb_build_object('ok', true);
+end $$;
+revoke execute on function public.admin_revoke_invite(text) from public, anon;
+grant execute on function public.admin_revoke_invite(text) to authenticated;
+
+-- Back to parent: loses every class and the acknowledgement; their pending to_parent codes go. Never refused because a class is left
+-- without a teacher: the children stay, and the admin assigns a teacher.
+create function public.admin_demote_teacher(p_user uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
+  update public.accounts a set role = 'parent', teacher_ack_at = null where a.user_id = p_user and a.role = 'teacher';
+  if not found then return jsonb_build_object('error', 'not_found'); end if;
+  delete from public.class_teachers ct where ct.teacher_id = p_user;
+  delete from public.invites i where i.created_by = p_user and i.kind = 'to_parent' and i.used_at is null;
+  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'demote_teacher', jsonb_build_object('user_id', p_user));
+  return jsonb_build_object('ok', true);
+end $$;
+revoke execute on function public.admin_demote_teacher(uuid) from public, anon;
+grant execute on function public.admin_demote_teacher(uuid) to authenticated;
+
+create function public.admin_create_class(p_name text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_name text := trim(coalesce(p_name, ''));
+  v_id uuid;
+begin
+  if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
+  if char_length(v_name) not between 1 and 40 then return jsonb_build_object('error', 'invalid'); end if;
+  insert into public.classes (name) values (v_name) returning id into v_id;
+  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'create_class', jsonb_build_object('class_id', v_id, 'name', v_name));
+  return jsonb_build_object('ok', true, 'id', v_id, 'name', v_name);
+end $$;
+revoke execute on function public.admin_create_class(text) from public, anon;
+grant execute on function public.admin_create_class(text) to authenticated;
+
+create function public.admin_rename_class(p_class uuid, p_name text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_name text := trim(coalesce(p_name, ''));
+begin
+  if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
+  if char_length(v_name) not between 1 and 40 then return jsonb_build_object('error', 'invalid'); end if;
+  update public.classes k set name = v_name where k.id = p_class;
+  if not found then return jsonb_build_object('error', 'not_found'); end if;
+  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'rename_class', jsonb_build_object('class_id', p_class, 'name', v_name));
+  return jsonb_build_object('ok', true);
+end $$;
+revoke execute on function public.admin_rename_class(uuid, text) from public, anon;
+grant execute on function public.admin_rename_class(uuid, text) to authenticated;
+
+-- Refused while the class holds children with no parent link: deleting it would leave them class-less with no link, and the creator's
+-- just-inserted read would hand them back to the teacher who made them. Linked children go class-less and keep their parent.
+create function public.admin_delete_class(p_class uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_unclaimed int;
+begin
+  if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
+  perform pg_advisory_xact_lock(hashtext('class:' || p_class::text));
+  perform 1 from public.classes k where k.id = p_class for update;
+  if not found then return jsonb_build_object('error', 'not_found'); end if;
+  select count(*) into v_unclaimed from public.child_profiles c
+    where c.class_id = p_class and not exists (select 1 from public.child_links l where l.child_id = c.id);
+  if v_unclaimed > 0 then return jsonb_build_object('error', 'orphans', 'count', v_unclaimed); end if;
+  delete from public.invites i using public.child_profiles c where i.child_id = c.id and c.class_id = p_class and i.used_at is null;
+  delete from public.classes k where k.id = p_class;
+  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'delete_class', jsonb_build_object('class_id', p_class));
+  return jsonb_build_object('ok', true);
+end $$;
+revoke execute on function public.admin_delete_class(uuid) from public, anon;
+grant execute on function public.admin_delete_class(uuid) to authenticated;
+
+-- Only an account whose role is teacher can be assigned (a parent's account answers not_found: there is no lookup of parents).
+create function public.admin_assign_teacher(p_class uuid, p_user uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
+  if not exists (select 1 from public.classes k where k.id = p_class)
+     or not exists (select 1 from public.accounts a where a.user_id = p_user and a.role = 'teacher') then
+    return jsonb_build_object('error', 'not_found');
+  end if;
+  insert into public.class_teachers (class_id, teacher_id) values (p_class, p_user) on conflict do nothing;
+  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'assign_teacher', jsonb_build_object('class_id', p_class, 'user_id', p_user));
+  return jsonb_build_object('ok', true);
+end $$;
+revoke execute on function public.admin_assign_teacher(uuid, uuid) from public, anon;
+grant execute on function public.admin_assign_teacher(uuid, uuid) to authenticated;
+
+-- Removes a teacher from a class; their pending to_parent codes for that class's children go with it.
+create function public.admin_unassign_teacher(p_class uuid, p_user uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
+  delete from public.class_teachers ct where ct.class_id = p_class and ct.teacher_id = p_user;
+  if not found then return jsonb_build_object('error', 'not_found'); end if;
+  delete from public.invites i using public.child_profiles c
+    where i.child_id = c.id and c.class_id = p_class and i.created_by = p_user and i.kind = 'to_parent' and i.used_at is null;
+  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'unassign_teacher', jsonb_build_object('class_id', p_class, 'user_id', p_user));
+  return jsonb_build_object('ok', true);
+end $$;
+revoke execute on function public.admin_unassign_teacher(uuid, uuid) from public, anon;
+grant execute on function public.admin_unassign_teacher(uuid, uuid) to authenticated;
 
 commit;

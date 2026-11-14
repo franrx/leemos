@@ -90,6 +90,50 @@ check('teachers: limit triggers take advisory locks (per owner, per class, per c
 check('teachers: the class limit runs before insert or update of class_id', /before insert or update of class_id on public\.child_profiles/.test(tc));
 check('teachers: data stays capped below 200000 bytes (constraint untouched)', tc.length > 0 && !/octet_length/.test(tc) && !/drop constraint child_profiles_data_check/.test(tc));
 
+// ---- RPCs (spec sections 1, 4, 5 and 8). Each name with its exact argument list; the clients of later tasks call them by these names.
+const RPCS = {
+  whoami: '', ack_teacher: '', create_invite: 'p_child uuid, p_kind text', redeem_invite: 'p_code text, p_class uuid default null',
+  leave_class: 'p_child uuid', unlink_me: 'p_child uuid', delete_child: 'p_child uuid', export_my_data: '', delete_my_account: '',
+  admin_list_accounts: '', admin_list_classes: '', admin_invite_teacher: 'p_email text', admin_revoke_invite: 'p_email text',
+  admin_demote_teacher: 'p_user uuid', admin_create_class: 'p_name text', admin_rename_class: 'p_class uuid, p_name text',
+  admin_delete_class: 'p_class uuid', admin_assign_teacher: 'p_class uuid, p_user uuid', admin_unassign_teacher: 'p_class uuid, p_user uuid',
+};
+const argsOf = (name) => { const m = new RegExp(`create function public\\.${esc(name)}\\(([^)]*)\\)`).exec(tc); return m ? m[1].replace(/\s+/g, ' ').trim() : null; };
+const bodyOf = (name) => (fn(name) || {}).body || '';
+for (const [n, args] of Object.entries(RPCS)) {
+  const f = fn('public.' + n);
+  check(`rpc: public.${n}(${args}) exists, security definer, returns jsonb`, argsOf(n) === args && definer(f) && /returns jsonb/.test(f.header), String(argsOf(n)));
+  check(`rpc: public.${n} revokes execute from public, anon and grants it to authenticated`, revokes('public.' + n) === 1 && new RegExp(`grant execute on function public\\.${esc(n)}\\([^)]*\\) to authenticated;`).test(tc));
+}
+check('rpc: whoami is volatile and claims through private.claim_role()', /\bvolatile\b/.test((fn('public.whoami') || {}).header || '') && /perform private\.claim_role\(\)/.test(bodyOf('public.whoami')) && definer(fn('private.claim_role')));
+check('rpc: claim_role matches the verified, lower-cased email to a pending invitation and deletes it', /email_confirmed_at is not null/.test(bodyOf('private.claim_role')) && /lower\(/.test(bodyOf('private.claim_role')) && /delete from public\.role_invites/.test(bodyOf('private.claim_role')) && /expires_at > now\(\)/.test(bodyOf('private.claim_role')) && /insert into public\.admin_log/.test(bodyOf('private.claim_role')));
+check('rpc: claim_role is not granted to anyone (only whoami calls it)', !/grant execute on function private\.claim_role/.test(tc));
+const admins = Object.keys(RPCS).filter((n) => n.startsWith('admin_'));
+check('rpc: every admin_* function first checks private.is_admin() and answers {error:forbidden}', admins.every((n) => /^\s*(declare[\s\S]*?)?begin\s+if not private\.is_admin\(\) then return jsonb_build_object\('error', 'forbidden'\); end if;/.test(bodyOf('public.' + n))), admins.filter((n) => !/^\s*(declare[\s\S]*?)?begin\s+if not private\.is_admin\(\) then return jsonb_build_object\('error', 'forbidden'\); end if;/.test(bodyOf('public.' + n))).join());
+const adminWrites = admins.filter((n) => !/^admin_list_/.test(n));
+check('rpc: every admin write inserts into admin_log', adminWrites.every((n) => /insert into public\.admin_log/.test(bodyOf('public.' + n))), adminWrites.filter((n) => !/insert into public\.admin_log/.test(bodyOf('public.' + n))).join());
+check('rpc: admin_list_* only read (no insert, update or delete)', admins.filter((n) => /^admin_list_/.test(n)).every((n) => !/\b(insert into|update public|delete from)\b/.test(bodyOf('public.' + n))));
+check('rpc: admin_list_accounts lists only teacher and admin accounts (no parent email)', /a\.role in \('teacher', 'admin'\)/.test(bodyOf('public.admin_list_accounts')) && !/'parent'/.test(bodyOf('public.admin_list_accounts')));
+const redeem = bodyOf('public.redeem_invite'), create = bodyOf('public.create_invite');
+check('rpc: redeem_invite records failed attempts in invite_attempts and never raises', /insert into public\.invite_attempts/.test(redeem) && !/\braise\b/i.test(redeem));
+check('rpc: redeem_invite rate-limits at 10 failed attempts per user per hour, under a per-user lock', /interval '1 hour'/.test(redeem) && />= 10/.test(redeem) && /pg_advisory_xact_lock\(hashtext\('redeem:'/.test(redeem) && redeem.indexOf("'rate'") >= 0 && redeem.indexOf("'rate'") < redeem.indexOf('update public.invites'));
+check('rpc: redeem_invite consumes the code in one statement (used_at is null and expires_at > now() returning)', /update public\.invites i set used_at = now\(\)[^;]*where[^;]*i\.used_at is null and i\.expires_at > now\(\)[^;]*returning/.test(redeem));
+check('rpc: redeem_invite checks the class, ownership and limits before consuming the code', ['already_in_class', 'has_parent', "'limit'", 'created_by = v_uid'].every((s) => redeem.indexOf(s) >= 0 && redeem.indexOf(s) < redeem.indexOf('update public.invites')));
+check('rpc: redeem_invite never generates codes; create_invite does, with extensions.gen_random_bytes', !/gen_random_bytes/.test(redeem) && /extensions\.gen_random_bytes\(/.test(create));
+const alpha = (/'([A-Za-z0-9]{20,})'/.exec(create) || [])[1] || '';
+check('rpc: the code alphabet has 32 distinct unambiguous characters (no 0 O 1 I l)', alpha.length === 32 && new Set(alpha).size === 32 && !/[0O1Il]/.test(alpha), alpha);
+check('rpc: codes are 8 characters, live 7 days and are stored only as a SHA-256 hash', /for i in 0\.\.7 loop/.test(create) && /interval '7 days'/.test(create) && /encode\(extensions\.digest\([^;]*'sha256'\), 'hex'\)/.test(create) && /encode\(extensions\.digest\([^;]*'sha256'\), 'hex'\)/.test(redeem) && !/insert into public\.invites \([^)]*\bcode\b(?!_hash)/.test(create));
+check('rpc: create_invite allows at most 5 pending codes per child (under a per-child lock)', />= 5/.test(create) && /pg_advisory_xact_lock\(hashtext\('invite:'/.test(create));
+check('rpc: delete_child and unlink_me write the tombstone before deleting', ['public.delete_child', 'public.unlink_me'].every((n) => { const b = bodyOf(n); return /insert into public\.deleted_children/.test(b) && b.indexOf('insert into public.deleted_children') < b.indexOf('delete from public.child_profiles'); }));
+check('rpc: delete_my_account writes tombstones, refuses the last admin and deletes the auth user', /insert into public\.deleted_children/.test(bodyOf('public.delete_my_account')) && /'last_admin'/.test(bodyOf('public.delete_my_account')) && /delete from auth\.users/.test(bodyOf('public.delete_my_account')));
+check('rpc: leave_class refuses a child with no parent link (orphan) and deletes its pending codes', /'orphan'/.test(bodyOf('public.leave_class')) && /delete from public\.invites/.test(bodyOf('public.leave_class')));
+check('rpc: admin_delete_class refuses while the class holds children with no parent link (orphans, with the count)', /jsonb_build_object\('error', 'orphans', 'count'/.test(bodyOf('public.admin_delete_class')));
+check('rpc: admin_demote_teacher and delete_my_account are never refused for orphans', !/orphan/.test(bodyOf('public.admin_demote_teacher')) && !/orphan/.test(bodyOf('public.delete_my_account')));
+// accounts.role is assigned only by the invitation claim and by demotion (the first admin is set by hand, in a comment).
+const setsRole = (b) => [...b.matchAll(/update public\.accounts\b[^;]*?\bset\b((?:(?!\bwhere\b)[^;])*)/gi)].some((m) => /\brole\s*=/.test(m[1])) || /insert into public\.accounts\s*\([^)]*\brole\b/.test(b);
+check('rpc: only private.claim_role and public.admin_demote_teacher assign accounts.role', fns.filter((f) => setsRole(f.body)).map((f) => f.name).sort().join() === 'private.claim_role,public.admin_demote_teacher', fns.filter((f) => setsRole(f.body)).map((f) => f.name).join());
+check('rpc: current_role is always called as private.current_role() (bare current_role is the SQL keyword)', fns.every((f) => !/(?<!private\.)\bcurrent_role\b/.test(f.body) && !/private\.current_role(?!\(\))/.test(f.body)));
+
 const jwtRole = k => { try { return JSON.parse(Buffer.from(String(k).split('.')[1], 'base64url').toString()).role; } catch (e) { return null; } };
 check('config: empty (feature off) or a Supabase https URL plus an anon-role JWT, never service_role',
   (cfg.url === '' && cfg.anonKey === '') ||
