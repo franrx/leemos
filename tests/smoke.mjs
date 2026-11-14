@@ -2677,6 +2677,62 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('sign-out: offline, "sign out anyway" then removes the class profiles', !profList(app).some((p) => p.id === 'mateo') && stOf(app, 'mateo') === null && stOf(app, 'ana').total === 3);
   }
 
+  // fix round 1: a final sync that never ran (another round hangs) is not "everything sent"
+  {
+    const t = await teacherWorld();
+    let hang = false;
+    const s = { ...t.s, fetch: async (u, o) => { if (hang && String(u).includes('/rest/v1/')) await new Promise(() => {}); return t.s.fetch(u, o); } };
+    const app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...CLASS_PROFILES(), 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 } } });
+    await until(() => t.s.log.filter((l) => l.startsWith('GET /rest/v1/child_profiles')).length >= 2, 3000); await sleep(80);
+    app.w.__leemosSignOutWait = 150;
+    app.w.localStorage.setItem('leemos-v1:mateo', JSON.stringify({ ...stOf(app, 'mateo'), total: 9, modAt: Date.now() + 1000 }));
+    hang = true; // slow school wifi: a background round never finishes
+    Object.defineProperty(app.d, 'hidden', { value: true, configurable: true });
+    app.d.dispatchEvent(new app.w.Event('visibilitychange'));
+    await sleep(20);
+    app.$('acctOutBtn').click();
+    await until(() => !app.$('link').hidden, 3000);
+    const asked = !app.$('link').hidden && app.$('linkAsk').textContent === ies.acctUnsentAsk;
+    (linkButtons(app)[1] || app.$('linkCancel')).click(); await sleep(40);
+    check('sign-out: a final sync that could not run (another round hangs) asks instead of purging', asked && profList(app).some((p) => p.id === 'mateo') && stOf(app, 'mateo').total === 9 && app.w.localStorage.getItem('leemos-auth') !== null, JSON.stringify({ asked, list: profList(app).map((p) => p.id) }));
+  }
+
+  // fix round 1: a revoked class profile (no rid) with progress always asks
+  {
+    const { app } = await signedTeacherBoot({ 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'mateo', name: 'Mateo', kind: 'reader', via: 'class' }] } });
+    app.$('acctOutBtn').click();
+    await until(() => !app.$('link').hidden, 3000);
+    const asked = !app.$('link').hidden && app.$('linkAsk').textContent === ies.acctUnsentAsk;
+    (linkButtons(app)[1] || app.$('linkCancel')).click(); await sleep(40);
+    check('sign-out: a revoked class profile with progress asks, and "stay" changes nothing', asked && profList(app).some((p) => p.id === 'mateo' && p.via === 'class' && !p.hidden) && stOf(app, 'mateo').total === 5 && app.w.localStorage.getItem('leemos-auth') !== null, JSON.stringify({ asked, list: profList(app) }));
+  }
+
+  // fix round 1: the session dies during the final sync and the adult stays: the class profiles are hidden
+  {
+    const { s, app } = await signedTeacherBoot();
+    app.w.localStorage.setItem('leemos-v1:mateo', JSON.stringify({ ...stOf(app, 'mateo'), total: 9, modAt: Date.now() + 1000 }));
+    s.expireAccessTokens(); s.revokeRefreshTokens();
+    app.$('acctOutBtn').click();
+    await until(() => !app.$('link').hidden, 3000);
+    (linkButtons(app)[1] || app.$('linkCancel')).click(); await sleep(40);
+    const m = profList(app).find((p) => p.id === 'mateo');
+    app.$('profileBtn').click();
+    const listed = [...app.d.querySelectorAll('#profileList .wbtn')].map((b) => b.textContent);
+    app.$('profilesClose').click();
+    check('sign-out: an auth error on the final sync plus "stay" hides the class profiles', !!m && m.hidden === true && !listed.some((x) => /Mateo/.test(x)) && stOf(app, 'mateo').total === 9, JSON.stringify({ m, listed }));
+  }
+
+  // fix round 1: another account cancels at the link question: the class profiles are not purged
+  {
+    const s = await withAccount([[RID_A, 'Elsa', 'reader', dat({ total: 1, name: 'Elsa' })]]);
+    const app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] }, 'leemos-auth-user': 'user-of-the-teacher', 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    await signInUi(app, 'mama@example.com');
+    await until(() => !app.$('link').hidden, 3000);
+    app.$('linkCancel').click(); await sleep(60);
+    const m = profList(app).find((p) => p.id === 'mateo');
+    check('a different account that cancels the sign-in does not purge the class profiles', !!m && m.rid === RID_B && m.via === 'class' && stOf(app, 'mateo').total === 5 && app.w.localStorage.getItem('leemos-auth') === null, JSON.stringify(profList(app)));
+  }
+
   // revoked: the server no longer lets this account have the child
   {
     const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);

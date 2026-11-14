@@ -740,18 +740,21 @@ function storeState(id,data){
 }
 function schedSync(){if(!sync)return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncAll(),5000)}
 onProgressChange=schedSync;
-// Resolves with the worst error kind of this round (null when everything synced or there was nothing to do).
+// Resolves with the worst error kind of this round: null when everything synced (or no profile is linked), 'busy' / 'nosession' / 'skipped'
+// when the round did not run at all (another round in flight, signed out, a session of another account): nothing was sent.
 // final: the last sync before signing out, which decides itself what an auth error means (no hiding, no profile switch).
 async function syncAll({final=false}={}){
-  if(syncBusy||!sync)return null;
+  if(!sync)return null;
+  if(syncBusy)return 'busy';
   syncBusy=true; // before the first await: two triggers at once (visibilitychange + pagehide, a double tap) must run ONE sync
   try{
     let s=null;
     try{s=await sync.session()}catch(e){if(e&&e.kind==='auth'&&!final)hideClassProfiles();renderAcct();return e&&e.kind||'error'}
-    if(!s)return null;
+    if(!s)return 'nosession';
     let last=null;try{last=localStorage.getItem(AUTH_USER_KEY)}catch(e){}
-    if(last&&s.user&&s.user.id&&last!==s.user.id)return null; // a session of another account than the one this device was linked to: never send these profiles to it
+    if(last&&s.user&&s.user.id&&last!==s.user.id)return 'skipped'; // a session of another account than the one this device was linked to: never send these profiles to it
     syncState='syncing';renderAcct();
+    const started=Date.now(); // the stamp of a complete round: progress made while it runs must not look sent
     const rank=k=>k==='auth'?3:k==='offline'?1:2;
     let worst=null,again=false;
     for(const p of PROFILES.list){
@@ -769,7 +772,7 @@ async function syncAll({final=false}={}){
       }catch(e){const k=e&&e.kind||'error';if(!worst||rank(k)>rank(worst))worst=k} // one profile failing must not stop the others
     }
     if(worst){syncState=worst==='offline'?'offline':'error';if(worst==='auth'){acctMsg('acctExpired');if(!final)hideClassProfiles()}}
-    else{syncState='idle';try{localStorage.setItem(SYNC_AT_KEY,String(Date.now()))}catch(e){}}
+    else{syncState='idle';try{localStorage.setItem(SYNC_AT_KEY,String(started))}catch(e){}}
     if(again)schedSync();
     return worst;
   }finally{syncBusy=false;renderAcct()}
@@ -807,6 +810,7 @@ function unsent(p){
   const st=stateOf(p.id);
   return Math.max(Number(st.modAt)||0,Number(st.session&&st.session.at)||0)>at;
 }
+function hasProgress(p){const st=stateOf(p.id);return (Number(st.total)||0)>0||Object.keys(st.stats||{}).length>0}
 // Asks a yes/no question in the link sheet. Resolves true for yesKey; noKey, "Ahora no" and Escape resolve false.
 function askChoice(textKey,yesKey,noKey,titleKey='acctSignOut'){
   return new Promise(resolve=>{
@@ -824,9 +828,16 @@ function askChoice(textKey,yesKey,noKey,titleKey='acctSignOut'){
 // Sign out: one last sync, then the class profiles go. If that sync failed and a class profile has progress not yet sent, ask first.
 async function signOutAndClean(){
   if(!sync)return;
-  for(let i=0;syncBusy&&i<200;i++)await new Promise(r=>setTimeout(r,50)); // a sync in flight finishes first
+  const wait=Date.now()+(window.__leemosSignOutWait||10000);
+  while(syncBusy&&Date.now()<wait)await new Promise(r=>setTimeout(r,50)); // a sync in flight finishes first (if it does not, this round is 'busy': nothing counts as sent)
   const fail=await syncAll({final:true});
-  if(fail&&PROFILES.list.some(p=>p.via==='class'&&unsent(p))&&!await askChoice('acctUnsentAsk','acctUnsentOut','acctUnsentStay'))return;
+  // a class profile without rid (revoked) can never send its progress: always ask for it; the others only when this last round failed
+  const risky=PROFILES.list.some(p=>p.via==='class'&&(p.rid?fail&&unsent(p):hasProgress(p)));
+  if(risky&&!await askChoice('acctUnsentAsk','acctUnsentOut','acctUnsentStay')){
+    if(fail==='auth'||!sync.userId())hideClassProfiles(); // staying without a session: the class children must not stay open on a shared tablet
+    renderAcct();
+    return;
+  }
   await sync.signOut();
   ROLE='parent';syncState='idle';acctMsg('');
   await purgeClassProfiles();
@@ -888,8 +899,7 @@ async function afterSignIn(user){
   let activeGone=false;
   try{
     if(prev&&prev!==user.id){
-      // another account used this tablet: its class children go (also the hidden ones), and the rest is never uploaded into this one unasked
-      if(PROFILES.list.some(p=>p.via==='class')){activeGone=dropClassProfiles();saveProfiles()}
+      // another account used this tablet: nothing is uploaded into this one unasked, and its class children go once the sign-in is saved
       PROFILES.list.forEach(p=>{delete p.rid});
     }else PROFILES.list.forEach(p=>{delete p.hidden}); // the same account is back: its class profiles show again
     await readRole();
@@ -914,6 +924,7 @@ async function afterSignIn(user){
     }
     if(!saveProfiles())throw new Error('storage'); // if the list cannot be saved the links would be lost at the next load: undo, do not pretend
     try{localStorage.setItem(AUTH_USER_KEY,user.id)}catch(err){}
+    if(prev&&prev!==user.id&&PROFILES.list.some(p=>p.via==='class')){activeGone=dropClassProfiles();saveProfiles()} // also the hidden ones
   }catch(e){
     // cancelled or failed half way: nothing stays linked and the device is signed out again. The list is restored in place,
     // so PROFILE (the active entry) is still one of its objects and renaming the child keeps persisting.
@@ -924,7 +935,6 @@ async function afterSignIn(user){
     $('link').hidden=true;
     acctMsg(e&&e.kind==='offline'?'acctNetwork':e&&e.message==='cancelled'?'':'acctError');
     renderAcct();
-    if(activeGone)switchProfile(fallbackId());
     return;
   }
   await syncAll();
