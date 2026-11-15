@@ -438,6 +438,28 @@ try {
     const bd = born && born.data, bornOk = !!bd && bd.modAt <= cap && bd.level === 4 && bd.resets.es === 1000 && bd.session.at <= cap && bd.prefs.lang.at <= cap;
     return [clamped && okr(left) && famOk && bornOk, JSON.stringify({ w: w.status, d, left: left.body, fam: fam.status, ad, bd })];
   });
+  if (!DB) console.log('SKIP  repeated +1 resets writes past 1e6 cannot disable «Borrar progreso» (needs the local db container: npm run test:rls)');
+  else await t('repeated +1 resets writes past 1e6 (row seeded at 999999 past the trigger) cannot disable «Borrar progreso»: the family\'s reset still wins', async () => {
+    const PR = await mk('prep'), kid = await mkKid(PR, { data: { level: 1, name: 'Elsa', modAt: Date.now(), resets: { es: 3, ca: 0 }, stats: { 's:ma': { ok: 1 } } } });
+    await share(PR, kid, T1, C1);
+    // what about 1e6 scripted teacher PATCHes would leave: seeded directly, then the last steps go through the API one write at a time
+    superSql(`set session_replication_role = replica; update public.child_profiles set data = jsonb_set(data, '{resets,es}', '999999') where id = '${kid}';`);
+    const steps = [];
+    for (let i = 0; i < 6; i++) {
+      const w = await rest(T1, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ data: { resets: { es: 1e9, ca: 0 }, stats: { 's:pa': { ok: 1e6, fail: 0 } }, modAt: Date.now() } }) });
+      steps.push(w.status === 200 ? (((await json(w)) || [])[0] || {}).data?.resets?.es : w.status);
+    }
+    const left = await rpc(PR, 'leave_class', { p_child: kid });
+    const row = await one(await rest(PR, `child_profiles?id=eq.${kid}&select=data,version`));
+    // the family's device pulled that row and taps «Borrar progreso» in Spanish (app.js: stats cleared, resets + 1)
+    const local = { ...mergeData(row.data, {}), stats: {}, resets: { es: row.data.resets.es + 1, ca: 0 } };
+    const merged = mergeData(local, row.data);
+    const fam = await rest(PR, `child_profiles?id=eq.${kid}&version=eq.${row.version}`, { method: 'PATCH', body: JSON.stringify({ data: merged, version: row.version + 1 }) });
+    const ad = (((await json(fam)) || [])[0] || {}).data;
+    const plusOne = steps.join() === '1000000,1000001,1000002,1000003,1000004,1000005';
+    return [plusOne && okr(left) && row.data.resets.es === 1000005 && fam.status === 200 && !!ad && ad.resets.es === 1000006 && !ad.stats['s:pa'] && !mergeData(ad, row.data).stats['s:pa'],
+      JSON.stringify({ steps, left: left.body, rowResets: row.data.resets, fam: fam.status, ad })];
+  });
   await t('malformed data never makes a write fail (odd types are left alone)', async () => {
     const PO = await mk('podd'), kid = await mkKid(PO, { data: { modAt: 'soon', level: 'two', resets: [1], prefs: [], session: 7 } });
     const r = await one(await rest(PO, `child_profiles?id=eq.${kid}&select=data`));

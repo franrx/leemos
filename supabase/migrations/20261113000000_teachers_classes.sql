@@ -266,6 +266,8 @@ create trigger child_profiles_version before insert or update on public.child_pr
 -- and they would outlive leave_class. Every write: data.modAt, data.session.at and each data.prefs.*.at at most now() + 10 min (epoch
 -- ms; a device clock a little ahead still passes); data.level at most 4, the last index of src/data/levels.{es,ca}.json (5 levels;
 -- tests/migration.mjs checks it); data.resets.es/ca at most old + 1 per update ("Borrar progreso" adds 1) and at most 1000 on insert.
+-- A writer can still raise resets by 1 per write, any number of times, but src/merge.js puts no reachable cap on them (any safe
+-- integer, 2^53 writes away), so repetition only makes the family's next reset one higher: it never reaches a state that defeats it.
 -- Only numbers are touched: a missing key or an odd type is left alone (merge.js ignores it), so no write ever fails here.
 create function private.child_profiles_data() returns trigger
 language plpgsql set search_path = '' as $$

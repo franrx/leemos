@@ -10,6 +10,11 @@ const ITEM_KEY = /^(ca:)?(s|w|snd):.{1,40}$/; // the stat keys the app really wr
 const unsafe = (k) => k === '__proto__' || k === 'constructor' || k === 'prototype';
 const langOf = (k) => (k.indexOf('ca:') === 0 ? 'ca' : 'es');
 const pair = (o) => ({ es: num(isObj(o) ? o.es : 0), ca: num(isObj(o) ? o.ca : 0) });
+// "Borrar progreso" counters have no reachable cap: the server lets them grow by at most 1 per write (trigger child_profiles_data), so
+// a cap like CAP could be reached by repetition and a reset would then tie the planted stats. Any safe integer is valid; beyond that
+// (2^53 writes away) the value cannot come from the server and is ignored, like a broken stamp.
+const rnum = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 && Math.floor(v) <= Number.MAX_SAFE_INTEGER ? Math.floor(v) : 0);
+const rpair = (o) => ({ es: rnum(isObj(o) ? o.es : 0), ca: rnum(isObj(o) ? o.ca : 0) });
 const lvl = (x) => Math.floor(num(x && x.level));
 const nm = (x) => (x && typeof x.name === 'string' ? x.name.trim().slice(0, 40) : '');
 // ---------- stickers per world (spec: 2026-10-17-world-stickers-design.md) ----------
@@ -85,7 +90,7 @@ const maxStat = (x, y) => {
 export function mergeData(a, b) {
   a = isObj(a) ? a : {};
   b = isObj(b) ? b : {};
-  const ra = pair(a.resets), rb = pair(b.resets);
+  const ra = rpair(a.resets), rb = rpair(b.resets);
   const stats = {};
   for (const L of LANGS) {
     const sa = statsOf(a, L), sb = statsOf(b, L);
