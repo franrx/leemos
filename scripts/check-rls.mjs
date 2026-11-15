@@ -163,7 +163,7 @@ try {
   await t('has_parent: a teacher sees true for a claimed child and false for an unclaimed one, and still cannot see who the parent is', async () => {
     const KU = await mkKid(T1, { class_id: C1 }), KCl = await claim(T1, C1, await mk('pcl'));
     const flag = async (u, id) => { const b = await json(await rest(u, `child_profiles?id=eq.${id}&select=id,has_parent`)); return Array.isArray(b) && b[0] ? b[0].has_parent : undefined; };
-    const links = await json(await rest(T1, `child_links?child_id=eq.${KCl}`));
+    const links = await json(await rest(T1, `child_links?child_id=eq.${KCl}&select=child_id,user_id`)); // the readable columns (granted_by is not granted)
     const stranger = await json(await rest(PB, `child_profiles?id=eq.${KCl}&select=id,has_parent`)); // a stranger sees no row at all
     return [(await flag(T1, KU)) === false && (await flag(T1, KCl)) === true && (await flag(T1, K1)) === true && Array.isArray(links) && links.length === 0 && Array.isArray(stranger) && stranger.length === 0, `${await flag(T1, KU)} ${await flag(T1, KCl)} ${JSON.stringify(links)} ${JSON.stringify(stranger)}`];
   });
@@ -347,6 +347,32 @@ try {
       && (await seen(TO, inClass)) && (await linksOf(left)).length === 1 && (await seen(FAM, left));
     const again = ok && okr(await rpc(TO, 'create_invite', { p_child: inClass, p_kind: 'to_parent' })); // unclaimed again: the class's teacher can give the right family a code
     return [ok && again, JSON.stringify({ un: un.body, dm: dm.body, parent: parent.body, dr: dr.body })];
+  });
+  // The provenance of a teacher's parent grant is on the link (child_links.granted_by, no foreign key): deleting the teacher's account
+  // (which cascades their invites) must not let those grants escape the admin's review.
+  for (const [n, how, del] of [[1, 'delete_my_account', (u) => rpc(u, 'delete_my_account')], [2, 'the Auth admin API', (u) => fetch(`${url}/auth/v1/admin/users/${u.id}`, { method: 'DELETE', headers: j({ apikey: service, Authorization: 'Bearer ' + service }) })]]) {
+    await t(`a teacher deleted through ${how}: their parent grants are logged for the admin, listed, and admin_drop_teacher_links still drops them`, async () => {
+      const TX = await mkRole('gx' + n, 'teacher', { ack: true }), TK = await mkRole('gk' + n, 'teacher', { ack: true }), CX = await mkClass('rls gone ' + stamp + ' ' + n);
+      await teach(CX, TX); await teach(CX, TK); // a second teacher, so the class keeps one
+      const ALT = await mk('galt' + n), kid = await claim(TX, CX, ALT);
+      const linkBy = ((await linksOf(kid))[0] || {}).granted_by;
+      const hidden = await rest(ALT, `child_links?child_id=eq.${kid}&select=granted_by`); // the linked parent may not read who granted it
+      const d = await del(TX);
+      const logs = (await json(await svc(`admin_log?action=eq.granter_deleted&detail->>user_id=eq.${TX.id}&select=actor,detail`))) || [];
+      const listed = await rpc(AD, 'admin_list_accounts'), former = ((listed.body && listed.body.former) || []).find((f) => f.user_id === TX.id);
+      const blocked = await rpc(TK, 'create_invite', { p_child: kid, p_kind: 'to_parent' }); // still claimed: the family cannot be given a code yet
+      const dr = await rpc(AD, 'admin_drop_teacher_links', { p_user: TX.id });
+      const again = await rpc(TK, 'create_invite', { p_child: kid, p_kind: 'to_parent' });
+      const ok = linkBy === TX.id && hidden.status >= 400 && d.status < 300 && logs.length === 1 && logs[0].detail.parent_links === 1 && logs[0].detail.outside_class === 0
+        && JSON.stringify(logs[0].detail.child_ids) === JSON.stringify([kid]) && !!former && former.parent_links === 1 && former.outside_class === 0
+        && errOf(blocked) === 'has_parent' && okr(dr) && dr.body.dropped === 1 && !(await linksOf(kid)).length && !(await seen(ALT, kid)) && (await kidRow(kid) || {}).class_id === CX && okr(again);
+      return [ok, JSON.stringify({ linkBy: linkBy === TX.id, hidden: hidden.status, d: d.status, logs, former, blocked: blocked.body, dr: dr.body, again: again.body })];
+    });
+  }
+  await t("the app's own select (child_links(user_id) embedded) still works with the column grant on child_links", async () => {
+    const PE = await mk('pembed'), kid = await claim(T1, C1, PE);
+    const r = await rest(PE, `child_profiles?select=id,name,kind,data,version,class_id,has_parent,child_links(user_id)&id=eq.${kid}`), b = await json(r);
+    return [r.status === 200 && Array.isArray(b) && b.length === 1 && JSON.stringify(b[0].child_links) === JSON.stringify([{ user_id: PE.id }]), `${r.status} ${JSON.stringify(b)}`];
   });
   await t('a parent claims a teacher-created child and takes it out of the class: the teacher can no longer read or edit it', async () => {
     const PD = await mk('pd5'), kid = await claim(T1, C1, PD), saw = await seen(T1, kid), r = await rpc(PD, 'leave_class', { p_child: kid });

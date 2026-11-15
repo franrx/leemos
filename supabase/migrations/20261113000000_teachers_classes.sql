@@ -31,13 +31,17 @@ create table public.class_teachers (
 );
 create index class_teachers_teacher_idx on public.class_teachers (teacher_id);
 
--- Parent links. v1 allows one per child (trigger below).
+-- Parent links. v1 allows one per child (trigger below). granted_by: the account whose to_parent code made this link (null for a creator's
+-- link or a backfilled one). No foreign key on purpose: the provenance must outlive that account, so an admin can still review and undo
+-- the grants of a teacher who deleted their own account (private.granted_links, admin_drop_teacher_links).
 create table public.child_links (
-  child_id  uuid not null references public.child_profiles(id) on delete cascade,
-  user_id   uuid not null references auth.users(id) on delete cascade,
+  child_id    uuid not null references public.child_profiles(id) on delete cascade,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  granted_by  uuid,
   primary key (child_id, user_id)
 );
 create index child_links_user_idx on public.child_links (user_id);
+create index child_links_granted_by_idx on public.child_links (granted_by) where granted_by is not null;
 
 -- Teacher invitations by email (section 1); claimed by whoami() at the invited person's sign-in.
 create table public.role_invites (
@@ -187,15 +191,14 @@ $$;
 revoke execute on function private.invite_hash(text) from public, anon;
 revoke execute on function private.invite_hash(text) from authenticated;
 
--- The parent links that came from p_user's redeemed to_parent codes (the code's used_by is the linked account), optionally only for
--- the children now in p_class. A teacher chooses who receives a parent code, and a code cannot be tied to a person: this is what an
--- admin reviews, and may drop, when that teacher is demoted or unassigned. Called only from the admin functions (no grant).
+-- The parent links that came from p_user's redeemed to_parent codes (child_links.granted_by, written by redeem_invite), optionally only
+-- for the children now in p_class. A teacher chooses who receives a parent code, and a code cannot be tied to a person: this is what an
+-- admin reviews, and may drop, when that teacher is demoted or unassigned, or has deleted their account (granted_by has no foreign key,
+-- so it survives the account and its invites). Called only from the admin functions (no grant).
 create function private.granted_links(p_user uuid, p_class uuid) returns table (child_id uuid, user_id uuid, class_id uuid)
 language sql stable set search_path = '' as $$
   select l.child_id, l.user_id, c.class_id from public.child_links l join public.child_profiles c on c.id = l.child_id
-  where (p_class is null or c.class_id = p_class)
-    and exists (select 1 from public.invites i where i.child_id = l.child_id and i.used_by = l.user_id and i.kind = 'to_parent'
-      and i.created_by = p_user and i.used_at is not null);
+  where l.granted_by = p_user and (p_class is null or c.class_id = p_class);
 $$;
 revoke execute on function private.granted_links(uuid, uuid) from public, anon;
 revoke execute on function private.granted_links(uuid, uuid) from authenticated;
@@ -333,6 +336,15 @@ begin
       and not exists (select 1 from public.child_links o where o.child_id = c.id and o.user_id <> old.id);
   -- The classed children lose their parent with the cascade below: no pending code of theirs may outlive it and claim them again.
   delete from public.invites i using public.child_links l where i.child_id = l.child_id and l.user_id = old.id and i.used_at is null;
+  -- Parent links this account granted with its to_parent codes stay (they are other families' links, never dropped silently) and keep
+  -- granted_by; the admin is told, so they can be reviewed and undone with admin_drop_teacher_links(<this id>).
+  insert into public.admin_log (actor, action, detail)
+    select null, 'granter_deleted', jsonb_build_object('user_id', old.id,
+      'parent_links', count(*) filter (where c.class_id is not null), 'outside_class', count(*) filter (where c.class_id is null),
+      'child_ids', jsonb_agg(l.child_id order by l.child_id))
+    from public.child_links l join public.child_profiles c on c.id = l.child_id
+    where l.granted_by = old.id and l.user_id <> old.id
+    having count(*) > 0;
   return old;
 end $$;
 revoke execute on function private.children_of_deleted_user() from public, anon;
@@ -365,7 +377,7 @@ create policy "own class rows read" on public.class_teachers for select to authe
 
 alter table public.child_links enable row level security;
 revoke all on public.child_links from anon, authenticated;
-grant select on public.child_links to authenticated;
+grant select (child_id, user_id) on public.child_links to authenticated; -- not granted_by: who granted a link is for the admin only
 create policy "own links read" on public.child_links for select to authenticated
   using (user_id = (select auth.uid()));
 
@@ -553,7 +565,7 @@ begin
   if v_inv.kind = 'to_class' then
     update public.child_profiles c set class_id = p_class where c.id = v_child.id;
   else
-    insert into public.child_links (child_id, user_id) values (v_child.id, v_uid);
+    insert into public.child_links (child_id, user_id, granted_by) values (v_child.id, v_uid, v_inv.created_by);
     -- The child has its parent now: the other parent codes would only answer has_parent, and would claim it again if that parent
     -- ever went away (account deleted, unlinked). They go. A to_parent code is a grant the admin may need to review: log it.
     delete from public.invites i where i.child_id = v_child.id and i.kind = 'to_parent' and i.used_at is null;
@@ -690,7 +702,14 @@ begin
     'accounts', coalesce((select jsonb_agg(jsonb_build_object('user_id', a.user_id, 'email', u.email, 'role', a.role) order by a.role, u.email)
       from public.accounts a join auth.users u on u.id = a.user_id where a.role in ('teacher', 'admin')), '[]'::jsonb),
     'invites', coalesce((select jsonb_agg(jsonb_build_object('email', r.email, 'expires_at', r.expires_at) order by r.email)
-      from public.role_invites r where r.expires_at > now()), '[]'::jsonb));
+      from public.role_invites r where r.expires_at > now()), '[]'::jsonb),
+    -- Accounts that no longer exist but whose to_parent codes made parent links still in place (a teacher who deleted their account):
+    -- only an id and two counts, so the admin can undo them with admin_drop_teacher_links (the same counts as a demotion).
+    'former', coalesce((select jsonb_agg(jsonb_build_object('user_id', g.granted_by, 'parent_links', g.n_in, 'outside_class', g.n_out) order by g.granted_by)
+      from (select l.granted_by, count(*) filter (where c.class_id is not null) as n_in, count(*) filter (where c.class_id is null) as n_out
+        from public.child_links l join public.child_profiles c on c.id = l.child_id
+        where l.granted_by is not null and not exists (select 1 from auth.users u where u.id = l.granted_by)
+        group by l.granted_by) g), '[]'::jsonb));
 end $$;
 revoke execute on function public.admin_list_accounts() from public, anon;
 grant execute on function public.admin_list_accounts() to authenticated;

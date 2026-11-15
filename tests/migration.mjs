@@ -45,7 +45,9 @@ check('teachers: every function body has its opening and closing dollar quote (e
 for (const t of TABLES) check(`teachers: ${t} is created with row level security enabled`, new RegExp(`create table public\\.${esc(t)} \\(`).test(tc) && new RegExp(`alter table public\\.${esc(t)} enable row level security`).test(tc));
 for (const t of TABLES) check(`teachers: ${t} starts from zero (revoke all from anon, authenticated)`, new RegExp(`revoke all on public\\.${esc(t)} from anon, authenticated;`).test(tc));
 for (const t of SERVER_ONLY) check(`teachers: ${t} has no grant at all (server-only)`, tc.length > 0 && grantsOn(t).length === 0, JSON.stringify(grantsOn(t)));
-for (const t of READABLE) { const g = grantsOn(t); check(`teachers: ${t} grants only select, to authenticated`, g.length === 1 && g[0].privs === 'select' && g[0].to === 'authenticated', JSON.stringify(g)); }
+// child_links: only its two key columns (granted_by, who granted a link, is for the admin only)
+const READ_PRIVS = { child_links: 'select (child_id, user_id)' };
+for (const t of READABLE) { const g = grantsOn(t); check(`teachers: ${t} grants only select, to authenticated`, g.length === 1 && g[0].privs === (READ_PRIVS[t] || 'select') && g[0].to === 'authenticated', JSON.stringify(g)); }
 check('teachers: no table or function is granted to anon', tc.length > 0 && !/grant [^;]* to [^;]*\banon\b/i.test(tc));
 check('teachers: no policy is granted to anon or public', tc.length > 0 && !/create policy [^;]* to (anon|public)\b/i.test(tc));
 
@@ -144,14 +146,23 @@ check('rpc: codes are 8 characters, live 7 days and are stored only as a keyed h
   const dm = bodyOf('public.delete_my_account'), del = (/before delete on auth\.users\s+for each row execute function (private\.\w+)\(\)/.exec(tc) || [])[1], dt = (del && bodyOf(del)) || '';
   check('rpc: delete_my_account voids the pending codes of its linked children before deleting the links', voids(dm, 'v_uid') > 0 && voids(dm, 'v_uid') < dm.indexOf('delete from public.child_links l where l.user_id = v_uid'));
   check('teachers: the deleted-user trigger voids the pending codes of the children it unlinks', voids(dt, 'old.id') > 0);
-  const link = redeem.indexOf('insert into public.child_links (child_id, user_id) values (v_child.id, v_uid);'), drop = redeem.search(/delete from public\.invites i where i\.child_id = v_child\.id and i\.kind = 'to_parent' and i\.used_at is null;/);
+  const link = redeem.indexOf('insert into public.child_links (child_id, user_id, granted_by) values (v_child.id, v_uid, v_inv.created_by);'), drop = redeem.search(/delete from public\.invites i where i\.child_id = v_child\.id and i\.kind = 'to_parent' and i\.used_at is null;/);
   check("rpc: a to_parent redeem deletes the child's other pending to_parent codes once it links the child", link > 0 && drop > link); }
 { // F007: a parent link from a teacher's code is logged and reversible by an admin
   const b = redeem, log = b.search(/insert into public\.admin_log \(actor, action, detail\)\s+values \(v_uid, 'redeem_to_parent', jsonb_build_object\('child_id', v_child\.id, 'teacher', v_inv\.created_by, 'invite_id', v_inv\.id\)\);/);
-  check('rpc: every to_parent redeem is written to admin_log (redeemer, child, teacher who made the code)', log > b.indexOf('insert into public.child_links (child_id, user_id) values (v_child.id, v_uid);'));
+  check('rpc: every to_parent redeem is written to admin_log (redeemer, child, teacher who made the code)', log > b.indexOf('insert into public.child_links (child_id, user_id, granted_by) values (v_child.id, v_uid, v_inv.created_by);'));
   const g = fn('private.granted_links');
-  check('teachers: private.granted_links lists the parent links that came from a teacher\'s redeemed to_parent codes (used_by = the linked user)',
-    !!g && /i\.kind = 'to_parent'/.test(g.body) && /i\.created_by = p_user/.test(g.body) && /i\.used_by = l\.user_id/.test(g.body) && /i\.used_at is not null/.test(g.body) && !/grant execute on function private\.granted_links/.test(tc));
+  // F003 (iteration 4): the provenance is on the link itself, with no foreign key, so it outlives the teacher's account and invites
+  check('teachers: private.granted_links reads child_links.granted_by (not the invites, which go with their creator)',
+    !!g && /l\.granted_by = p_user/.test(g.body) && !/public\.invites/.test(g.body) && !/grant execute on function private\.granted_links/.test(tc));
+  const cl = (/create table public\.child_links \(([\s\S]*?)\n\);/.exec(tc) || [])[1] || '';
+  check('teachers: child_links.granted_by is a plain uuid (no foreign key, so it survives the granting account)', /\n\s*granted_by\s+uuid,/.test(cl) && !/granted_by[^,\n]*references/.test(cl) && !/foreign key \(granted_by\)/.test(tc));
+  check('rpc: a to_parent redeem records the code\'s creator on the link', redeem.includes('insert into public.child_links (child_id, user_id, granted_by) values (v_child.id, v_uid, v_inv.created_by);'));
+  const delTrig = (/before delete on auth\.users\s+for each row execute function (private\.\w+)\(\)/.exec(tc) || [])[1], dtb = (delTrig && bodyOf(delTrig)) || '';
+  check('teachers: deleting an account that granted parent links logs them for the admin (granter_deleted: counts and child ids) and keeps the links',
+    /insert into public\.admin_log/.test(dtb) && /'granter_deleted'/.test(dtb) && /l\.granted_by = old\.id/.test(dtb) && /'child_ids'/.test(dtb) && !/delete from public\.child_links/.test(dtb));
+  check('rpc: admin_list_accounts lists deleted accounts whose grants are still in place (former: id and counts only)',
+    /'former'/.test(bodyOf('public.admin_list_accounts')) && /not exists \(select 1 from auth\.users u where u\.id = l\.granted_by\)/.test(bodyOf('public.admin_list_accounts')));
   for (const n of ['public.admin_demote_teacher', 'public.admin_unassign_teacher'])
     check(`rpc: ${n} reports how many parent links came from that teacher's codes (parent_links, outside_class)`, /private\.granted_links\(p_user, /.test(bodyOf(n)) && /'parent_links'/.test(bodyOf(n)) && /'outside_class'/.test(bodyOf(n)));
   const dl = bodyOf('public.admin_drop_teacher_links');

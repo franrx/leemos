@@ -185,7 +185,10 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
         const bad = admin(); if (bad) return bad;
         const list = [...accounts].filter(([, x]) => ['teacher', 'admin'].includes(x.role)).map(([id, x]) => ({ user_id: id, email: emailOf(id), role: x.role }));
         list.sort((x, y) => x.role.localeCompare(y.role) || x.email.localeCompare(y.email));
-        return { accounts: list, invites: [...roleInvites].filter(([, e]) => e > clock()).map(([email, e]) => ({ email, expires_at: iso(e) })).sort((x, y) => x.email.localeCompare(y.email)) };
+        // former: accounts that no longer exist whose to_parent codes made links still in place (the SQL reads child_links.granted_by)
+        const gone = [...new Set(invites.filter((i) => i.kind === 'to_parent' && i.used && !emailOf(i.by)).map((i) => i.by))].sort();
+        const former = gone.map((by) => { const g = granted(by, null); return { user_id: by, parent_links: g.filter((x) => x.r.class_id).length, outside_class: g.filter((x) => !x.r.class_id).length }; }).filter((f) => f.parent_links + f.outside_class > 0);
+        return { accounts: list, invites: [...roleInvites].filter(([, e]) => e > clock()).map(([email, e]) => ({ email, expires_at: iso(e) })).sort((x, y) => x.email.localeCompare(y.email)), former };
       }
       case 'admin_list_classes': {
         const bad = admin(); if (bad) return bad;

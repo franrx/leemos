@@ -72,6 +72,7 @@ try{if(!localStorage.getItem('leemos-auth')&&PROFILES.list.some(x=>x.via==='clas
 if(PROFILES.list.find(x=>x.id===PROFILES.active).hidden){PROFILES.active=fallbackId();saveProfiles()} // a hidden profile is never opened
 const PROFILE=PROFILES.list.find(x=>x.id===PROFILES.active);
 let purgedActive=false; // the open profile was purged: its state must not be written back before the reload
+let switchAfterRound=false; // the open class profile was revoked during a sync round: the page switches after the round, never inside it
 const keyFor=id=>id==='elsa'?'leemos-v1':'leemos-v1:'+id;
 const profileSlug=n=>n.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 function switchProfile(id){PROFILES.active=id;saveProfiles();location.reload()}
@@ -771,7 +772,7 @@ async function syncAll({final=false}={}){
         const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:mergeMod.pickSynced(stateOf(p.id)),kindChanged:dirty});
         if(!PROFILES.list.includes(p))continue; // removed from this device while the request was in flight (purged, deleted): nothing is written back
         if(r.revoked){ // removed from the class or deleted by someone else
-          if(p.via==='class'){const n=p.name;forgetRid(p.rid);acctMsg('acctRevokedClass',{n});continue} // another family's child held for a class: nothing of it can be sent, it leaves this device
+          if(p.via==='class'){const n=p.name;forgetRid(p.rid,{later:true});acctMsg('acctRevokedClass',{n});continue} // another family's child held for a class: nothing of it can be sent, it leaves this device
           delete p.rid;p.noSync=true;saveProfiles();acctMsg('acctRevoked',{n:p.name});continue // the family's own copy: local progress stays
         }
         let ch=false;
@@ -786,7 +787,14 @@ async function syncAll({final=false}={}){
     else{syncState='idle';try{localStorage.setItem(SYNC_AT_KEY,String(started))}catch(e){}}
     if(again)schedSync();
     return worst;
-  }finally{syncBusy=false;renderAcct()}
+  }finally{syncBusy=false;renderAcct();if(switchAfterRound&&!final)switchNow({keepMsg:true})} // the final round leaves it to signOutAndClean: after signOut and the purge
+}
+// The pending switch away from a revoked open profile. keepMsg: the account message survives the reload (shown once by the next page).
+const NOTE_KEY='leemos-acct-note';
+function switchNow({keepMsg=false}={}){
+  switchAfterRound=false;
+  if(keepMsg){try{const m=$('acctMsg').textContent;if(m)sessionStorage.setItem(NOTE_KEY,m)}catch(e){}}
+  switchProfile(PROFILES.active);
 }
 // ---------- teachers and classes (spec: docs/superpowers/specs/2026-11-13-teachers-classes-design.md §6) ----------
 let ROLE='parent'; // from whoami() after sign-in and at start; it only chooses what the panel offers, the database decides what is visible
@@ -805,8 +813,10 @@ function dropClassProfiles(){
 }
 // A shared school tablet keeps no other family's child: their progress is on the server and comes back when the teacher opens them again.
 async function purgeClassProfiles(){
-  if(!PROFILES.list.some(p=>p.via==='class'))return;
-  if(dropClassProfiles())switchProfile(fallbackId());else saveProfiles();
+  const had=PROFILES.list.some(p=>p.via==='class');
+  if(had&&dropClassProfiles()){switchAfterRound=false;switchProfile(fallbackId());return}
+  if(switchAfterRound){switchNow();return} // the open class profile was revoked in the last round: leave it only now
+  if(had)saveProfiles();
 }
 // The session is dead (auth error) and nobody can be asked: the class profiles are hidden, not deleted, until the next sign-in.
 function hideClassProfiles(){
@@ -884,6 +894,7 @@ async function signOutAndClean(){
   if(risky&&!await askChoice('acctUnsentAsk','acctUnsentOut','acctUnsentStay')){
     if(fail==='auth'||!sync.userId())hideClassProfiles(); // staying without a session: the class children must not stay open on a shared tablet
     renderAcct();
+    if(switchAfterRound)switchNow({keepMsg:true});
     return;
   }
   await sync.signOut();
@@ -900,13 +911,14 @@ function downloadJSON(name,obj){
 }
 const acctErrKey=e=>e&&e.kind==='offline'?'acctNetwork':e&&e.kind==='auth'?'acctExpired':e&&e.message==='last_admin'?'acctLastAdmin':'acctError';
 // A child that was deleted on the server loses its link here; its local progress stays (it is the family's own copy).
-function forgetRid(id){
+// later: inside a sync round, which switches away from a removed open profile only when the round is over (signOutAndClean: after the purge).
+function forgetRid(id,{later=false}={}){
   const p=PROFILES.list.find(x=>x.rid===id);if(!p)return;
   if(p.via==='class'){ // a class child held for a teacher: it goes from the device at once (purge only ever touches these)
     try{localStorage.removeItem(keyFor(p.id))}catch(e){}
     const was=p.id===PROFILES.active;
     PROFILES.list.splice(PROFILES.list.indexOf(p),1);
-    if(was){purgedActive=true;PROFILES.active=fallbackId();saveProfiles();switchProfile(PROFILES.active)}else saveProfiles();
+    if(was){purgedActive=true;PROFILES.active=fallbackId();saveProfiles();if(later)switchAfterRound=true;else switchProfile(PROFILES.active)}else saveProfiles();
     return;
   }
   delete p.rid;p.noSync=true;saveProfiles(); // the family's own copy stays here, and is not uploaded again unless the adult asks
@@ -1035,6 +1047,8 @@ async function afterSignIn(user){
   if(activeGone)switchProfile(fallbackId()); // the open profile was another account's class child
   showTeach();
 }
+// A message the previous page left for this one (a revoked open profile switched the page): shown once.
+try{const m=sessionStorage.getItem(NOTE_KEY);if(m){sessionStorage.removeItem(NOTE_KEY);$('acctMsg').textContent=m}}catch(e){}
 // A session from an earlier visit: sync at start (only if signed in; otherwise nothing is loaded or sent).
 try{if(localStorage.getItem('leemos-auth'))syncInit().then(async sy=>{if(sy){renderAcct();let last=null;try{last=localStorage.getItem(AUTH_USER_KEY)}catch(e){}
   if(!last||last===sy.userId())if(await readRole()==='auth')hideClassProfiles(); // the role first (one request at a time, so a refresh never races another); never for another account's session

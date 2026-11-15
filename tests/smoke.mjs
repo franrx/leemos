@@ -19,7 +19,12 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
   const errors = [];
   const audioCalls = [];
   const vc = new VirtualConsole();
-  vc.on('jsdomError', (e) => { if (!/Not implemented: navigation/.test(e.message)) console.error(e.message); });
+  // jsdom does not navigate; navs records what a real browser would have left behind when the page asked to reload (location.reload)
+  const navs = []; let wRef = null;
+  vc.on('jsdomError', (e) => {
+    if (!/Not implemented: navigation/.test(e.message)) { console.error(e.message); return; }
+    if (wRef) navs.push({ auth: wRef.localStorage.getItem('leemos-auth'), profiles: JSON.parse(wRef.localStorage.getItem('leemos-profiles') || 'null'), note: wRef.sessionStorage.getItem('leemos-acct-note'), log: supa ? [...supa.log] : [] });
+  });
   const dom = new JSDOM(html, {
     runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://localhost/', virtualConsole: vc,
     beforeParse(w) {
@@ -82,13 +87,13 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
       w.addEventListener('error', (e) => errors.push(e.message));
     },
   });
-  const w = dom.window;
+  const w = dom.window; wRef = w;
   if (onDom) onDom(w); // a test can observe the page from the start
   const p = w.eval(`(async()=>{'use strict';${appJs}\n})()`);
   p.catch((e) => errors.push('boot: ' + e.message));
   for (let i = 0; i < 100 && !w.document.getElementById('hello').textContent.startsWith('¡Hola') && !w.document.getElementById('hello').textContent.startsWith('Hola,'); i++) await sleep(20);
   await sleep(30);
-  return { w, d: w.document, $: (id) => w.document.getElementById(id), errors, audioCalls };
+  return { w, d: w.document, $: (id) => w.document.getElementById(id), errors, audioCalls, navs };
 }
 
 async function playSession(app, n, verdict = () => true) {
@@ -2749,6 +2754,44 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('sign-out: a class child revoked in the final round does not skip the next one (its progress is sent before the purge)',
       t.s.rows.get(RID_B).data.total === 9 && !profList(app).some((p) => p.id === 'lucia' || p.id === 'mateo') && app.errors.length === 0,
       JSON.stringify({ server: t.s.rows.get(RID_B).data.total, list: profList(app).map((p) => p.id), e: app.errors }));
+  }
+
+  // fix iteration 4 (F001): the OPEN class child is revoked in the final sign-out round. The page reloads (switch to another profile)
+  // only after signOut and the purge: a reload inside the round would unload it before signing out, leaving the session and the class children.
+  {
+    const RID_L = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    const t = await teacherWorld();
+    t.s.rows.set(RID_L, { id: RID_L, owner: null, class_id: t.cls, name: 'Lucía', kind: 'reader', data: dat({ total: 2, name: 'Lucía', modAt: 2 }), version: 1 });
+    const profiles = { 'leemos-profiles': { active: 'lucia', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'lucia', name: 'Lucía', kind: 'reader', rid: RID_L, via: 'class' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] } };
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...profiles, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 }, 'leemos-v1:lucia': { name: 'Lucía', total: 2, modAt: 2 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 } } });
+    await until(() => t.s.log.filter((l) => l.startsWith('GET /rest/v1/child_profiles')).length >= 3, 3000); await sleep(80);
+    t.s.hideRow(RID_L); // Lucía, open on the tablet, is taken out of the class just before the teacher signs out
+    app.$('acctOutBtn').click();
+    await until(() => app.navs.length > 0 || !app.$('link').hidden, 3000); await sleep(60);
+    const nav = app.navs[0] || {};
+    const logoutAt = (nav.log || []).indexOf('POST /auth/v1/logout');
+    check('sign-out: an open class child revoked in the final round reloads only after signOut and the purge',
+      app.navs.length >= 1 && nav.auth === null && logoutAt >= 0 && !!nav.profiles && !nav.profiles.list.some((p) => p.via === 'class') && nav.profiles.active === 'elsa' && app.errors.length === 0,
+      JSON.stringify({ navs: app.navs.map((n) => ({ auth: !!n.auth, logoutAt: n.log.indexOf('POST /auth/v1/logout'), list: n.profiles && n.profiles.list.map((p) => p.id) })), e: app.errors }));
+  }
+
+  // fix iteration 4 (F001): an open class child revoked in a normal round: the page reloads after the round, and the message survives the reload
+  {
+    const t = await teacherWorld();
+    t.s.hideRow(RID_B);
+    const profiles = { 'leemos-profiles': { active: 'mateo', list: [{ id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }, { id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }] } };
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...profiles, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 } } });
+    await until(() => app.navs.length > 0, 3000); await sleep(60);
+    const nav = app.navs[0] || {};
+    const msg = ies.acctRevokedClass.replace('{n}', 'Mateo');
+    const elsaSynced = (nav.log || []).some((l) => l.includes('child_profiles') && l.includes(RID_A));
+    check('sync revoked: the open class child reloads the page only after the round (the profiles after it are synced first)',
+      app.navs.length === 1 && elsaSynced && nav.profiles.active === 'elsa' && !nav.profiles.list.some((p) => p.id === 'mateo') && app.errors.length === 0,
+      JSON.stringify({ navs: app.navs.length, elsaSynced, e: app.errors }));
+    check('sync revoked: the message is kept for the reloaded page', nav.note === msg, JSON.stringify(nav.note));
+    const again = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, 'leemos-profiles': nav.profiles, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 } }, onDom: (w) => w.sessionStorage.setItem('leemos-acct-note', nav.note || '') });
+    await sleep(60);
+    check('sync revoked: the reloaded page shows the message once', again.$('acctMsg').textContent === msg && again.w.sessionStorage.getItem('leemos-acct-note') === null, again.$('acctMsg').textContent);
   }
 
   // fix round 1: the session dies during the final sync and the adult stays: the class profiles are hidden

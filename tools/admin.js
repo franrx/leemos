@@ -47,6 +47,8 @@ export const TEXT = {
   dropLinks: 'Quitar esos vínculos',
   keepLinks: 'Mantenerlos',
   dropped: 'Vínculos quitados:',
+  former: 'Cuentas borradas que dieron códigos para padres',
+  formerWhy: 'Esta cuenta ya no existe. Las familias que se vincularon con sus códigos siguen vinculadas hasta que las quites.',
 };
 export const t = (k) => TEXT[k] || k;
 
@@ -126,7 +128,11 @@ export async function mountAdmin(root, sync, tr = t) {
   // After a demotion or an unassignment: the parent links that came from this teacher's codes (a code is not tied to a person). The admin
   // keeps them or drops the ones whose child is still in a class (admin_drop_teacher_links).
   function grants(j, user, cls) {
-    if (!j || typeof j !== 'object' || !(j.parent_links > 0)) return;
+    if (!j || typeof j !== 'object') return;
+    if (!(j.parent_links > 0)) { // nothing here can be dropped from this page; the ones outside every class are still reported
+      if (j.outside_class > 0) status.textContent = `${tr('done')} ${tr('grantOutside')} ${j.outside_class}`;
+      return;
+    }
     const kids = [el('p', { text: `${tr('grantIn')} ${j.parent_links}` }), el('p', { text: tr('grantWhy') })];
     if (j.outside_class > 0) kids.push(el('p', { text: `${tr('grantOutside')} ${j.outside_class}` }));
     ask('grantWarn', tr('grantTitle'), kids, tr('dropLinks'), async () => {
@@ -164,6 +170,22 @@ export async function mountAdmin(root, sync, tr = t) {
     inv.type = 'email';
     const secT = el('section', {}, el('h2', { text: tr('teachers') }), tl, el('h3', { text: tr('pending') }), pl,
       el('div', { class: 'row' }, inv, btn(tr('invite'), () => { const v = inv.value.trim(); if (v) actAndRefresh('admin_invite_teacher', { p_email: v }); })));
+    // A teacher who deleted their account: the parent links their codes made stay until the admin decides (only an id and counts).
+    const former = Array.isArray(a.former) ? a.former : [];
+    if (former.length) {
+      const fl = el('ul');
+      for (const f of former) {
+        const id = String(f.user_id).slice(0, 8);
+        const parts = [f.parent_links > 0 ? `${tr('grantIn')} ${f.parent_links}.` : '', f.outside_class > 0 ? `${tr('grantOutside')} ${f.outside_class}.` : ''].filter(Boolean).join(' ');
+        const li = el('li', {}, el('span', { text: `${id}: ${parts} ` }));
+        if (f.parent_links > 0) li.append(btn(tr('dropLinks'), (e) => ask('formerWarn', `${tr('grantTitle')}: ${id}`, [el('p', { text: tr('formerWhy') }), el('p', { text: tr('grantWhy') })], tr('dropLinks'), async () => {
+          const r = await actAndRefresh('admin_drop_teacher_links', { p_user: f.user_id });
+          if (r && typeof r === 'object') status.textContent = `${tr('dropped')} ${r.dropped}`;
+        }, e.currentTarget, tr('keepLinks')), { aria: `${tr('dropLinks')}: ${id}` }));
+        fl.append(li);
+      }
+      secT.append(el('h3', { text: tr('former') }), fl);
+    }
 
     const nc = field(tr('newClass'));
     const secC = el('section', {}, el('h2', { text: tr('classes') }));

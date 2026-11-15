@@ -60,7 +60,7 @@ drop function public.admin_assign_teacher(uuid, uuid);
 drop function public.admin_unassign_teacher(uuid, uuid);
 drop function public.admin_drop_teacher_links(uuid, uuid);
 
--- Tables (their policies, triggers and indexes go with them), then the private schema (helpers and trigger functions).
+-- Tables (their policies, triggers and indexes go with them; child_links takes its granted_by column), then the private schema (helpers and trigger functions).
 drop policy "admin, teacher or family reads" on public.classes; -- reads child_profiles.class_id
 alter table public.child_profiles drop column class_id;
 drop table public.invites, public.invite_attempts, public.child_links, public.class_teachers, public.role_invites,

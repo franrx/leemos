@@ -187,6 +187,40 @@ const granted = (s, cid, profEmail) => {
     told && srv.links.get('k1').size === 1 && !root.querySelector('[role=alertdialog]') && doc.activeElement && doc.activeElement.tagName === 'H2' && doc.activeElement.textContent === t('classes'), JSON.stringify({ told, a: doc.activeElement && doc.activeElement.outerHTML }));
 }
 {
+  // fix iteration 4 (F002): the only grant is a child its family already took out of every class (parent_links 0, outside_class 1):
+  // nothing can be dropped from here, so no dialog, but the admin is told how many there are
+  const { root, srv } = await open('admin@e.c', (s) => {
+    s.setRole('admin@e.c', 'admin'); s.setRole('prof@e.c', 'teacher', { ack: true }); const cid = s.addClass('3A'); s.addTeacher(cid, 'prof@e.c');
+    const prof = s.userByEmail('prof@e.c').id;
+    kid(s, 'k2', null, true, 'Beto'); s.invites.push({ code: 'Ck2', kind: 'to_parent', child: 'k2', by: prof, exp: Date.now() + 864e5, used: true, usedBy: 'user-x' });
+  });
+  await click(byLabel(root, /^Quitar rol de profesor: prof@e.c$/)[0]);
+  const st = root.querySelector('#adminStatus').textContent;
+  check('admin: a demotion whose only grants are outside every class tells the admin their number (no drop dialog)',
+    !root.querySelector('[role=alertdialog]') && st.includes(`${t('grantOutside')} 1`) && srv.links.get('k2').size === 1 && !/Beto/.test(root.textContent), st);
+}
+{
+  // fix iteration 4 (F003): a teacher deleted their own account; the links their codes made are still listed (by id, with counts) and
+  // «Quitar esos vínculos» drops the ones still in a class
+  const GONE = '0b0b0b0b-0000-4000-8000-000000000001';
+  let cid;
+  const { root, srv } = await open('admin@e.c', (s) => {
+    s.setRole('admin@e.c', 'admin'); cid = s.addClass('3A');
+    kid(s, 'k1', cid, true, 'Ana'); kid(s, 'k2', null, true, 'Beto');
+    for (const k of ['k1', 'k2']) s.invites.push({ code: 'C' + k, kind: 'to_parent', child: k, by: GONE, exp: Date.now() + 864e5, used: true, usedBy: 'user-x' });
+  });
+  const sec = [...root.querySelectorAll('section')].find((x) => x.querySelector('h3') && [...x.querySelectorAll('h3')].some((h) => h.textContent === t('former')));
+  const item = sec && [...sec.querySelectorAll('li')].find((li) => li.textContent.includes(GONE.slice(0, 8)));
+  const listed = !!item && item.textContent.includes(`${t('grantIn')} 1`) && item.textContent.includes(`${t('grantOutside')} 1`) && !/Ana|Beto/.test(root.textContent);
+  const b = byLabel(root, new RegExp(`^${t('dropLinks')}: ${GONE.slice(0, 8)}`))[0];
+  if (b) await click(b);
+  const dlg = root.querySelector('[role=alertdialog]');
+  if (dlg) await click([...dlg.querySelectorAll('button')].find((x) => x.textContent === t('dropLinks')));
+  check('admin: a deleted teacher\'s parent grants are listed and «Quitar esos vínculos» drops the one still in a class',
+    listed && !!b && srv.links.get('k1').size === 0 && srv.rows.get('k1').class_id === cid && srv.links.get('k2').size === 1 && root.querySelector('#adminStatus').textContent === `${t('dropped')} 1`,
+    JSON.stringify({ listed, b: !!b, txt: sec && sec.textContent, st: root.querySelector('#adminStatus').textContent }));
+}
+{
   // a demotion with no such link asks nothing more
   let cid;
   const { root } = await open('admin@e.c', (s) => { s.setRole('admin@e.c', 'admin'); s.setRole('prof@e.c', 'teacher', { ack: true }); cid = s.addClass('3A'); s.addTeacher(cid, 'prof@e.c'); });
