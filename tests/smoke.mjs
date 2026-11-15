@@ -1151,6 +1151,26 @@ const OLD = () => NOW() - 120000; // idle for two minutes
     && after === n && app.errors.length === 0,
     JSON.stringify({ row: Object.keys(row).length, real: new Set(real).size, missing: real.filter((k) => !row[k]).slice(0, 5), loc: Object.keys(loc).length, n, after, e: app.errors }));
 }
+// fix iteration (F001): planted world ids in data.stk. merge.js reads at most 32 ids per side; a row with 30 planted ids (two letters, which
+// jsonb sorts first) plus the child's 2 real worlds is within the server's bound. The device took them in on a pull, so a sticker earned in
+// a NEW world was the 33rd key and the push cut it. The device pushes only the app's worlds: the sticker lands on the row after two rounds,
+// stays on the device, and a fresh device sees every real world.
+{
+  const planted = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [String.fromCharCode(97 + Math.floor(i / 26)) + String.fromCharCode(97 + (i % 26)), 6]));
+  const { s, app } = await seed({ stk: { ...planted, bosque: 3, playa: 2 }, stickers: 5 }, { stk: { bosque: 3, playa: 2 }, stickers: 5, world: 5, sessionLen: 5 });
+  await until(() => app.w.localStorage.getItem('leemos-sync-at'), 3000); await sleep(60);
+  await playSession(app, 5);
+  const earned = localState(app).stk.mar === 1;
+  for (let i = 0; i < 2; i++) { app.w.localStorage.removeItem('leemos-sync-at'); app.w.dispatchEvent(new app.w.Event('online')); await until(() => app.w.localStorage.getItem('leemos-sync-at'), 3000); await sleep(60); }
+  const row = s.rows.get(RID_A).data.stk, loc = localState(app).stk;
+  const { auth, uid } = await signedAuth(s);
+  const fresh = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A, 'leemos-v1': { name: 'Elsa' } } });
+  await until(() => fresh.w.localStorage.getItem('leemos-sync-at'), 3000); await sleep(60);
+  const fst = localState(fresh).stk || {};
+  check('stk: with 30 planted world ids on the row, a sticker earned in a new world reaches the row, stays on the device, and a fresh device sees every real world',
+    earned && row.mar === 1 && row.bosque === 3 && row.playa === 2 && loc.mar === 1 && fst.mar === 1 && fst.bosque === 3 && fst.playa === 2 && app.errors.length === 0 && fresh.errors.length === 0,
+    JSON.stringify({ earned, row, loc, fst, e: app.errors.concat(fresh.errors) }));
+}
 
 // ---------- 31. review fixes for the session/preferences sync ----------
 // I1: the echo of this device's own push must not wipe a session that just finished (the end screen reads its counters)

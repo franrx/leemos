@@ -31,8 +31,9 @@ const clampData = (d, old, now) => {
 };
 
 // what the database refuses with 23514 (HTTP 400): the child_profiles_data_check (data under 200000 bytes) and the stat key bound of
-// trigger child_profiles_data (at most 1000 keys per language, "ca:" ones and the others, of at most 31 characters; only when data changes)
-const STATS_PER_LANG = 1000, STAT_KEY_MAX = 31;
+// trigger child_profiles_data (at most 1000 keys per language, "ca:" ones and the others, of at most 31 characters; at most 32 world ids in
+// stk; only when data changes)
+const STATS_PER_LANG = 1000, STAT_KEY_MAX = 31, STK_MAX = 32;
 const refusedData = (d) => {
   if (Buffer.byteLength(JSON.stringify(d ?? null)) >= 200000) return 'new row for relation "child_profiles" violates check constraint "child_profiles_data_check"';
   const st = d && typeof d === 'object' && !Array.isArray(d) ? d.stats : null;
@@ -40,6 +41,8 @@ const refusedData = (d) => {
     const ks = Object.keys(st), ca = ks.filter((k) => k.startsWith('ca:')).length;
     if (ca > STATS_PER_LANG || ks.length - ca > STATS_PER_LANG || ks.some((k) => [...k].length > STAT_KEY_MAX)) return 'child_profiles_stats: at most 1000 stat keys per language, of at most 31 characters';
   }
+  const stk = d && typeof d === 'object' && !Array.isArray(d) ? d.stk : null;
+  if (stk && typeof stk === 'object' && !Array.isArray(stk) && Object.keys(stk).length > STK_MAX) return 'child_profiles_stk: at most 32 world ids';
   return null;
 };
 

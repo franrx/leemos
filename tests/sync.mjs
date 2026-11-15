@@ -471,5 +471,32 @@ for (const variant of ['lowered', 'omitted']) {
   }
 }
 
+// fix iteration (F001): data.stk is bounded like the stats. merge.js reads at most 32 world ids per side, so the server refuses (23514) a
+// data write with more than 32 stk keys, and a refused family write is retried with stk pruned to the app's worlds (knownWorlds).
+{
+  const WORLDS_ = new Set(['bosque', 'playa', 'mar']);
+  const opts = { knownKeys: async () => () => true, knownWorlds: (id) => WORLDS_.has(id) };
+  const ids = (n) => Array.from({ length: n }, (_, i) => String.fromCharCode(97 + Math.floor(i / 26)) + String.fromCharCode(97 + (i % 26)));
+  const planted = (n) => Object.fromEntries(ids(n).map((k) => [k, 6]));
+  const srv = createFakeSupabase();
+  const cls = srv.addClass('3A');
+  const t = await as(srv, 't@e.c'); srv.setRole('t@e.c', 'teacher', { ack: true }); srv.addTeacher(cls, 't@e.c');
+  const A = await as(srv, 'p@e.c', opts);
+  await A.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ stk: { bosque: 3, playa: 2 }, stickers: 5 }) });
+  await t.sync.redeemInvite((await A.sync.createInvite(RID, 'to_class')).code, cls);
+  const tok = (await t.sync.session()).access_token;
+  const teacherPatch = (d) => srv.fetch(`${URL_}/rest/v1/child_profiles?id=eq.${RID}`, { method: 'PATCH', headers: { Authorization: 'Bearer ' + tok }, body: JSON.stringify({ data: d }) });
+  const base = srv.rows.get(RID).data;
+  const over = await teacherPatch({ ...base, stk: planted(33) });
+  const overCode = (await over.json()).code;
+  const at = await teacherPatch({ ...base, stk: planted(32) });
+  await A.sync.leaveClass(RID);
+  const res = await rejects(A.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ stk: { bosque: 3, playa: 2, mar: 1 }, stickers: 6 }) }));
+  const row = srv.rows.get(RID).data;
+  check('stk: the server refuses more than 32 world ids (23514); a family push that the planted ids put over it is pruned to the app\'s worlds and lands',
+    over.status === 400 && overCode === '23514' && at.status === 200 && res === null && JSON.stringify(row.stk) === JSON.stringify({ bosque: 3, playa: 2, mar: 1 }) && row.stickers === 6,
+    JSON.stringify({ over: over.status, overCode, at: at.status, err: res && [res.kind, res.status], stk: row.stk }));
+}
+
 console.log(failures ? `\n${failures} sync test(s) FAILED` : '\nAll sync tests passed');
 process.exit(failures ? 1 : 0);

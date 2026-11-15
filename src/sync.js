@@ -12,13 +12,20 @@ const SESSION_KEY = 'leemos-auth';
 // wipe what another device played at the stored one. `old`: the row's cleaned data, or null for an insert.
 const capResets = (d, old) => { for (const L of ['es', 'ca']) d.resets[L] = Math.min(d.resets[L], old ? old.resets[L] + 1 : 1000); return d; };
 
-// A write the server refuses with 23514 (data over the 200 KB check, or more stat keys per language than trigger child_profiles_data
-// allows) carries keys somebody planted: they are shaped like the app's own, so the merge keeps them. Such a write is retried once with
-// the stats pruned to the keys this app can produce. Only that fallback prunes: an ordinary push keeps a newer device's new keys.
-const pruneStats = (d, known) => ({ ...d, stats: Object.fromEntries(Object.entries(d.stats).filter(([k]) => known(k))) });
+// A write the server refuses with 23514 (data over the 200 KB check, more stat keys per language or more than 32 world ids in stk than
+// trigger child_profiles_data allows) carries keys somebody planted: they are shaped like the app's own, so the merge keeps them. Such a
+// write is retried once with the stats pruned to the keys this app can produce and stk to its worlds (whichever the app can tell). Only
+// that fallback prunes: an ordinary push keeps a newer device's new keys and worlds.
+const pruneData = (d, known, world) => {
+  const out = { ...d };
+  if (known) out.stats = Object.fromEntries(Object.entries(d.stats).filter(([k]) => known(k)));
+  if (world) { out.stk = Object.fromEntries(Object.entries(d.stk).filter(([k]) => world(k))); out.stickers = Object.values(out.stk).reduce((s, n) => s + n, 0); }
+  return out;
+};
 
-// knownKeys: async () => (statKey) => boolean, or null when the app cannot tell (no pruning then).
-export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, storage = globalThis.localStorage, now = Date.now, knownKeys = null }) {
+// knownKeys: async () => (statKey) => boolean, or null when the app cannot tell (no pruning of the stats then).
+// knownWorlds: (worldId) => boolean, the worlds of this app, or null (no pruning of stk then).
+export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, storage = globalThis.localStorage, now = Date.now, knownKeys = null, knownWorlds = null }) {
   // the project root: a URL copied with an API path (…/rest/v1/, …/auth/v1) or a trailing slash still works
   const base = String(url).trim().replace(/\/+$/, '').replace(/\/(rest|auth)\/v1$/, '').replace(/\/+$/, '');
   const read = (k) => { try { return JSON.parse(storage.getItem(k)); } catch (e) { return null; } };
@@ -90,6 +97,8 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
   }
   const errCode = async (r) => { try { const j = await r.json(); return j && j.code; } catch (e) { return null; } };
   const knownOf = async () => { try { return knownKeys ? await knownKeys() : null; } catch (e) { return null; } };
+  // the refused write, pruned with whatever the app can tell; null when it can tell nothing (no retry)
+  const pruned23514 = async (d) => { const known = await knownOf(); return known || knownWorlds ? pruneData(d, known, knownWorlds) : null; };
   const rows = async (r) => { try { const j = await r.json(); return Array.isArray(j) ? j : []; } catch (e) { return []; } };
   const SELECT = 'select=id,name,kind,data,version,class_id,has_parent,child_links(user_id)'; // has_parent: a computed column (a boolean for rows the caller can read)
 
@@ -150,7 +159,7 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
         let born = capResets(mergeData(data, {}), null), pruned = false;
         const create = () => api('child_profiles', { method: 'POST', body: JSON.stringify({ id: rid, name, kind, data: born }) });
         let c = await create();
-        if (c.status === 400 && (await errCode(c)) === '23514') { const known = await knownOf(); if (known) { born = pruneStats(born, known); pruned = true; c = await create(); } }
+        if (c.status === 400 && (await errCode(c)) === '23514') { const p = await pruned23514(born); if (p) { born = p; pruned = true; c = await create(); } }
         if (c.status === 403) return { revoked: true }; // the insert policy refuses (e.g. a deleted child's id)
         if (c.status === 409) { // exists but not visible to us (revoked), or another device created it first
           row = await getProfile(rid);
@@ -169,7 +178,7 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
       // a version at the integer maximum (planted before the server controlled it): version+1 overflows (22003). Start again at 1 under the same filter.
       let code = p.status === 400 ? await errCode(p) : null;
       if (code === '22003') { next = 1; p = await write(next); code = p.status === 400 ? await errCode(p) : null; }
-      if (code === '23514') { const known = await knownOf(); if (known) { merged = pruneStats(merged, known); pruned = true; p = await write(next); } }
+      if (code === '23514') { const d = await pruned23514(merged); if (d) { merged = d; pruned = true; p = await write(next); } }
       if (!p.ok) throw new SyncError('http', 'could not save the profile', p.status);
       if ((await rows(p)).length) return { data: merged, version: next, kind: nextKind, ...(pruned ? { pruned } : {}) };
       // empty result: someone else wrote first, go again from the read

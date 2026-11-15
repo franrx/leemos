@@ -105,6 +105,7 @@ const S=Object.assign({stats:{},level:0,mode:'syl',upper:true,rate:.75,theme:'',
 // An old save has only the counter S.stickers: its stickers are the first ones of the old order, each in its world's set.
 // Runs before lastFp is taken, so loading an old state is not a progress change (modAt decides level and name in the sync).
 WORLDS.forEach(w=>{if(!Array.isArray(w.stk))w.stk=[]}); // a stale cached worlds.json from before the sets must not stop the app from starting
+const WORLD_IDS=new Set(WORLDS.map(w=>w.id)); // the worlds this version knows (what a device pushes in stk: syncedOf)
 const stkTotal=()=>WORLDS.reduce((n,w)=>n+Math.min(Math.max(0,Math.floor(Number(S.stk[w.id]))||0),w.stk.length),0);
 if(!S.stk||typeof S.stk!=='object'||Array.isArray(S.stk)){
   const stk={};
@@ -672,7 +673,7 @@ function syncInit(){
       const imp=window.__leemosImport||(p=>import(p));
       const [sm,mm]=await Promise.all([imp('./sync.js'),imp('./merge.js')]);
       mergeMod=mm;
-      sync=sm.createSync({url:cfg.url,anonKey:cfg.anonKey,fetch:window.__leemosSyncFetch||undefined,storage:localStorage,knownKeys:knownStatKeys}); // the page's own localStorage, also under the jsdom tests
+      sync=sm.createSync({url:cfg.url,anonKey:cfg.anonKey,fetch:window.__leemosSyncFetch||undefined,storage:localStorage,knownKeys:knownStatKeys,knownWorlds:id=>WORLD_IDS.has(id)}); // the page's own localStorage, also under the jsdom tests
       // Push when the page is hidden or closing; PULL what other devices did when it is shown again, focused, back online,
       // and once a minute while it stays visible (an open page never asks the server by itself otherwise).
       const wake=()=>{if(!document.hidden)syncAll()};
@@ -707,6 +708,10 @@ function pruneLocalStats(id,known){
   for(const k of Object.keys(cur.stats))if(!known(k))delete cur.stats[k];
   if(!active)try{localStorage.setItem(keyFor(id),JSON.stringify(cur))}catch(e){}
 }
+// The synced snapshot of a saved state, with only the worlds of this app in stk. merge.js reads at most 32 world ids per side, and a pull
+// can bring in ids somebody planted on the row: kept in the push, a sticker of a NEW world would be the 33rd and be cut. The row's other
+// ids still merge in (sync.js), so this never drops a newer device's world from the server.
+const syncedOf=st=>mergeMod.pickSynced(st&&st.stk&&typeof st.stk==='object'&&!Array.isArray(st.stk)?{...st,stk:Object.fromEntries(Object.entries(st.stk).filter(([k])=>WORLD_IDS.has(k)))}:st);
 const stateOf=id=>{
   if(id===PROFILE.id)return S;
   try{return JSON.parse(localStorage.getItem(keyFor(id)))||{}}catch(e){return {}}
@@ -747,7 +752,7 @@ function applyMerged(m,adoptSession){
 // beyond that is dropped here too (those resets cleared the same stats, already on the row); one made while the request was in flight stays.
 function storeState(id,data,sent){
   const active=id===PROFILE.id,cur=active?S:stateOf(id);
-  const mine=mergeMod.pickSynced(cur);
+  const mine=syncedOf(cur);
   if(sent)for(const L of ['es','ca']){const drop=sent.resets[L]-data.resets[L];if(drop>0)mine.resets[L]=Math.max(data.resets[L],mine.resets[L]-drop)}
   const merged=mergeMod.mergeData(mine,data);
   if(active){
@@ -795,7 +800,7 @@ async function syncAll({final=false}={}){
       if(!p.rid||p.hidden)continue;
       try{
         const dirty=!!p.kindDirty; // the adult switched the kind on this device: push it once, then the server's kind wins
-        const snap=mergeMod.pickSynced(stateOf(p.id));
+        const snap=syncedOf(stateOf(p.id));
         const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:snap,kindChanged:dirty});
         if(!PROFILES.list.includes(p))continue; // removed from this device while the request was in flight (purged, deleted): nothing is written back
         if(r.revoked){ // removed from the class or deleted by someone else

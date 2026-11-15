@@ -486,7 +486,7 @@ try {
   const familySync = (u, real) => {
     const store = new Map([['leemos-auth', JSON.stringify({ access_token: u.token, refresh_token: 'unused', expires_at: Date.now() + 3600e3, user: { id: u.id, email: u.email } })]]);
     const storage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
-    return createSync({ url, anonKey: anon, storage, knownKeys: async () => (k) => real.includes(k) });
+    return createSync({ url, anonKey: anon, storage, knownKeys: async () => (k) => real.includes(k), knownWorlds: (id) => ['bosque', 'playa', 'mar'].includes(id) });
   };
   await t('a data write with more than 1000 stat keys in one language, or a stat key over 31 characters, is refused (23514); 1000 land, other columns of that row still update, and the family\'s sync.js prunes the planted keys after leave_class', async () => {
     const PK = await mk('pstats'), kid = await mkKid(PK, { data: { level: 1, name: 'Elsa', modAt: Date.now(), resets: { es: 0, ca: 0 }, stats: { 's:ma': { ok: 2, fail: 0 } } } });
@@ -503,6 +503,20 @@ try {
     const keys = Object.keys((await one(await rest(PK, `child_profiles?id=eq.${kid}&select=data`))).data.stats).sort();
     return [over.join() === '400,23514' && long.join() === '400,23514' && at.join() === '200,rows' && ren.status === 200 && okr(left) && r.pruned === true && keys.join() === 'ca:s:ma,s:ma',
       JSON.stringify({ over, long, at, ren: ren.status, left: left.body, pruned: r.pruned, keys: keys.length })];
+  });
+  await t('a data write with more than 32 world ids in stk is refused (23514); 32 land, and after leave_class the family\'s sync.js prunes stk to the app\'s worlds: a sticker of a new world lands', async () => {
+    const PK = await mk('pstk'), kid = await mkKid(PK, { data: { level: 1, name: 'Elsa', modAt: Date.now(), resets: { es: 0, ca: 0 }, stk: { bosque: 3, playa: 2 }, stickers: 5 } });
+    await share(PK, kid, T1, C1);
+    const base = (await one(await rest(PK, `child_profiles?id=eq.${kid}&select=data`))).data;
+    const ids = (n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [String.fromCharCode(97 + Math.floor(i / 26)) + String.fromCharCode(97 + (i % 26)), 6]));
+    const patch = async (data) => { const w = await rest(T1, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ data }) }); const b = await json(w); return [w.status, Array.isArray(b) ? 'rows' : b && b.code]; };
+    const over = await patch({ ...base, stk: ids(33) });
+    const at = await patch({ ...base, stk: { ...ids(30), bosque: 3, playa: 2 } });
+    const left = await rpc(PK, 'leave_class', { p_child: kid });
+    const r = await familySync(PK, []).syncProfile({ rid: kid, name: 'Elsa', kind: 'reader', data: mergeData({ ...base, stk: { bosque: 3, playa: 2, mar: 1 } }, {}) });
+    const stk = (await one(await rest(PK, `child_profiles?id=eq.${kid}&select=data`))).data.stk;
+    return [over.join() === '400,23514' && at.join() === '200,rows' && okr(left) && r.pruned === true && JSON.stringify(Object.keys(stk).sort()) === '["bosque","mar","playa"]' && stk.mar === 1,
+      JSON.stringify({ over, at, left: left.body, pruned: r.pruned, stk })];
   });
   if (!DB) console.log('SKIP  a row filled with planted stat keys before the bound (seeded past the trigger) is cleaned by the family\'s next push (needs the local db container: npm run test:rls)');
   else await t('a row filled with 5000 planted stat keys before the bound (seeded past the trigger, under the 200 KB check) is cleaned by the family\'s next push', async () => {

@@ -127,6 +127,12 @@ check('teachers: the class limit runs before insert or update of class_id', /bef
   check('teachers: a data write carries at most 1000 stat keys per language of at most 31 characters (23514 otherwise, only when data changes); the app\'s own keys fit with room',
     /new\.data is distinct from old\.data/.test(b) && /jsonb_object_keys\(d->'stats'\)/.test(b) && /left\(k, 3\) = 'ca:'/.test(b) && /n_ca > 1000 or n_es > 1000 or longest > 31/.test(b) && /errcode = '23514'/.test(b)
     && real.every((r) => r.n <= 600 && r.longest <= 24), JSON.stringify(real));
+  // fix iteration (F001): data.stk carries at most 32 world ids (merge.js stkOf reads 32 per side), otherwise 23514; the app's worlds fit
+  const worlds = JSON.parse(readFileSync(new URL('../src/data/worlds.json', import.meta.url), 'utf8'));
+  const merge = readFileSync(new URL('../src/merge.js', import.meta.url), 'utf8');
+  check('teachers: a data write carries at most 32 world ids in stk (23514 otherwise, only when data changes), the same 32 merge.js reads; the app\'s worlds fit',
+    /\(tg_op = 'INSERT' or new\.data is distinct from old\.data\) and jsonb_typeof\(d\) = 'object' and jsonb_typeof\(d->'stk'\) = 'object'\s+and \(select count\(\*\) from jsonb_object_keys\(d->'stk'\)\) > 32 then\s+raise exception 'child_profiles_stk: at most 32 world ids' using errcode = '23514';/.test(b)
+    && /Object\.keys\(d\.stk\)\.slice\(0, 32\)/.test(merge) && worlds.length <= 32, `${worlds.length} worlds`);
 }
 check('teachers: data stays capped below 200000 bytes (constraint untouched)', tc.length > 0 && !/octet_length/.test(tc) && !/drop constraint child_profiles_data_check/.test(tc));
 
