@@ -936,10 +936,12 @@ async function signOutSteps(){
     return;
   }
   await sync.signOut();
-  ROLE='parent';syncState='idle';acctMsg('');
+  ROLE='parent';syncState='idle';acctMsg('');clearAcctForm();
   await purgeClassProfiles();
   renderAcct();
 }
+// The sign-in form keeps nothing of the adult who used it (shared tablet): email, code and consent go once they are signed in or out.
+function clearAcctForm(){$('acctEmail').value='';$('acctCode').value='';$('acctConsent').checked=false;$('acctCodeRow').hidden=true}
 function acctMsg(key,vars){$('acctMsg').textContent=key?t(key,vars):''}
 // ---------- privacy: export and deletion (spec section 8). The export is built in the browser: nothing is sent anywhere. ----------
 function downloadJSON(name,obj){
@@ -986,7 +988,7 @@ async function deleteSteps(){
   [AUTH_USER_KEY,SYNC_AT_KEY,'leemos-auth'].forEach(k=>{try{localStorage.removeItem(k)}catch(e){}});
   PROFILES.list.forEach(p=>{if(p.rid&&p.via!=='class')p.noSync=true;delete p.rid;delete p.hidden});
   saveProfiles();
-  ROLE='parent';syncState='idle';
+  ROLE='parent';syncState='idle';clearAcctForm();
   await purgeClassProfiles();
   renderAcct();acctMsg('acctDeleted');
 }
@@ -1015,7 +1017,7 @@ $('acctVerify').onclick=async()=>{
   const sy=await syncInit();if(!sy)return;
   try{
     const s=await sy.verifyCode($('acctEmail').value.trim(),$('acctCode').value);
-    acctMsg('');$('acctCode').value='';$('acctCodeRow').hidden=true;
+    acctMsg('');clearAcctForm(); // signed in: a session that later dies outside a round shows an empty form too
     await afterSignIn(s.user);
   }catch(e){acctMsg(e&&e.kind==='code'?'acctBadCode':e&&e.kind==='offline'?'acctNetwork':'acctError')}
 };

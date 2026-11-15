@@ -318,6 +318,7 @@ export function createTeach(ctx) {
   function render() {
     if (!sync.userId()) { // signed out: nothing of an account stays on the screen (or in memory)
       rows = null; classes = []; me = null; msg = null; hasParent.clear();
+      draft.redeem = ''; draft.classCode = ''; draft.pick = ''; draft.names = {}; // a typed, unsent code is a grant: never for the next adult
       Object.keys(codes).forEach((k) => delete codes[k]);
       body.textContent = ''; msgEl.textContent = ''; root.hidden = true;
       return;

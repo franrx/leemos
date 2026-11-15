@@ -675,6 +675,7 @@ check('account: the first sign-in uploads the local profile', supa.rows.size ===
 a.$('acctOutBtn').click();
 await sleep(20);
 check('account: sign out returns to the sign-in view and keeps local progress and the link', !a.$('acctOut').hidden && a.$('acctIn').hidden && !!JSON.parse(a.w.localStorage.getItem('leemos-profiles')).list[0].rid && a.w.localStorage.getItem('leemos-auth') === null);
+check('account: after sign-out the form keeps nothing of the previous adult (empty email and code, consent unticked, code row hidden)', a.$('acctEmail').value === '' && a.$('acctCode').value === '' && a.$('acctConsent').checked === false && a.$('acctCodeRow').hidden, JSON.stringify({ e: a.$('acctEmail').value, c: a.$('acctConsent').checked }));
 
 const swText = readFileSync(join(ROOT, 'sw.js'), 'utf8');
 check('account: the service worker pre-caches the sync modules and config', ['src/merge.js', 'src/sync.js', 'src/data/sync.config.json'].every((f) => swText.includes(`'${f}'`)));
@@ -3180,6 +3181,23 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     check('teach: redeeming a wrong code shows one generic message (wrong, own, used and expired alike)', [m1, m2, m3, m4].every((m) => m === ies.teachBadCode) && w.s.rows.get(RID_A).class_id === null && !(w.s.links.get(RID_X) || new Set()).size, JSON.stringify({ m1, m2, m3, m4 }));
   }
 
+  // fix (F001): what an adult typed in the panel and did not send is gone after sign-out, for the next account on the same page
+  {
+    const w = await world({ who: 'teacher' });
+    const app = await bootWorld(w);
+    type(app, 'teachCode', 'ABCD2345'); type(app, 'teachClassCode', 'EFGH6789'); type(app, 'teachNewName-' + w.cls, 'Nuria');
+    app.$('acctOutBtn').click();
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null && !app.$('acctOut').hidden, 3000); await sleep(40);
+    const gone = app.$('teach').hidden && !app.$('teachCode');
+    app.$('acctEmail').value = T_EMAIL; app.$('acctConsent').checked = true; app.$('acctSend').click();
+    await until(() => !app.$('acctCodeRow').hidden, 3000);
+    app.$('acctCode').value = '123456'; app.$('acctVerify').click();
+    await until(() => !app.$('teach').hidden && !!app.$('teachClassCode') && !!app.$('teachNewName-' + w.cls), 4000); await sleep(40);
+    const vals = { code: app.$('teachCode').value, cls: app.$('teachClassCode').value, name: app.$('teachNewName-' + w.cls).value };
+    check('teach: sign-out forgets the typed redeem code, class code and new-child name (the next sign-in shows empty fields)',
+      gone && app.navs.length === 0 && vals.code === '' && vals.cls === '' && vals.name === '' && app.errors.length === 0, JSON.stringify({ gone, navs: app.navs.length, vals, e: app.errors }));
+  }
+
   {
     const w = await world({ who: 'teacher' });
     const app = await bootWorld(w);
@@ -3439,8 +3457,10 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     app.$('acctDelete').click(); await ask(true); await ask(false); await sleep(60);
     const afterNo2 = w.s.log.filter((l) => /delete_my_account/.test(l)).length;
     const stillIn = ls.getItem('leemos-auth') !== null;
+    app.$('acctEmail').value = 'mama@example.com'; app.$('acctConsent').checked = true; app.$('acctCode').value = '123456'; // left in the (hidden) sign-in form
     app.$('acctDelete').click(); await ask(true); await ask(true);
     await until(() => ls.getItem('leemos-auth') === null, 3000); await sleep(100);
+    check('delete account: the sign-in form shown afterwards is empty and the consent unticked', app.$('acctEmail').value === '' && app.$('acctCode').value === '' && app.$('acctConsent').checked === false, JSON.stringify({ e: app.$('acctEmail').value, c: app.$('acctConsent').checked }));
     const list = profList(app);
     const keysAfter = Object.keys(ls).filter((k) => !/^leemos-(auth|auth-user|sync-at)$/.test(k)).sort();
     check('delete account: asks twice, clears the auth keys and keeps local progress',
