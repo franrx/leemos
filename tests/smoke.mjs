@@ -878,6 +878,23 @@ a = await boot({ storage: { 'leemos-v1': { name: 'Elsa', total: 1, modAt: future
 a.$('joinBtn').click(); a.$('okBtn').click();
 check('review I4: modAt is always newer than the stamp already stored', JSON.parse(a.w.localStorage.getItem('leemos-v1')).modAt > future);
 
+// 26g: two "Borrar progreso" before a push: the server keeps old + 1 (trigger child_profiles_data). The device must settle on the
+// server's counter in the same round, or its next round would wipe what another device played at that counter.
+supa = createFakeSupabase();
+sa = await signedAuth(supa);
+supa.rows.set(RID_A, { id: RID_A, owner: sa.uid, name: 'Elsa', kind: 'reader', data: dat({ stats: { 's:pa': { ok: 3, fail: 0 } }, total: 3, name: 'Elsa' }), version: 1 });
+supa.links.set(RID_A, new Set([sa.uid]));
+a = await boot({ supa, syncConfig: CFG, storage: { 'leemos-auth': sa.auth, 'leemos-auth-user': sa.uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', total: 5, stats: { 's:ma': { ok: 1, fail: 0 } }, resets: { es: 2, ca: 0 }, modAt: 10 } } });
+await until(() => !!supa.rows.get(RID_A).data.stats['s:ma'], 3000);
+await sleep(60);
+const rsLocal = () => JSON.parse(a.w.localStorage.getItem('leemos-v1')).resets.es;
+check('resets jump: the server keeps old + 1 and the device settles on it in the same round', supa.rows.get(RID_A).data.resets.es === 1 && rsLocal() === 1, `server ${supa.rows.get(RID_A).data.resets.es} device ${rsLocal()}`);
+{ const r = supa.rows.get(RID_A); r.data = { ...r.data, stats: { ...r.data.stats, 's:pe': { ok: 4, fail: 0 } } }; r.version++; } // the school tablet pulled resets 1 and played at it
+a.w.dispatchEvent(new a.w.Event('focus'));
+await until(() => !!(JSON.parse(a.w.localStorage.getItem('leemos-v1')).stats['s:pe']), 3000);
+await sleep(80);
+check("resets jump: the device's next round keeps what the other device played (nothing wiped on either side)", !!supa.rows.get(RID_A).data.stats['s:pe'] && !!JSON.parse(a.w.localStorage.getItem('leemos-v1')).stats['s:pe'] && !!supa.rows.get(RID_A).data.stats['s:ma'], JSON.stringify(supa.rows.get(RID_A).data.stats));
+
 // ---------- 27. review minors: init once, safe linking, level clamp, texts, blocked storage ----------
 // m1: opening the panel twice at once loads the sync modules once
 supa = createFakeSupabase();

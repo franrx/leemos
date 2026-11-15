@@ -7,6 +7,10 @@ export class SyncError extends Error {
 }
 
 const SESSION_KEY = 'leemos-auth';
+// The server keeps at most old + 1 resets per language and write, and 1000 on insert (trigger child_profiles_data). Push exactly what it
+// will store, so the data returned is the server's and the device settles on it in the same round: a higher local counter would later
+// wipe what another device played at the stored one. `old`: the row's cleaned data, or null for an insert.
+const capResets = (d, old) => { for (const L of ['es', 'ca']) d.resets[L] = Math.min(d.resets[L], old ? old.resets[L] + 1 : 1000); return d; };
 
 export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, storage = globalThis.localStorage, now = Date.now }) {
   // the project root: a URL copied with an API path (…/rest/v1/, …/auth/v1) or a trailing slash still works
@@ -136,17 +140,18 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
     for (let attempt = 0; attempt < 5; attempt++) {
       let row = await getProfile(rid);
       if (!row) {
-        const c = await api('child_profiles', { method: 'POST', body: JSON.stringify({ id: rid, name, kind, data: mergeData(data, {}) }) });
+        const born = capResets(mergeData(data, {}), null);
+        const c = await api('child_profiles', { method: 'POST', body: JSON.stringify({ id: rid, name, kind, data: born }) });
         if (c.status === 403) return { revoked: true }; // the insert policy refuses (e.g. a deleted child's id)
         if (c.status === 409) { // exists but not visible to us (revoked), or another device created it first
           row = await getProfile(rid);
           if (!row) return { revoked: true };
         } else {
           if (!c.ok) throw new SyncError('http', 'could not create the profile', c.status);
-          return { data: mergeData(data, {}), version: 1, kind };
+          return { data: born, version: 1, kind };
         }
       }
-      const merged = mergeData(data, row.data);
+      const merged = capResets(mergeData(data, row.data), mergeData(row.data, {}));
       const push = kindChanged && kind !== row.kind;
       const nextKind = push ? kind : row.kind;
       if (sameData(merged, mergeData(row.data, {})) && row.name === name && !push) return { data: merged, version: row.version, kind: nextKind };

@@ -721,9 +721,12 @@ function applyMerged(m,adoptSession){
 }
 // Returns the merged data. The child may have answered while the request was in flight, so the server's data is merged
 // into the CURRENT local state (never copied over it): a sync can only add progress, never take it away.
-function storeState(id,data){
+// sent: the snapshot that was pushed. The server stores at most old + 1 resets per language (sync.js capResets): what this device sent
+// beyond that is dropped here too (those resets cleared the same stats, already on the row); one made while the request was in flight stays.
+function storeState(id,data,sent){
   const active=id===PROFILE.id,cur=active?S:stateOf(id);
   const mine=mergeMod.pickSynced(cur);
+  if(sent)for(const L of ['es','ca']){const drop=sent.resets[L]-data.resets[L];if(drop>0)mine.resets[L]=Math.max(data.resets[L],mine.resets[L]-drop)}
   const merged=mergeMod.mergeData(mine,data);
   if(active){
     const now=Date.now();
@@ -770,7 +773,8 @@ async function syncAll({final=false}={}){
       if(!p.rid||p.hidden)continue;
       try{
         const dirty=!!p.kindDirty; // the adult switched the kind on this device: push it once, then the server's kind wins
-        const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:mergeMod.pickSynced(stateOf(p.id)),kindChanged:dirty});
+        const snap=mergeMod.pickSynced(stateOf(p.id));
+        const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:snap,kindChanged:dirty});
         if(!PROFILES.list.includes(p))continue; // removed from this device while the request was in flight (purged, deleted): nothing is written back
         if(r.revoked){ // removed from the class or deleted by someone else
           if(p.via==='class'){const n=p.name;forgetRid(p.rid,{later:true});acctMsg('acctRevokedClass',{n});continue} // another family's child held for a class: nothing of it can be sent, it leaves this device
@@ -780,7 +784,7 @@ async function syncAll({final=false}={}){
         if(dirty&&p.kind===r.kind){delete p.kindDirty;ch=true} // pushed (unless the adult switched it again meanwhile)
         if(!p.kindDirty&&(r.kind==='pre'||r.kind==='reader')&&r.kind!==p.kind){p.kind=r.kind;ch=true} // the server's kind; the screen follows on the next load
         if(ch)saveProfiles();
-        const merged=storeState(p.id,r.data);
+        const merged=storeState(p.id,r.data,snap);
         if(!mergeMod.sameData(merged,r.data))again=true; // the child progressed meanwhile: push that too
       }catch(e){const k=e&&e.kind||'error';if(!worst||rank(k)>rank(worst))worst=k} // one profile failing must not stop the others
     }

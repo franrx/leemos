@@ -161,6 +161,18 @@ const signedIn = async () => { const x = mk(); await x.sync.requestCode('m@e.c')
   const row = srv.rows.get(RID).data;
   check('data: after the clamp the family wins again (level, language, "Borrar progreso" drops the planted stats)', r.data.level === 1 && row.level === 1 && row.prefs.lang.v === 'ca' && row.resets.es === 5 && !row.stats['s:pa'], JSON.stringify(row));
 }
+{
+  // two "Borrar progreso" before a push: the trigger stores old + 1. The data returned is what the server holds, so the device settles
+  // on it (a higher local counter would later wipe what another device played at the stored one)
+  const { srv, sync } = await signedIn();
+  await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+  const r = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ resets: { es: 2, ca: 0 }, stats: {}, total: 6 }) });
+  const row = srv.rows.get(RID).data;
+  check('resets: a jump of 2 is stored as old + 1 and the result says what the server holds', row.resets.es === 1 && r.data.resets.es === 1 && !row.stats['s:ma'] && !r.data.stats['s:ma'], JSON.stringify({ row: row.resets, r: r.data.resets }));
+  const fresh = '22222222-2222-4222-8222-222222222222';
+  const c = await sync.syncProfile({ rid: fresh, name: 'Ana', kind: 'reader', data: data({ resets: { es: 1500, ca: 0 } }) });
+  check('resets: a new row is born with at most 1000 (insert clamp) and the result says so', srv.rows.get(fresh).data.resets.es === 1000 && c.data.resets.es === 1000, JSON.stringify(c.data.resets));
+}
 
 // ---------- a project URL pasted with an API path still works ----------
 for (const pasted of ['https://x.supabase.co/rest/v1/', 'https://x.supabase.co/auth/v1', 'https://x.supabase.co/', 'https://x.supabase.co']) {
