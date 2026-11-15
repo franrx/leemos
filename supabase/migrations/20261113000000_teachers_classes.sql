@@ -111,6 +111,17 @@ create schema if not exists private;
 revoke all on schema private from public;
 grant usage on schema private to authenticated;
 
+-- The caller, only while their account exists. A deleted account's access token stays valid until it expires (PostgREST checks only
+-- the signature and expiry), and auth.uid() keeps returning its id: every RPC and the insert policy take the caller from here, so that
+-- token acts as no one (forbidden) instead of reaching a foreign key error (which rolled back the redeem rate limit and told a valid
+-- code from a wrong one). accounts cascades from auth.users, so a row here means the user exists.
+create function private.caller() returns uuid
+language sql stable security definer set search_path = '' as $$
+  select a.user_id from public.accounts a where a.user_id = (select auth.uid());
+$$;
+revoke execute on function private.caller() from public, anon;
+grant execute on function private.caller() to authenticated;
+
 create function private.is_admin() returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (select 1 from public.accounts a where a.user_id = (select auth.uid()) and a.role = 'admin');
@@ -222,7 +233,7 @@ create policy "linked or class teacher updates" on public.child_profiles for upd
   using (private.has_link(id) or private.is_class_teacher(class_id) or (owner = (select auth.uid()) and class_id is null and not private.has_any_link(id)))
   with check (private.has_link(id) or private.is_class_teacher(class_id) or (owner = (select auth.uid()) and class_id is null and not private.has_any_link(id)));
 create policy "creator inserts" on public.child_profiles for insert to authenticated
-  with check (owner = (select auth.uid()) and (class_id is null or private.is_class_teacher(class_id)) and not private.is_tombstoned(id));
+  with check (owner = (select private.caller()) and (class_id is null or private.is_class_teacher(class_id)) and not private.is_tombstoned(id));
 -- No delete policy: a direct delete is revoked; deletion goes through delete_child, which writes the tombstone.
 
 -- The previous migration's grants stay live unless revoked: start from zero, then grant only what is allowed (no delete).
@@ -494,7 +505,7 @@ language plpgsql volatile security definer set search_path = '' as $$
 declare
   v_res jsonb;
 begin
-  if auth.uid() is null then return jsonb_build_object('error', 'forbidden'); end if;
+  if private.caller() is null then return jsonb_build_object('error', 'forbidden'); end if;
   perform private.claim_role();
   select jsonb_build_object('role', a.role, 'teacher_ack_at', a.teacher_ack_at) into v_res from public.accounts a where a.user_id = auth.uid();
   return coalesce(v_res, jsonb_build_object('role', 'parent', 'teacher_ack_at', null));
@@ -521,7 +532,7 @@ grant execute on function public.ack_teacher() to authenticated;
 create function public.create_invite(p_child uuid, p_kind text) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
-  v_uid uuid := auth.uid();
+  v_uid uuid := private.caller();
   v_alpha constant text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   v_class uuid;
   v_bytes bytea;
@@ -566,13 +577,17 @@ grant execute on function public.create_invite(uuid, text) to authenticated;
 create function public.redeem_invite(p_code text, p_class uuid default null) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
-  v_uid uuid := auth.uid();
+  v_uid uuid := private.caller();
   v_inv public.invites;
   v_child public.child_profiles;
   v_used uuid;
   v_err text;
 begin
   if v_uid is null then return jsonb_build_object('error', 'forbidden'); end if;
+  -- Hold the caller's user row: a deletion running now waits for this redeem (so the failure record below never meets a vanished user),
+  -- and one that already committed answers the same forbidden as a deleted account, before any code is looked at.
+  perform 1 from auth.users u where u.id = v_uid for key share;
+  if not found then return jsonb_build_object('error', 'forbidden'); end if;
   perform pg_advisory_xact_lock(hashtext('redeem:' || v_uid::text));
   delete from public.invite_attempts t where t.user_id = v_uid and t.at < now() - interval '1 hour';
   if (select count(*) from public.invite_attempts t where t.user_id = v_uid and t.at > now() - interval '1 hour') >= 10 then
@@ -648,7 +663,7 @@ language plpgsql security definer set search_path = '' as $$
 declare
   v_class uuid;
 begin
-  if auth.uid() is null then return jsonb_build_object('error', 'forbidden'); end if;
+  if private.caller() is null then return jsonb_build_object('error', 'forbidden'); end if;
   select c.class_id into v_class from public.child_profiles c where c.id = p_child for update;
   if not found or not (private.has_link(p_child) or private.is_class_teacher(v_class)) then return jsonb_build_object('error', 'not_found'); end if;
   if v_class is null then return jsonb_build_object('ok', true); end if;
@@ -667,7 +682,7 @@ declare
   v_class uuid;
   v_deleted boolean := false;
 begin
-  if auth.uid() is null then return jsonb_build_object('error', 'forbidden'); end if;
+  if private.caller() is null then return jsonb_build_object('error', 'forbidden'); end if;
   select c.class_id into v_class from public.child_profiles c where c.id = p_child for update;
   if not found or not private.has_link(p_child) then return jsonb_build_object('error', 'not_found'); end if;
   delete from public.child_links l where l.child_id = p_child and l.user_id = auth.uid();
@@ -689,7 +704,7 @@ language plpgsql security definer set search_path = '' as $$
 declare
   v_class uuid;
 begin
-  if auth.uid() is null then return jsonb_build_object('error', 'forbidden'); end if;
+  if private.caller() is null then return jsonb_build_object('error', 'forbidden'); end if;
   select c.class_id into v_class from public.child_profiles c where c.id = p_child for update;
   if not found or not (private.has_link(p_child) or private.is_class_teacher(v_class)) then return jsonb_build_object('error', 'not_found'); end if;
   if private.has_any_link(p_child) then
@@ -708,7 +723,7 @@ grant execute on function public.delete_child(uuid) to authenticated;
 create function public.export_my_data() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
-  v_uid uuid := auth.uid();
+  v_uid uuid := private.caller();
 begin
   if v_uid is null then return jsonb_build_object('error', 'forbidden'); end if;
   return jsonb_build_object(
@@ -730,7 +745,7 @@ grant execute on function public.export_my_data() to authenticated;
 create function public.delete_my_account() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
-  v_uid uuid := auth.uid();
+  v_uid uuid := private.caller();
 begin
   if v_uid is null then return jsonb_build_object('error', 'forbidden'); end if;
   perform pg_advisory_xact_lock(hashtext('admins'));

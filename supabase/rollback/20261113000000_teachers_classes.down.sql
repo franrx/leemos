@@ -67,6 +67,7 @@ drop policy "admin, teacher or family reads" on public.classes; -- reads child_p
 alter table public.child_profiles drop column class_id;
 drop table public.invites, public.invite_attempts, public.child_links, public.class_teachers, public.role_invites,
   public.admin_log, public.deleted_children, public.classes, public.accounts;
+drop function private.caller();
 drop function private.is_admin();
 drop function private.current_role();
 drop function private.is_class_teacher(uuid);

@@ -51,7 +51,7 @@ for (const t of READABLE) { const g = grantsOn(t); check(`teachers: ${t} grants 
 check('teachers: no table or function is granted to anon', tc.length > 0 && !/grant [^;]* to [^;]*\banon\b/i.test(tc));
 check('teachers: no policy is granted to anon or public', tc.length > 0 && !/create policy [^;]* to (anon|public)\b/i.test(tc));
 
-const HELPERS = ['is_admin', 'current_role', 'is_class_teacher', 'has_link', 'has_any_link', 'is_tombstoned'];
+const HELPERS = ['caller', 'is_admin', 'current_role', 'is_class_teacher', 'has_link', 'has_any_link', 'is_tombstoned'];
 for (const h of HELPERS) { const f = fn('private.' + h); check(`teachers: helper private.${h} exists, security definer and stable`, definer(f) && /\bstable\b/i.test(f.header)); }
 check('teachers: helpers take the agreed arguments (p_class, p_child)', /function private\.is_class_teacher\(p_class uuid\)/.test(tc) && ['has_link', 'has_any_link', 'is_tombstoned'].every((h) => new RegExp(`function private\\.${h}\\(p_child uuid\\)`).test(tc)) && /function private\.is_admin\(\)/.test(tc) && /function private\.current_role\(\)/.test(tc));
 check('teachers: the private schema exists and only authenticated gets usage', /create schema if not exists private;/.test(tc) && /grant usage on schema private to authenticated;/.test(tc));
@@ -78,7 +78,7 @@ const sel = policy('child_profiles', 'select'), upd = policy('child_profiles', '
 const access = /private\.has_link\(id\) or private\.is_class_teacher\(class_id\) or \(owner = \(select auth\.uid\(\)\) and class_id is null and not private\.has_any_link\(id\)\)/;
 check('teachers: the select policy is link, class teacher, or just inserted through private.has_any_link', access.test(sel), access.test(sel) ? '' : sel.trim());
 check('teachers: the update policy uses the same rule in using and with check', (upd.match(new RegExp(access.source, 'g')) || []).length === 2, (upd.match(new RegExp(access.source, 'g')) || []).length === 2 ? '' : upd.trim());
-check('teachers: the insert policy is own owner, class-less or own class, and not tombstoned', /owner = \(select auth\.uid\(\)\)/.test(ins) && /class_id is null or private\.is_class_teacher\(class_id\)/.test(ins) && /not private\.is_tombstoned\(id\)/.test(ins));
+check('teachers: the insert policy is own owner (an existing account: private.caller()), class-less or own class, and not tombstoned', /owner = \(select private\.caller\(\)\)/.test(ins) && /class_id is null or private\.is_class_teacher\(class_id\)/.test(ins) && /not private\.is_tombstoned\(id\)/.test(ins));
 check('teachers: child_profiles has no delete policy', tc.length > 0 && !/create policy "[^"]+" on public\.child_profiles for delete/.test(tc));
 const rv = tc.indexOf('revoke all on public.child_profiles from authenticated;'), gu = tc.indexOf('grant update (name, data, version, kind) on public.child_profiles to authenticated;');
 check('teachers: child_profiles grants start from zero (revoke all) before select, insert and the column update grant (name, data, version, kind)', rv >= 0 && gu > rv && /grant select, insert on public\.child_profiles to authenticated;/.test(tc));
@@ -137,6 +137,17 @@ check('rpc: whoami is volatile and claims through private.claim_role()', /\bvola
 check('rpc: claim_role matches the verified, lower-cased email to a pending invitation and deletes it', /email_confirmed_at is not null/.test(bodyOf('private.claim_role')) && /lower\(/.test(bodyOf('private.claim_role')) && /delete from public\.role_invites/.test(bodyOf('private.claim_role')) && /expires_at > now\(\)/.test(bodyOf('private.claim_role')) && /insert into public\.admin_log/.test(bodyOf('private.claim_role')));
 check('rpc: claim_role is not granted to anyone (only whoami calls it)', !/grant execute on function private\.claim_role/.test(tc));
 const admins = Object.keys(RPCS).filter((n) => n.startsWith('admin_'));
+{ // a deleted account's token stays valid until it expires: every non-admin RPC takes its caller from private.caller() (null once the
+  // account is gone) and answers forbidden; the admin ones go through private.is_admin(), which reads accounts too
+  const cl = fn('private.caller'), cb = (cl && cl.body) || '';
+  check('teachers: private.caller() is auth.uid() only while public.accounts still has that user', /from public\.accounts a where a\.user_id = \(select auth\.uid\(\)\)/.test(cb) && /returns uuid/.test(cl.header));
+  const callers = ['whoami', 'create_invite', 'redeem_invite', 'leave_class', 'unlink_me', 'delete_child', 'export_my_data', 'delete_my_account'];
+  const raw = callers.filter((n) => !/private\.caller\(\)/.test(bodyOf('public.' + n)) || /auth\.uid\(\) is null|v_uid uuid := auth\.uid\(\)/.test(bodyOf('public.' + n)));
+  check('rpc: every non-admin RPC checks its caller with private.caller() (a deleted account is forbidden), never a bare auth.uid()', !raw.length, raw.join());
+  const rb = bodyOf('public.redeem_invite'), lk = rb.search(/from auth\.users u where u\.id = v_uid for key share;\s*if not found then return jsonb_build_object\('error', 'forbidden'\)/);
+  check('rollback: private.caller() is dropped', /drop function private\.caller\(\);/.test(readFileSync('supabase/rollback/20261113000000_teachers_classes.down.sql', 'utf8')));
+  check('rpc: redeem_invite holds the caller\'s auth.users row (for key share) before the rate limit, so a deletion cannot land mid-redeem', lk > 0 && lk < rb.indexOf("'rate'"));
+}
 check('rpc: every admin_* function first checks private.is_admin() and answers {error:forbidden}', admins.every((n) => /^\s*(declare[\s\S]*?)?begin\s+if not private\.is_admin\(\) then return jsonb_build_object\('error', 'forbidden'\); end if;/.test(bodyOf('public.' + n))), admins.filter((n) => !/^\s*(declare[\s\S]*?)?begin\s+if not private\.is_admin\(\) then return jsonb_build_object\('error', 'forbidden'\); end if;/.test(bodyOf('public.' + n))).join());
 const adminWrites = admins.filter((n) => !/^admin_list_/.test(n));
 check('rpc: every admin write inserts into admin_log', adminWrites.every((n) => /insert into public\.admin_log/.test(bodyOf('public.' + n))), adminWrites.filter((n) => !/insert into public\.admin_log/.test(bodyOf('public.' + n))).join());

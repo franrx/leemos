@@ -470,7 +470,7 @@ try {
     return [before && after && !!row && row.owner === null && row.name === 'Mine', JSON.stringify(row)];
   });
   await t('the helper functions are not exposed at /rest/v1/rpc (OpenAPI lists none; calls with their real signatures answer 404/403)', async () => {
-    const helpers = { is_admin: {}, current_role: {}, is_class_teacher: { p_class: C1 }, has_link: { p_child: K1 }, has_any_link: { p_child: K1 }, is_tombstoned: { p_child: K1 } };
+    const helpers = { caller: {}, is_admin: {}, current_role: {}, is_class_teacher: { p_class: C1 }, has_link: { p_child: K1 }, has_any_link: { p_child: K1 }, is_tombstoned: { p_child: K1 } };
     const doc = await json(await fetch(`${url}/rest/v1/`, { headers: { apikey: anon, Authorization: 'Bearer ' + T1.token } }));
     const paths = Object.keys((doc && doc.paths) || {});
     const listed = Object.keys(helpers).filter((n) => paths.includes('/rpc/' + n));
@@ -488,6 +488,35 @@ try {
     for (const [n, a] of calls) { const an = await rpc(null, n, a), au = await rpc(CT, n, a); if (!(an.status === 401 || an.status === 403) || au.status === 404) bad.push(`${n}:${an.status}/${au.status}`); }
     return [!bad.length, bad.join(' ')];
   });
+  // A deleted account's access token stays valid until it expires (PostgREST checks only the signature and expiry). It must act as no
+  // one: the same uniform refusal for every RPC, no raised foreign key error (that rolled back the failure record, so the rate limit
+  // never came, and told a valid code from a wrong one), nothing written, and a class teacher's token reads no class child.
+  for (const [n, how, del] of [[1, 'delete_my_account', (u) => rpc(u, 'delete_my_account')], [2, 'the Auth admin API', (u) => fetch(`${url}/auth/v1/admin/users/${u.id}`, { method: 'DELETE', headers: j({ apikey: service, Authorization: 'Bearer ' + service }) })]]) {
+    await t(`a token of an account deleted through ${how} is refused uniformly by every RPC (no rate-limit bypass, no valid-code oracle)`, async () => {
+      const TZ = await mkRole('zt' + n, 'teacher', { ack: true }), CZ = await mkClass('rls ghost ' + stamp + ' ' + n), GH = await mk('ghost' + n); await teach(CZ, TZ);
+      const kid = await mkKid(TZ, { class_id: CZ }), valid = await code(TZ, kid, 'to_parent');
+      const d = await del(GH);
+      const wrong = []; for (let i = 0; i < 12; i++) wrong.push(await redeem(GH, 'ZZZZZZZ' + 'ABCDEFGHJKLM'[i]));
+      const hit = await redeem(GH, valid);
+      const attempts = (await json(await svc(`invite_attempts?user_id=eq.${GH.id}&select=id`))) || [];
+      const used = (await one(await svc(`invites?child_id=eq.${kid}&select=used_at`))) || {};
+      const x = uuid(), others = [['whoami', {}], ['ack_teacher', {}], ['create_invite', { p_child: kid, p_kind: 'to_parent' }], ['leave_class', { p_child: x }], ['unlink_me', { p_child: x }],
+        ['delete_child', { p_child: x }], ['export_my_data', {}], ['admin_list_accounts', {}], ['delete_my_account', {}]];
+      const bad = []; for (const [f, a] of others) { const r = await rpc(GH, f, a); if (r.status !== 200 || errOf(r) !== 'forbidden') bad.push(`${f}:${r.status}:${JSON.stringify(r.body)}`); }
+      const ins = await rest(GH, 'child_profiles', { method: 'POST', body: JSON.stringify({ id: uuid(), name: 'Ghost', kind: 'reader' }) });
+      const uniform = [...wrong, hit].every((r) => r.status === 200 && errOf(r) === 'forbidden');
+      const ok = d.status < 300 && uniform && !attempts.length && !used.used_at && !bad.length && ins.status >= 400 && ins.status !== 409 && (await kidRow(kid) || {}).class_id === CZ;
+      return [ok, JSON.stringify({ d: d.status, wrong: wrong.slice(0, 2).map((r) => [r.status, r.body && (r.body.error || r.body.message)]), hit: [hit.status, hit.body && (hit.body.error || hit.body.message)], attempts: attempts.length, bad, ins: ins.status })];
+    });
+    await t(`a class teacher deleted through ${how} no longer reads or writes the class children with the old token (class_teachers rows are gone)`, async () => {
+      const TZ = await mkRole('zg' + n, 'teacher', { ack: true }), CZ = await mkClass('rls ghost t ' + stamp + ' ' + n); await teach(CZ, TZ);
+      const kid = await mkKid(TZ, { class_id: CZ }), before = await seen(TZ, kid);
+      const d = await del(TZ);
+      const rows = (await json(await svc(`class_teachers?teacher_id=eq.${TZ.id}&select=class_id`))) || [];
+      const upd = (await json(await rest(TZ, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ name: 'Ghost' }) }))) || [];
+      return [before && d.status < 300 && !rows.length && !(await seen(TZ, kid)) && Array.isArray(upd) && !upd.length, `${before} ${d.status} ${rows.length}`];
+    });
+  }
 
   // Limits (fresh accounts, so the earlier fixtures do not count).
   await t('the 9th child without a class is refused', async () => {
