@@ -672,7 +672,7 @@ function syncInit(){
       const imp=window.__leemosImport||(p=>import(p));
       const [sm,mm]=await Promise.all([imp('./sync.js'),imp('./merge.js')]);
       mergeMod=mm;
-      sync=sm.createSync({url:cfg.url,anonKey:cfg.anonKey,fetch:window.__leemosSyncFetch||undefined,storage:localStorage}); // the page's own localStorage, also under the jsdom tests
+      sync=sm.createSync({url:cfg.url,anonKey:cfg.anonKey,fetch:window.__leemosSyncFetch||undefined,storage:localStorage,knownKeys:knownStatKeys}); // the page's own localStorage, also under the jsdom tests
       // Push when the page is hidden or closing; PULL what other devices did when it is shown again, focused, back online,
       // and once a minute while it stays visible (an open page never asks the server by itself otherwise).
       const wake=()=>{if(!document.hidden)syncAll()};
@@ -684,6 +684,28 @@ function syncInit(){
       return sync;
     }catch(err){syncP=null;return null} // a failed load can be retried later
   })());
+}
+// Every stat key this version can write, in both languages: syllables, words and letter sounds. Only the fallback for a write the server
+// refuses (sync.js knownKeys: planted item-shaped keys over the size or key bound) uses it, so an ordinary round never drops the keys of
+// a newer device. Without the letter sounds it cannot tell, and answers null (nothing is pruned).
+let knownP=null;
+function knownStatKeys(){
+  return knownP||(knownP=(async()=>{
+    const ks=new Set();
+    for(const l of ['es','ca']){
+      const p=l==='ca'?'ca:':'',snd=await loadJSON('src/data/sounds.'+l+'.json');
+      (LV[l]||[]).forEach(x=>{x.syl.forEach(y=>ks.add(p+'s:'+y));x.words.forEach(o=>ks.add(p+'w:'+o.w))});
+      snd.groups.forEach(g=>g.letters.forEach(x=>ks.add(p+'snd:'+x.l)));
+    }
+    return k=>ks.has(k);
+  })().catch(()=>{knownP=null;return null}));
+}
+// After a pruned push the device drops the same keys: kept here, they would be merged into the next push and refused again every round.
+function pruneLocalStats(id,known){
+  const active=id===PROFILE.id,cur=active?S:stateOf(id);
+  if(!cur.stats||typeof cur.stats!=='object')return;
+  for(const k of Object.keys(cur.stats))if(!known(k))delete cur.stats[k];
+  if(!active)try{localStorage.setItem(keyFor(id),JSON.stringify(cur))}catch(e){}
 }
 const stateOf=id=>{
   if(id===PROFILE.id)return S;
@@ -784,6 +806,7 @@ async function syncAll({final=false}={}){
         if(dirty&&p.kind===r.kind){delete p.kindDirty;ch=true} // pushed (unless the adult switched it again meanwhile)
         if(!p.kindDirty&&(r.kind==='pre'||r.kind==='reader')&&r.kind!==p.kind){p.kind=r.kind;ch=true} // the server's kind; the screen follows on the next load
         if(ch)saveProfiles();
+        if(r.pruned){const kn=await knownStatKeys();if(!PROFILES.list.includes(p))continue;if(kn)pruneLocalStats(p.id,kn)}
         const merged=storeState(p.id,r.data,snap);
         if(!mergeMod.sameData(merged,r.data))again=true; // the child progressed meanwhile: push that too
       }catch(e){const k=e&&e.kind||'error';if(!worst||rank(k)>rank(worst))worst=k} // one profile failing must not stop the others
@@ -846,8 +869,9 @@ function loadTeach(){
 }
 function showTeach(){if(sync&&$('parents').open&&sync.userId())loadTeach().then(x=>x&&x.refresh())}
 // Percentage of mastered items (syllables and words of every level) in the language on screen, for a child's server data.
+// That data comes from other accounts: read it through mergeData (numbers only, like every other consumer), never raw.
 function pctOfData(data){
-  const st=(data&&data.stats)||{};let n=0,m=0;
+  const st=mergeMod?mergeMod.mergeData(data,{}).stats:{};let n=0,m=0;
   LEVELS.forEach((_,i)=>[...itemsFor(i,'syl'),...itemsFor(i,'word')].forEach(x=>{n++;if(isMastered(st[x.key]))m++}));
   return n?Math.round(100*m/n):0;
 }
@@ -1575,7 +1599,7 @@ function applyLang(){
   });
   $('langBtn').textContent=S.lang==='ca'?'CA':'ES';
   updateHello();renderLevels();renderPath();renderMode();renderHard();renderSession();renderAlbum();renderWorlds();updateRecInfo();
-  if(teach)teach.render();
+  if(teach)try{teach.render()}catch(e){} // a panel failure must not cut the language switch short
   if(hasTTS)pickVoice();
   if(phase==='read'||phase==='judge')$('hint').textContent=hintFor(phase);
 }

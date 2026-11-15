@@ -115,6 +115,18 @@ check('teachers: the class limit runs before insert or update of class_id', /bef
     && /between 0 and 9007199254740991/.test(b) && /o := greatest\(o, least\(\(d->'resets'->>lang\)::numeric, o \+ 1\)\)/.test(b)
     && /before insert or update on public\.child_profiles\s+for each row execute function private\.child_profiles_data\(\)/.test(tc)
     && /drop trigger child_profiles_data on public\.child_profiles;/.test(down) && /drop function private\.child_profiles_data\(\);/.test(down), `last level ${lastLevel}`);
+  // fix iteration (F001): a write that changes data may carry at most 1000 stat keys per language ("ca:" and the rest), each of at most
+  // 31 characters ("ca:snd:" + the 24 that src/merge.js keeps); otherwise 23514, which src/sync.js answers by pruning to the app's keys.
+  // The app's real keys must stay well inside it (and inside merge.js's 24 characters), or a family's own push would be refused.
+  const real = ['es', 'ca'].map((l) => {
+    const lv = JSON.parse(readFileSync(new URL(`../src/data/levels.${l}.json`, import.meta.url), 'utf8'));
+    const snd = JSON.parse(readFileSync(new URL(`../src/data/sounds.${l}.json`, import.meta.url), 'utf8'));
+    const ks = new Set(); lv.forEach((x) => { x.syl.forEach((s) => ks.add('s:' + s)); x.words.forEach((o) => ks.add('w:' + o.w)); }); snd.groups.forEach((g) => g.letters.forEach((x) => ks.add('snd:' + x.l)));
+    return { n: ks.size, longest: Math.max(...[...ks].map((k) => k.replace(/^(s|w|snd):/, '').length)) };
+  });
+  check('teachers: a data write carries at most 1000 stat keys per language of at most 31 characters (23514 otherwise, only when data changes); the app\'s own keys fit with room',
+    /new\.data is distinct from old\.data/.test(b) && /jsonb_object_keys\(d->'stats'\)/.test(b) && /left\(k, 3\) = 'ca:'/.test(b) && /n_ca > 1000 or n_es > 1000 or longest > 31/.test(b) && /errcode = '23514'/.test(b)
+    && real.every((r) => r.n <= 600 && r.longest <= 24), JSON.stringify(real));
 }
 check('teachers: data stays capped below 200000 bytes (constraint untouched)', tc.length > 0 && !/octet_length/.test(tc) && !/drop constraint child_profiles_data_check/.test(tc));
 

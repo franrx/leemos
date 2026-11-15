@@ -6,7 +6,7 @@ const CAP = 1e6; // counters stay below this, so a hostile 1e300 can never absor
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(CAP, Math.floor(v)) : 0);
 const MAX_AT = 8.64e15; // the largest date JavaScript can represent: a stamp beyond it is invalid
 const stamp = (v) => (Number.isSafeInteger(v) && v > 0 && v <= MAX_AT ? v : 0); // modAt and the other stamps are millisecond timestamps, not counters
-const ITEM_KEY = /^(ca:)?(s|w|snd):.{1,40}$/; // the stat keys the app really writes
+const ITEM_KEY = /^(ca:)?(s|w|snd):.{1,24}$/; // the stat keys the app really writes (the longest real name after the prefix has 12 characters)
 const unsafe = (k) => k === '__proto__' || k === 'constructor' || k === 'prototype';
 const langOf = (k) => (k.indexOf('ca:') === 0 ? 'ca' : 'es');
 const pair = (o) => ({ es: num(isObj(o) ? o.es : 0), ca: num(isObj(o) ? o.ca : 0) });
@@ -71,9 +71,10 @@ const pickSession = (a, b) => {
 };
 
 
+const STAT_FIELDS = ['ok', 'fail']; // the only fields the app writes (stat() in app.js and sounds.js): nothing else is carried along
 const cleanStat = (s) => {
   const o = {};
-  if (isObj(s)) for (const f of Object.keys(s).slice(0, 8)) if (!unsafe(f) && f.length <= 16 && typeof s[f] === 'number' && Number.isFinite(s[f]) && s[f] >= 0) o[f] = Math.min(CAP, Math.floor(s[f]));
+  if (isObj(s)) for (const f of STAT_FIELDS) if (Object.prototype.hasOwnProperty.call(s, f) && typeof s[f] === 'number' && Number.isFinite(s[f]) && s[f] >= 0) o[f] = Math.min(CAP, Math.floor(s[f]));
   return o;
 };
 const statsOf = (d, L) => {

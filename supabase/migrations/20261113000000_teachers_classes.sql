@@ -272,7 +272,13 @@ create trigger child_profiles_version before insert or update on public.child_pr
 -- from lowering or dropping it, which would make a stale family device's older stats win again after leave_class.
 -- A writer can still raise resets by 1 per write, any number of times, but src/merge.js puts no reachable cap on them (any safe
 -- integer, 2^53 writes away), so repetition only makes the family's next reset one higher: it never reaches a state that defeats it.
--- Only numbers are touched: other keys with odd types are left alone (merge.js ignores them), so no write ever fails here.
+-- Only numbers are touched: other keys with odd types are left alone (merge.js ignores them), so a clamp never makes a write fail.
+-- The one refusal is the size of data.stats: merge.js keeps every key shaped like the app's own, so a writer could fill the 200 KB
+-- check with them and every later family push (those keys plus its own) would be refused, outliving leave_class. A write that changes
+-- data may carry at most 1000 stat keys per language ("ca:" keys and the others; the app has at most 454) of at most 31 characters
+-- ("ca:snd:" + the 24 that merge.js keeps; the longest real one has 12): otherwise 23514, like the size check. src/sync.js answers
+-- 23514 by retrying once with the stats pruned to the keys the app can produce, which also cleans a row poisoned before this bound.
+-- Only checked when data changes, so an update of other columns (leave_class, a rename) never fails on an older row.
 create function private.child_profiles_data() returns trigger
 language plpgsql set search_path = '' as $$
 declare
@@ -283,7 +289,17 @@ declare
   allowed numeric;
   keep jsonb := '{}'::jsonb;
   o numeric;
+  n_ca bigint;
+  n_es bigint;
+  longest integer;
 begin
+  if (tg_op = 'INSERT' or new.data is distinct from old.data) and jsonb_typeof(d) = 'object' and jsonb_typeof(d->'stats') = 'object' then
+    select count(*) filter (where left(k, 3) = 'ca:'), count(*) filter (where left(k, 3) <> 'ca:'), coalesce(max(char_length(k)), 0)
+      into n_ca, n_es, longest from jsonb_object_keys(d->'stats') k;
+    if n_ca > 1000 or n_es > 1000 or longest > 31 then
+      raise exception 'child_profiles_stats: at most 1000 stat keys per language, of at most 31 characters' using errcode = '23514';
+    end if;
+  end if;
   -- the old counters a write may not lower: safe integers >= 0 (anything else keeps the plain upper bound below)
   if tg_op = 'UPDATE' and jsonb_typeof(old.data) = 'object' and jsonb_typeof(old.data->'resets') = 'object' then
     foreach lang in array array['es', 'ca'] loop

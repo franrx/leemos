@@ -12,7 +12,13 @@ const SESSION_KEY = 'leemos-auth';
 // wipe what another device played at the stored one. `old`: the row's cleaned data, or null for an insert.
 const capResets = (d, old) => { for (const L of ['es', 'ca']) d.resets[L] = Math.min(d.resets[L], old ? old.resets[L] + 1 : 1000); return d; };
 
-export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, storage = globalThis.localStorage, now = Date.now }) {
+// A write the server refuses with 23514 (data over the 200 KB check, or more stat keys per language than trigger child_profiles_data
+// allows) carries keys somebody planted: they are shaped like the app's own, so the merge keeps them. Such a write is retried once with
+// the stats pruned to the keys this app can produce. Only that fallback prunes: an ordinary push keeps a newer device's new keys.
+const pruneStats = (d, known) => ({ ...d, stats: Object.fromEntries(Object.entries(d.stats).filter(([k]) => known(k))) });
+
+// knownKeys: async () => (statKey) => boolean, or null when the app cannot tell (no pruning then).
+export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, storage = globalThis.localStorage, now = Date.now, knownKeys = null }) {
   // the project root: a URL copied with an API path (…/rest/v1/, …/auth/v1) or a trailing slash still works
   const base = String(url).trim().replace(/\/+$/, '').replace(/\/(rest|auth)\/v1$/, '').replace(/\/+$/, '');
   const read = (k) => { try { return JSON.parse(storage.getItem(k)); } catch (e) { return null; } };
@@ -83,6 +89,7 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
     return r;
   }
   const errCode = async (r) => { try { const j = await r.json(); return j && j.code; } catch (e) { return null; } };
+  const knownOf = async () => { try { return knownKeys ? await knownKeys() : null; } catch (e) { return null; } };
   const rows = async (r) => { try { const j = await r.json(); return Array.isArray(j) ? j : []; } catch (e) { return []; } };
   const SELECT = 'select=id,name,kind,data,version,class_id,has_parent,child_links(user_id)'; // has_parent: a computed column (a boolean for rows the caller can read)
 
@@ -140,27 +147,31 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
     for (let attempt = 0; attempt < 5; attempt++) {
       let row = await getProfile(rid);
       if (!row) {
-        const born = capResets(mergeData(data, {}), null);
-        const c = await api('child_profiles', { method: 'POST', body: JSON.stringify({ id: rid, name, kind, data: born }) });
+        let born = capResets(mergeData(data, {}), null), pruned = false;
+        const create = () => api('child_profiles', { method: 'POST', body: JSON.stringify({ id: rid, name, kind, data: born }) });
+        let c = await create();
+        if (c.status === 400 && (await errCode(c)) === '23514') { const known = await knownOf(); if (known) { born = pruneStats(born, known); pruned = true; c = await create(); } }
         if (c.status === 403) return { revoked: true }; // the insert policy refuses (e.g. a deleted child's id)
         if (c.status === 409) { // exists but not visible to us (revoked), or another device created it first
           row = await getProfile(rid);
           if (!row) return { revoked: true };
         } else {
           if (!c.ok) throw new SyncError('http', 'could not create the profile', c.status);
-          return { data: born, version: 1, kind };
+          return { data: born, version: 1, kind, ...(pruned ? { pruned } : {}) };
         }
       }
-      const merged = capResets(mergeData(data, row.data), mergeData(row.data, {}));
+      let merged = capResets(mergeData(data, row.data), mergeData(row.data, {})), pruned = false;
       const push = kindChanged && kind !== row.kind;
       const nextKind = push ? kind : row.kind;
       if (sameData(merged, mergeData(row.data, {})) && row.name === name && !push) return { data: merged, version: row.version, kind: nextKind };
       const write = (version) => api(`child_profiles?id=eq.${encodeURIComponent(rid)}&version=eq.${row.version}`, { method: 'PATCH', body: JSON.stringify({ name, data: merged, version, ...(push ? { kind } : {}) }) });
       let next = row.version + 1, p = await write(next);
       // a version at the integer maximum (planted before the server controlled it): version+1 overflows (22003). Start again at 1 under the same filter.
-      if (p.status === 400 && (await errCode(p)) === '22003') { next = 1; p = await write(next); }
+      let code = p.status === 400 ? await errCode(p) : null;
+      if (code === '22003') { next = 1; p = await write(next); code = p.status === 400 ? await errCode(p) : null; }
+      if (code === '23514') { const known = await knownOf(); if (known) { merged = pruneStats(merged, known); pruned = true; p = await write(next); } }
       if (!p.ok) throw new SyncError('http', 'could not save the profile', p.status);
-      if ((await rows(p)).length) return { data: merged, version: next, kind: nextKind };
+      if ((await rows(p)).length) return { data: merged, version: next, kind: nextKind, ...(pruned ? { pruned } : {}) };
       // empty result: someone else wrote first, go again from the read
     }
     throw new SyncError('conflict', 'too many concurrent writes');

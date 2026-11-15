@@ -205,7 +205,7 @@ for (const pasted of ['https://x.supabase.co/rest/v1/', 'https://x.supabase.co/a
   await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
   await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ total: 9, modAt: 200 }) });
   check('keepalive: small writes survive the page closing (POST and PATCH)', seen.length === 2 && seen.every((s) => s.keepalive === true), JSON.stringify(seen));
-  const many = {}; for (let i = 0; i < 3000; i++) many['s:item' + i] = { ok: 1, fail: 0 };
+  const many = {}; for (let i = 0; i < 900; i++) for (const L of ['', 'ca:']) many[L + 's:item' + String(i).padStart(16, '0')] = { ok: 1, fail: 0 }; // within the server's 1000 keys per language
   seen.length = 0;
   await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ stats: many, modAt: 300 }) });
   check('keepalive: a write over the 64 KB browser limit does not ask for it (it would be rejected)', seen.length === 1 && seen[0].len > 60000 && !seen[0].keepalive, JSON.stringify(seen.map((s) => ({ k: s.keepalive, l: s.len }))));
@@ -231,7 +231,7 @@ for (const pasted of ['https://x.supabase.co/rest/v1/', 'https://x.supabase.co/a
 }
 
 // ---------- teachers and classes (Task 4): rpc, class and link fields, revoked outcome ----------
-const as = async (srv, email) => { const storage = memoryStorage(); const sync = createSync({ url: URL_, anonKey: 'anon-key', fetch: srv.fetch, storage }); await sync.requestCode(email); await sync.verifyCode(email, '123456'); return { sync, storage, id: srv.userByEmail(email).id }; };
+const as = async (srv, email, extra = {}) => { const storage = memoryStorage(); const sync = createSync({ url: URL_, anonKey: 'anon-key', fetch: srv.fetch, storage, ...extra }); await sync.requestCode(email); await sync.verifyCode(email, '123456'); return { sync, storage, id: srv.userByEmail(email).id }; };
 {
   const { srv, sync } = await signedIn();
   srv.expireAccessTokens();
@@ -407,6 +407,68 @@ for (const variant of ['lowered', 'omitted']) {
   const after = await flags();
   check('sync: listProfiles carries has_parent (false while unclaimed, true once a parent redeemed)', before[U] === false && before[V] === false && after[U] === false && after[V] === true && srv.log.some((l) => /has_parent/.test(l)), JSON.stringify({ before, after }));
   check('sync: a to_parent code redeemed with a class is a code error, links nobody and still works for the parent', viaBox instanceof SyncError && viaBox.kind === 'code' && stillNone && srv.links.get(V).has(srv.userByEmail('p@e.c').id));
+}
+
+// fix iteration (F001): planted stat keys shaped like the app's own cannot stop a child's sync. A write that the server refuses for
+// its size or its stat key count (23514) is retried once with the stats pruned to the keys this app can produce (knownKeys).
+{
+  const REAL = new Set(['s:ma', 's:pa', 'w:ma-no', 'ca:s:ma', 'ca:w:ca-sa', 'snd:m']);
+  const known = { knownKeys: async () => (k) => REAL.has(k) };
+  const junk = (prefix, n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [prefix + 'j' + String(i).padStart(19, '0'), { ok: 1 }]));
+  const bytes = (d) => Buffer.byteLength(JSON.stringify(d));
+  { // a row filled up to the 200 KB check (planted before the server bounded the key count): one new local stat must still land
+    const srv = createFakeSupabase();
+    const A = await as(srv, 'p@e.c', known);
+    await A.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+    const row0 = srv.rows.get(RID);
+    let n = 5000; while (bytes({ ...row0.data, stats: { ...row0.data.stats, ...junk('s:', n + 1) } }) < 199500) n++;
+    row0.data = { ...row0.data, stats: { ...row0.data.stats, ...junk('s:', n) } };
+    const planted = bytes(row0.data);
+    const r = await rejects(A.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ stats: { 's:ma': { ok: 2, fail: 0 }, 's:pa': { ok: 1, fail: 0 }, 'snd:m': { ok: 1, fail: 0 } } }) }));
+    const res = r === null ? await A.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ stats: { 's:ma': { ok: 2, fail: 0 }, 's:pa': { ok: 1, fail: 0 }, 'snd:m': { ok: 1, fail: 0 } } }) }) : null;
+    const row = srv.rows.get(RID).data, keys = Object.keys(row.stats);
+    const again = srv.log.length;
+    const settled = res ? await A.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: res.data }) : null;
+    check('stats: a row at the size limit plus one new local stat: syncProfile succeeds, the planted keys are gone, the real ones stay, and the next round writes nothing',
+      planted < 200000 && planted > 199000 && r === null && keys.every((k) => REAL.has(k)) && row.stats['s:pa'].ok === 1 && row.stats['s:ma'].ok === 2 && row.stats['snd:m'].ok === 1 && bytes(row) < 2000
+      && !!settled && !srv.log.slice(again).some((l) => l.startsWith('PATCH')),
+      JSON.stringify({ planted, err: r && [r.kind, r.status], keys: keys.length }));
+  }
+  { // the server bounds the stat keys per language and write (trigger child_profiles_data): a teacher cannot plant more than 1000
+    const srv = createFakeSupabase();
+    const cls = srv.addClass('3A');
+    const t = await as(srv, 't@e.c'); srv.setRole('t@e.c', 'teacher', { ack: true }); srv.addTeacher(cls, 't@e.c');
+    const A = await as(srv, 'p@e.c', known);
+    await A.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+    await t.sync.redeemInvite((await A.sync.createInvite(RID, 'to_class')).code, cls);
+    const tok = (await t.sync.session()).access_token;
+    const teacherPatch = (d) => srv.fetch(`${URL_}/rest/v1/child_profiles?id=eq.${RID}`, { method: 'PATCH', headers: { Authorization: 'Bearer ' + tok }, body: JSON.stringify({ data: d }) });
+    const base = srv.rows.get(RID).data;
+    const over = await teacherPatch({ ...base, stats: { ...base.stats, ...junk('ca:s:', 1001) } });
+    const overCode = (await over.json()).code;
+    const stillClean = Object.keys(srv.rows.get(RID).data.stats).length === 1;
+    const at = await teacherPatch({ ...base, stats: { ...base.stats, ...junk('ca:s:', 999) } });
+    await A.sync.leaveClass(RID);
+    const res = await rejects(A.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ stats: { 's:ma': { ok: 2, fail: 0 }, 'ca:s:ma': { ok: 1, fail: 0 }, 'ca:w:ca-sa': { ok: 1, fail: 0 } } }) }));
+    const row = srv.rows.get(RID).data;
+    check('stats: the server refuses more than 1000 stat keys in one language (23514); a family push that the planted keys put over it is pruned and lands',
+      over.status === 400 && overCode === '23514' && stillClean && at.status === 200 && res === null && Object.keys(row.stats).every((k) => REAL.has(k)) && row.stats['ca:w:ca-sa'].ok === 1,
+      JSON.stringify({ over: over.status, overCode, at: at.status, err: res && [res.kind, res.status], keys: Object.keys(row.stats).length }));
+  }
+  { // the same fallback on the first insert: a local copy that took planted keys from an earlier row is pruned and created
+    const srv = createFakeSupabase();
+    const A = await as(srv, 'p@e.c', known);
+    const r = await rejects(A.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ stats: { 'ca:s:ma': { ok: 1, fail: 0 }, ...junk('ca:s:', 1000) } }) }));
+    const st = srv.rows.has(RID) ? srv.rows.get(RID).data.stats : {};
+    check('stats: an insert refused for its stat keys is retried with the known keys only', r === null && Object.keys(st).join() === 'ca:s:ma', JSON.stringify({ err: r && [r.kind, r.status], keys: Object.keys(st).length }));
+  }
+  { // only the refused write prunes: an ordinary push keeps an item key this app does not know (a newer device's new word)
+    const srv = createFakeSupabase();
+    const A = await as(srv, 'p@e.c', known);
+    await A.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ stats: { 's:ma': { ok: 2, fail: 0 }, 'w:zu-mo': { ok: 1, fail: 0 } } }) });
+    const r = await A.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ stats: { 's:pa': { ok: 1, fail: 0 } } }) });
+    check('stats: an ordinary push never prunes (a newer device\'s unknown item key stays)', !!srv.rows.get(RID).data.stats['w:zu-mo'] && !!r.data.stats['w:zu-mo'] && !r.pruned);
+  }
 }
 
 console.log(failures ? `\n${failures} sync test(s) FAILED` : '\nAll sync tests passed');

@@ -225,7 +225,8 @@ export function createTeach(ctx) {
     const li = el('div', 'teach-row'); li.dataset.child = r.id;
     const top = el('div', 'teach-top');
     top.append(el('strong', 'teach-name', nameOf(r)));
-    const p = Math.max(0, Math.min(100, Number(ctx.pct(r.data)) || 0));
+    let p = 0; // one unreadable child shows 0%, it never blanks the class
+    try { p = Math.max(0, Math.min(100, Number(ctx.pct(r.data)) || 0)); } catch (e) { p = 0; }
     const bar = el('div', 'teach-bar'); bar.setAttribute('role', 'img'); bar.setAttribute('aria-label', t('teachProgress', { n: nameOf(r), p }));
     const fill = el('i'); fill.style.width = p + '%'; bar.append(fill);
     top.append(bar);

@@ -1126,6 +1126,31 @@ const OLD = () => NOW() - 120000; // idle for two minutes
   const st = localState(app);
   check('pull h: invalid remote preferences are never applied and nothing crashes', app.errors.length === 0 && (st.theme || '') !== 'purple' && st.mode !== 'x' && st.sessionLen !== 7 && st.rate !== 99 && st.lang !== 'fr', app.errors.join(' | '));
 }
+// fix iteration (F001): a row filled with planted item-shaped stat keys up to the 200 KB check. The family device, which has every real
+// key of both languages (syllables, words, letter sounds) and one planted key it took from an earlier round, must get its push through:
+// the refused write is retried with the keys the app knows (knownKeys), every real key reaches the server, the planted ones leave the
+// row AND the device, and the next round writes nothing (no endless refused push every 5 s).
+{
+  const real = [];
+  for (const [l, p] of [['es', ''], ['ca', 'ca:']]) {
+    readJSON(`src/data/levels.${l}.json`).forEach((x) => { x.syl.forEach((s) => real.push(p + 's:' + s)); x.words.forEach((o) => real.push(p + 'w:' + o.w)); });
+    readJSON(`src/data/sounds.${l}.json`).groups.forEach((g) => g.letters.forEach((x) => real.push(p + 'snd:' + x.l)));
+  }
+  const mine = Object.fromEntries([...new Set(real)].map((k) => [k, { ok: 1, fail: 0 }]));
+  mine['ca:s:planted-before'] = { ok: 1, fail: 0 };
+  const junk = {}; for (let i = 0; JSON.stringify(junk).length < 190000; i++) junk['s:j' + String(i).padStart(19, '0')] = { ok: 1 };
+  const { s, app } = await seed({ stats: junk }, { stats: mine, modAt: 6 });
+  const isJunk = (k) => /^s:j\d{19}$/.test(k); // not just "s:j": the real syllables ja, je… start like that
+  await until(() => !Object.keys(s.rows.get(RID_A).data.stats).some(isJunk), 4000); await sleep(80);
+  const row = s.rows.get(RID_A).data.stats, loc = localState(app).stats;
+  const n = s.log.filter((l) => l.startsWith('PATCH')).length;
+  app.w.dispatchEvent(new app.w.Event('focus')); await sleep(200);
+  const after = s.log.filter((l) => l.startsWith('PATCH')).length;
+  check('stats: a planted row at the size limit no longer stops the sync: every real key lands, the planted ones leave the row and the device, the next round writes nothing',
+    Object.keys(junk).length > 4000 && real.every((k) => row[k] && row[k].ok === 1) && Object.keys(row).length === new Set(real).size && !('ca:s:planted-before' in loc) && !Object.keys(loc).some(isJunk)
+    && after === n && app.errors.length === 0,
+    JSON.stringify({ row: Object.keys(row).length, real: new Set(real).size, missing: real.filter((k) => !row[k]).slice(0, 5), loc: Object.keys(loc).length, n, after, e: app.errors }));
+}
 
 // ---------- 31. review fixes for the session/preferences sync ----------
 // I1: the echo of this device's own push must not wipe a session that just finished (the end screen reads its counters)
@@ -3073,6 +3098,25 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
     app.$('teachAckBtn').click();
     await until(() => !!qs(app, '[data-roster]'), 3000);
     check('teach: a teacher without acknowledgement sees only the acknowledgement', only && !!w.s.accounts.get(w.tea.uid).ack && !app.$('teachAck') && !!qs(app, '[data-act=open][data-child="' + RID_B + '"]'), app.$('teach').textContent);
+  }
+
+  // fix iteration (F002): another account's child data reaches the roster percentage; a stat whose ok is an object with non-callable
+  // valueOf/toString (valid JSON) must not blank the class panel nor abort the language switch
+  {
+    const w = await world({ who: 'teacher' });
+    const bad = { ok: { valueOf: 1, toString: 1 }, fail: 0 };
+    w.s.rows.get(RID_B).data.stats = { 's:ma': bad, 'ca:s:ma': bad, 's:me': { ok: 3, fail: { valueOf: 1 } } };
+    w.s.rows.set(RID_C, { id: RID_C, owner: null, class_id: w.cls, name: 'Nuria', kind: 'reader', data: dat({ name: 'Nuria', modAt: 2, stats: { 's:ma': { ok: 3, fail: 0 }, 's:me': { ok: 3, fail: 0 }, 's:mi': { ok: 3, fail: 0 } } }), version: 1 });
+    const app = await bootWorld(w);
+    await until(() => !!qs(app, '[data-roster]'), 3000); await sleep(40);
+    const label = (id) => { const b = qs(app, '[data-child="' + id + '"] .teach-bar'); return b ? b.getAttribute('aria-label') : ''; };
+    const rows = qsa(app, '[data-roster] .teach-row').length, lb = label(RID_B), lc = label(RID_C);
+    const before = app.$('hint').textContent;
+    app.$('langBtn').click(); await sleep(60);
+    check('teach: a roster child with crafted non-numeric stats still renders (0%) and the language switch completes',
+      rows === 2 && /Mateo: 0%/.test(lb) && /Nuria: [1-9]\d*%/.test(lc) && !!qs(app, '[data-act=newchild]') && !!qs(app, '[data-act=open][data-child="' + RID_B + '"]')
+      && app.$('langBtn').textContent === 'CA' && app.$('hint').textContent !== before && !!qs(app, '[data-roster] [data-child="' + RID_B + '"]') && app.errors.length === 0,
+      JSON.stringify({ rows, lb, lc, before, after: app.$('hint').textContent, e: app.errors }));
   }
 
   {

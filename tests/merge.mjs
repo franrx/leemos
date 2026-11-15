@@ -92,6 +92,13 @@ check('bounds: a reset counter at the cap is still just a counter', huge.resets.
 check('bounds: stats keys that are not item keys, or are too long, are dropped', !('evil' in huge.stats) && !Object.keys(huge.stats).some((k) => k.length > 44), Object.keys(huge.stats).join('|'));
 check('bounds: fractional counters become whole numbers', huge.stats['w:ne-na'].ok === 1);
 check('bounds: field names inside a stat are limited too', Object.keys(huge.stats['snd:m']).every((f) => f.length <= 16));
+{ // fix iteration (F001): what one planted key can carry into the family's next push is bounded: a name of at most 24 characters after
+  // the prefix (the longest real one has 12) and only the two fields the app writes (ok and fail)
+  const s24 = 'x'.repeat(24), s25 = 'x'.repeat(25);
+  const b = mergeData({ stats: { ['s:' + s24]: { ok: 1, fail: 2, junk: 3, okay: 4 }, ['s:' + s25]: { ok: 1 }, ['ca:snd:' + s24]: { ok: 1 }, ['ca:w:' + s25]: { ok: 1 } } }, {});
+  check('bounds: stat keys keep at most 24 characters after the prefix, and a stat keeps only ok and fail',
+    Object.keys(b.stats).sort().join('|') === ['ca:snd:' + s24, 's:' + s24].sort().join('|') && JSON.stringify(b.stats['s:' + s24]) === '{"ok":1,"fail":2}', JSON.stringify(b.stats));
+}
 check('bounds: an unsafe modAt counts as zero', huge.modAt === 0);
 
 // ---------- session in progress and preferences (spec: 2026-10-17-session-prefs-sync-design.md) ----------

@@ -6,6 +6,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { mergeData } from '../src/merge.js';
+import { createSync } from '../src/sync.js';
 
 const env = { ...process.env };
 if (existsSync('.env')) for (const l of readFileSync('.env', 'utf8').split('\n')) { const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(l); if (m && !(m[1] in env)) env[m[1]] = m[2].replace(/^["']|["']$/g, ''); }
@@ -478,6 +479,39 @@ try {
     const r = await one(await rest(PO, `child_profiles?id=eq.${kid}&select=data`));
     const u = await rest(PO, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ data: { modAt: null, level: -3, resets: { es: 'a', ca: null }, prefs: { lang: null, mode: { v: 'syl' } }, session: { at: [] } } }) }), ub = ((await json(u)) || [])[0];
     return [!!r && r.data.modAt === 'soon' && r.data.level === 'two' && u.status === 200 && !!ub && ub.data.level === -3 && ub.data.resets.es === 'a', JSON.stringify({ r, u: u.status, ub })];
+  });
+  // Planted item-shaped stat keys (src/merge.js keeps them) must not stop a child's sync: the trigger bounds them per write, and the
+  // family's real client (src/sync.js) answers a 23514 by pruning to the keys the app can produce.
+  const junk = (p, n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [p + 'j' + String(i).padStart(19, '0'), { ok: 1 }]));
+  const familySync = (u, real) => {
+    const store = new Map([['leemos-auth', JSON.stringify({ access_token: u.token, refresh_token: 'unused', expires_at: Date.now() + 3600e3, user: { id: u.id, email: u.email } })]]);
+    const storage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+    return createSync({ url, anonKey: anon, storage, knownKeys: async () => (k) => real.includes(k) });
+  };
+  await t('a data write with more than 1000 stat keys in one language, or a stat key over 31 characters, is refused (23514); 1000 land, other columns of that row still update, and the family\'s sync.js prunes the planted keys after leave_class', async () => {
+    const PK = await mk('pstats'), kid = await mkKid(PK, { data: { level: 1, name: 'Elsa', modAt: Date.now(), resets: { es: 0, ca: 0 }, stats: { 's:ma': { ok: 2, fail: 0 } } } });
+    await share(PK, kid, T1, C1);
+    const base = (await one(await rest(PK, `child_profiles?id=eq.${kid}&select=data`))).data;
+    const patch = async (data) => { const w = await rest(T1, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ data }) }); const b = await json(w); return [w.status, Array.isArray(b) ? 'rows' : b && b.code]; };
+    const over = await patch({ ...base, stats: { ...base.stats, ...junk('ca:s:', 1001) } });
+    const long = await patch({ ...base, stats: { ...base.stats, ['ca:snd:' + 'x'.repeat(25)]: { ok: 1 } } });
+    const at = await patch({ ...base, stats: { ...base.stats, ...junk('ca:s:', 1000) } });
+    const ren = await rest(T1, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ name: 'Elsa M' }) });
+    const left = await rpc(PK, 'leave_class', { p_child: kid });
+    // the family's device has one Catalan stat of its own: the merge (1000 planted + 1) is over the bound, the client prunes and lands
+    const r = await familySync(PK, ['s:ma', 'ca:s:ma']).syncProfile({ rid: kid, name: 'Elsa M', kind: 'reader', data: mergeData({ ...base, stats: { 's:ma': { ok: 2, fail: 0 }, 'ca:s:ma': { ok: 1, fail: 0 } } }, {}) });
+    const keys = Object.keys((await one(await rest(PK, `child_profiles?id=eq.${kid}&select=data`))).data.stats).sort();
+    return [over.join() === '400,23514' && long.join() === '400,23514' && at.join() === '200,rows' && ren.status === 200 && okr(left) && r.pruned === true && keys.join() === 'ca:s:ma,s:ma',
+      JSON.stringify({ over, long, at, ren: ren.status, left: left.body, pruned: r.pruned, keys: keys.length })];
+  });
+  if (!DB) console.log('SKIP  a row filled with planted stat keys before the bound (seeded past the trigger) is cleaned by the family\'s next push (needs the local db container: npm run test:rls)');
+  else await t('a row filled with 5000 planted stat keys before the bound (seeded past the trigger, under the 200 KB check) is cleaned by the family\'s next push', async () => {
+    const PK = await mk('pstats2'), kid = await mkKid(PK, { data: { level: 1, name: 'Elsa', modAt: Date.now(), resets: { es: 0, ca: 0 }, stats: { 's:ma': { ok: 2, fail: 0 } } } });
+    superSql(`set session_replication_role = replica; update public.child_profiles set data = jsonb_set(data, '{stats}', data->'stats' || (select jsonb_object_agg('s:j' || lpad(i::text, 19, '0'), '{"ok":1}'::jsonb) from generate_series(1, 5000) i)) where id = '${kid}';`);
+    const seeded = Object.keys((await one(await rest(PK, `child_profiles?id=eq.${kid}&select=data`))).data.stats).length;
+    const r = await familySync(PK, ['s:ma', 's:pa']).syncProfile({ rid: kid, name: 'Kid', kind: 'reader', data: mergeData({ stats: { 's:ma': { ok: 2, fail: 0 }, 's:pa': { ok: 1, fail: 0 } } }, {}) });
+    const st = (await one(await rest(PK, `child_profiles?id=eq.${kid}&select=data`))).data.stats;
+    return [seeded === 5001 && r.pruned === true && Object.keys(st).sort().join() === 's:ma,s:pa' && st['s:pa'].ok === 1, JSON.stringify({ seeded, pruned: r.pruned, keys: Object.keys(st).length })];
   });
 
   // Creating children, old clients and the exposed surface.

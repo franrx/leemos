@@ -30,6 +30,19 @@ const clampData = (d, old, now) => {
   return out;
 };
 
+// what the database refuses with 23514 (HTTP 400): the child_profiles_data_check (data under 200000 bytes) and the stat key bound of
+// trigger child_profiles_data (at most 1000 keys per language, "ca:" ones and the others, of at most 31 characters; only when data changes)
+const STATS_PER_LANG = 1000, STAT_KEY_MAX = 31;
+const refusedData = (d) => {
+  if (Buffer.byteLength(JSON.stringify(d ?? null)) >= 200000) return 'new row for relation "child_profiles" violates check constraint "child_profiles_data_check"';
+  const st = d && typeof d === 'object' && !Array.isArray(d) ? d.stats : null;
+  if (st && typeof st === 'object' && !Array.isArray(st)) {
+    const ks = Object.keys(st), ca = ks.filter((k) => k.startsWith('ca:')).length;
+    if (ca > STATS_PER_LANG || ks.length - ca > STATS_PER_LANG || ks.some((k) => [...k].length > STAT_KEY_MAX)) return 'child_profiles_stats: at most 1000 stat keys per language, of at most 31 characters';
+  }
+  return null;
+};
+
 export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: baseNow = Date.now } = {}) {
   const users = new Map();      // email -> {id, email}
   const asked = new Set();      // emails that requested a code
@@ -348,7 +361,9 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
         if (rows.has(body.id)) return res(409, { message: 'duplicate key' });
         if (!cid && [...rows.values()].filter((r) => r.owner === uid && !r.class_id).length >= 8) return res(400, { message: 'profile limit reached' });
         if (cid && [...rows.values()].filter((r) => r.class_id === cid).length >= 60) return res(400, { message: 'class limit reached' });
-        const row = { id: body.id, owner: uid, class_id: cid, name: body.name, kind: body.kind, data: clampData(body.data || {}, null, clock()), version: 1 }; // trigger child_profiles_version: an insert always starts at 1
+        const born = clampData(body.data || {}, null, clock()), bad = refusedData(born);
+        if (bad) return res(400, { code: '23514', message: bad });
+        const row = { id: body.id, owner: uid, class_id: cid, name: body.name, kind: body.kind, data: born, version: 1 }; // trigger child_profiles_version: an insert always starts at 1
         rows.set(row.id, row);
         if (!cid) linkSet(row.id).add(uid); // child_profiles_link_creator
         return res(201, [out(row)]);
@@ -360,7 +375,9 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
         if (!r || !canSee(uid, r) || (f.version && String(r.version) !== f.version)) return res(200, []);
         // trigger child_profiles_version: a changed version moves at most one step up (least(new, old + 1)); an omitted one stays
         const v = body.version === undefined || body.version === r.version ? r.version : Math.min(body.version, r.version + 1);
-        Object.assign(r, { name: body.name ?? r.name, kind: body.kind ?? r.kind, data: clampData(body.data ?? r.data, r.data, clock()), version: v });
+        const nd = clampData(body.data ?? r.data, r.data, clock()), bad = body.data === undefined ? null : refusedData(nd);
+        if (bad) return res(400, { code: '23514', message: bad });
+        Object.assign(r, { name: body.name ?? r.name, kind: body.kind ?? r.kind, data: nd, version: v });
         return res(200, [out(r)]);
       }
     }
