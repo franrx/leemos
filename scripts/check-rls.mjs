@@ -1,8 +1,9 @@
 // Verifies row level security on a REAL Supabase project with throwaway users. Run it after applying the migrations:
 //   node scripts/check-rls.mjs        (or `npm run test:rls`, which runs it against a local Docker Supabase)
 // Needs in .env: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY (the service key stays in .env, never in git or the app).
-// It creates users with the admin API, signs them in with a password, sets roles/classes with the service key (the only way, as in
-// production), and deletes everything it created at the end. Spec: docs/superpowers/specs/2026-11-13-teachers-classes-design.md section 9.
+// It creates users with the admin API, signs them in with an emailed code as the app does (the admin API hands out the code, no mail;
+// a password session reaches nothing since the F001 fix), sets roles/classes with the service key (the only way, as in production),
+// and deletes everything it created at the end. Spec: docs/superpowers/specs/2026-11-13-teachers-classes-design.md section 9.
 import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { mergeData } from '../src/merge.js';
@@ -18,13 +19,19 @@ let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
 const j = (h) => ({ 'Content-Type': 'application/json', ...h });
 const stamp = Date.now();
-const pw = 'T3st-' + Math.random().toString(36).slice(2) + 'Zz9!';
 const made = [], kids = [], classes = [], emails = []; // everything created, for the cleanup in `finally`
+// Signs an existing user in exactly as src/sync.js does (POST /verify, type email, with the emailed code); the admin API's generate_link
+// returns that code (email_otp, top level or under properties depending on the GoTrue version) without sending a mail.
+const signIn = async (email) => {
+  const g = await (await fetch(`${url}/auth/v1/admin/generate_link`, { method: 'POST', headers: j({ apikey: service, Authorization: 'Bearer ' + service }), body: JSON.stringify({ type: 'magiclink', email }) })).json();
+  const otp = (g && (g.email_otp || (g.properties && g.properties.email_otp))) || '';
+  return (await fetch(`${url}/auth/v1/verify`, { method: 'POST', headers: j({ apikey: anon }), body: JSON.stringify({ type: 'email', email, token: otp }) })).json();
+};
 const mk = async (tag) => {
   const email = `rls-${tag}-${stamp}@example.com`;
-  const c = await fetch(`${url}/auth/v1/admin/users`, { method: 'POST', headers: j({ apikey: service, Authorization: 'Bearer ' + service }), body: JSON.stringify({ email, password: pw, email_confirm: true }) });
+  const c = await fetch(`${url}/auth/v1/admin/users`, { method: 'POST', headers: j({ apikey: service, Authorization: 'Bearer ' + service }), body: JSON.stringify({ email, email_confirm: true }) });
   const u = await c.json();
-  const s = await (await fetch(`${url}/auth/v1/token?grant_type=password`, { method: 'POST', headers: j({ apikey: anon }), body: JSON.stringify({ email, password: pw }) })).json();
+  const s = await signIn(email);
   const me = { id: u.id, token: s.access_token, email };
   made.push(me);
   return me;
@@ -144,6 +151,35 @@ try {
     const inv = await rpc(AD, 'admin_invite_teacher', { p_email: I.email.toUpperCase() });
     const w = await whoami(I);
     return [okr(inv) && w.role === 'teacher' && !w.teacher_ack_at && !(await json(await svc(`role_invites?email=eq.${encodeURIComponent(I.email)}`))).length, JSON.stringify(w)];
+  });
+  // fix iteration (F001): someone pre-registers an invited teacher's address with a password. The teacher's emailed code confirms that
+  // same account (GoTrue keeps the password), so the password must open nothing: a session whose amr says password gets no role, no
+  // class child, no code and no export, also after a refresh. Locally «Confirm email» is off, so the signup comes with a session at once.
+  await t("a password set by whoever pre-registered an invited teacher's address reaches nothing, before or after the teacher signs in with a code", async () => {
+    const email = `rls-prereg-${stamp}@example.com`, mpw = 'M4l-' + Math.random().toString(36).slice(2) + 'Zz9!'; emails.push(email);
+    const su = await json(await fetch(`${url}/auth/v1/signup`, { method: 'POST', headers: j({ apikey: anon }), body: JSON.stringify({ email, password: mpw }) }));
+    const mid = su && ((su.user && su.user.id) || su.id); if (mid) made.push({ id: mid, email });
+    const pwSession = async () => { const g = await json(await fetch(`${url}/auth/v1/token?grant_type=password`, { method: 'POST', headers: j({ apikey: anon }), body: JSON.stringify({ email, password: mpw }) })); return g || {}; };
+    const inv = await rpc(AD, 'admin_invite_teacher', { p_email: email });
+    const early = await pwSession(), ME = { id: early.user && early.user.id, token: early.access_token };
+    const earlyWho = await rpc(ME, 'whoami'), pending = ((await json(await svc(`role_invites?email=eq.${encodeURIComponent(email)}`))) || []).length; // before the teacher: no claim
+    const s = await signIn(email), T = { id: s.user && s.user.id, token: s.access_token, email }; // the teacher, as the app
+    const w = await whoami(T), ack = await rpc(T, 'ack_teacher'), CP = await mkClass('rls prereg ' + stamp), as = await rpc(AD, 'admin_assign_teacher', { p_class: CP, p_user: T.id });
+    const P = await mk('pprereg'), kid = await mkKid(P), sh = await share(P, kid, T, CP);
+    const control = !!mid && T.id === mid && okr(inv) && refused(earlyWho) && pending === 1 && w.role === 'teacher' && okr(ack) && okr(as) && okr(sh) && (await seen(T, kid));
+    const g = await pwSession(), M = { id: g.user && g.user.id, token: g.access_token };
+    const rf = await json(await fetch(`${url}/auth/v1/token?grant_type=refresh_token`, { method: 'POST', headers: j({ apikey: anon }), body: JSON.stringify({ refresh_token: g.refresh_token }) }));
+    const res = {};
+    for (const [tag, U] of [['pw', M], ['refreshed', { id: rf && rf.user && rf.user.id, token: rf && rf.access_token }]]) {
+      const rows = await json(await rest(U, `child_profiles?select=id`)), up = await json(await rest(U, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ name: 'Hacked' }) }));
+      const ins = await rest(U, 'child_profiles', { method: 'POST', body: JSON.stringify({ id: uuid(), name: 'M', kind: 'reader' }) });
+      const reads = await Promise.all(['accounts?select=user_id', 'class_teachers?select=class_id', 'classes?select=id', 'child_links?select=child_id'].map(async (p) => ((await json(await rest(U, p))) || []).length));
+      res[tag] = { same: U.id === T.id, who: refused(await rpc(U, 'whoami')), rows: Array.isArray(rows) ? rows.length : 'err', up: Array.isArray(up) ? up.length : 'err', ins: ins.status,
+        exp: refused(await rpc(U, 'export_my_data')), code: refused(await rpc(U, 'create_invite', { p_child: kid, p_kind: 'to_parent' })), reads: reads.join('/') };
+    }
+    const name = (await one(await svc(`child_profiles?id=eq.${kid}&select=name`))) || {};
+    const shut = (r) => r && r.same && r.who && r.rows === 0 && r.up === 0 && r.ins >= 400 && r.exp && r.code && r.reads === '0/0/0/0';
+    return [control && shut(res.pw) && shut(res.refreshed) && name.name === 'Kid' && (await seen(T, kid)), `control=${control} ${JSON.stringify(res)} name=${name.name}`];
   });
   await t('admin_list_accounts returns no parent email', async () => {
     const r = await rpc(AD, 'admin_list_accounts'); const txt = JSON.stringify(r.body);
@@ -553,7 +589,7 @@ try {
     return [before && after && !!row && row.owner === null && row.name === 'Mine', JSON.stringify(row)];
   });
   await t('the helper functions are not exposed at /rest/v1/rpc (OpenAPI lists none; calls with their real signatures answer 404/403)', async () => {
-    const helpers = { caller: {}, is_admin: {}, current_role: {}, is_class_teacher: { p_class: C1 }, has_link: { p_child: K1 }, has_any_link: { p_child: K1 }, is_tombstoned: { p_child: K1 } };
+    const helpers = { uid: {}, caller: {}, is_admin: {}, current_role: {}, is_class_teacher: { p_class: C1 }, has_link: { p_child: K1 }, has_any_link: { p_child: K1 }, is_tombstoned: { p_child: K1 } };
     const doc = await json(await fetch(`${url}/rest/v1/`, { headers: { apikey: anon, Authorization: 'Bearer ' + T1.token } }));
     const paths = Object.keys((doc && doc.paths) || {});
     const listed = Object.keys(helpers).filter((n) => paths.includes('/rpc/' + n));

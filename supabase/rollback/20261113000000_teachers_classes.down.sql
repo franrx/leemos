@@ -86,6 +86,7 @@ drop function private.children_of_deleted_user();
 drop function private.claim_role();
 drop function private.invite_hash(text);
 drop function private.granted_links(uuid, uuid);
+drop function private.uid(); -- after everything that calls it
 drop table private.secrets;
 drop schema private; -- no cascade: an omission above fails loudly
 

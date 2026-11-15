@@ -111,20 +111,34 @@ create schema if not exists private;
 revoke all on schema private from public;
 grant usage on schema private to authenticated;
 
+-- The caller's user id, unless this session was opened with a password. The app and tools/admin.html sign in only with an emailed code
+-- (amr otp), and a password proves nothing about the inbox: whoever registers an address with a password before its owner keeps that
+-- password after the owner confirms the address with a code (GoTrue confirms the existing user and leaves the password as it was), and
+-- claim_role then gives that account a teacher invitation, so the password would open a whole class. «Confirm email» does not prevent it.
+-- GoTrue copies amr into every refreshed token, so a password session stays one. Every policy, helper and RPC below takes the caller from
+-- here and never reads auth.uid() directly: a password session acts as no one (no role, no child, no code, forbidden).
+create function private.uid() returns uuid
+language sql stable security definer set search_path = '' as $$
+  select case when coalesce(((select auth.jwt()) -> 'amr' @> '[{"method":"password"}]'::jsonb) or ((select auth.jwt()) -> 'amr' @> '["password"]'::jsonb), false)
+    then null else (select auth.uid()) end;
+$$;
+revoke execute on function private.uid() from public, anon;
+grant execute on function private.uid() to authenticated;
+
 -- The caller, only while their account exists. A deleted account's access token stays valid until it expires (PostgREST checks only
--- the signature and expiry), and auth.uid() keeps returning its id: every RPC and the insert policy take the caller from here, so that
+-- the signature and expiry), and private.uid() keeps returning its id: every RPC and the insert policy take the caller from here, so that
 -- token acts as no one (forbidden) instead of reaching a foreign key error (which rolled back the redeem rate limit and told a valid
 -- code from a wrong one). accounts cascades from auth.users, so a row here means the user exists.
 create function private.caller() returns uuid
 language sql stable security definer set search_path = '' as $$
-  select a.user_id from public.accounts a where a.user_id = (select auth.uid());
+  select a.user_id from public.accounts a where a.user_id = (select private.uid());
 $$;
 revoke execute on function private.caller() from public, anon;
 grant execute on function private.caller() to authenticated;
 
 create function private.is_admin() returns boolean
 language sql stable security definer set search_path = '' as $$
-  select exists (select 1 from public.accounts a where a.user_id = (select auth.uid()) and a.role = 'admin');
+  select exists (select 1 from public.accounts a where a.user_id = (select private.uid()) and a.role = 'admin');
 $$;
 revoke execute on function private.is_admin() from public, anon;
 grant execute on function private.is_admin() to authenticated;
@@ -132,7 +146,7 @@ grant execute on function private.is_admin() to authenticated;
 -- The caller's role; the stable twin of the public whoami(), which may claim an invitation.
 create function private.current_role() returns text
 language sql stable security definer set search_path = '' as $$
-  select a.role from public.accounts a where a.user_id = (select auth.uid());
+  select a.role from public.accounts a where a.user_id = (select private.uid());
 $$;
 revoke execute on function private.current_role() from public, anon;
 grant execute on function private.current_role() to authenticated;
@@ -142,7 +156,7 @@ create function private.is_class_teacher(p_class uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
   select p_class is not null and exists (
     select 1 from public.class_teachers ct join public.accounts a on a.user_id = ct.teacher_id
-    where ct.class_id = p_class and ct.teacher_id = (select auth.uid()) and a.role = 'teacher' and a.teacher_ack_at is not null);
+    where ct.class_id = p_class and ct.teacher_id = (select private.uid()) and a.role = 'teacher' and a.teacher_ack_at is not null);
 $$;
 revoke execute on function private.is_class_teacher(uuid) from public, anon;
 grant execute on function private.is_class_teacher(uuid) to authenticated;
@@ -150,7 +164,7 @@ grant execute on function private.is_class_teacher(uuid) to authenticated;
 -- The caller has a parent link to the child.
 create function private.has_link(p_child uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
-  select exists (select 1 from public.child_links l where l.child_id = p_child and l.user_id = (select auth.uid()));
+  select exists (select 1 from public.child_links l where l.child_id = p_child and l.user_id = (select private.uid()));
 $$;
 revoke execute on function private.has_link(uuid) from public, anon;
 grant execute on function private.has_link(uuid) to authenticated;
@@ -171,7 +185,7 @@ create function public.has_parent(public.child_profiles) returns boolean
 language sql stable security definer set search_path = '' as $$
   select coalesce((select private.has_any_link(c.id) from public.child_profiles c
     where c.id = $1.id and (private.has_link(c.id) or private.is_class_teacher(c.class_id)
-      or (c.owner = (select auth.uid()) and c.class_id is null and not private.has_any_link(c.id)))), false);
+      or (c.owner = (select private.uid()) and c.class_id is null and not private.has_any_link(c.id)))), false);
 $$;
 revoke execute on function public.has_parent(public.child_profiles) from public, anon;
 grant execute on function public.has_parent(public.child_profiles) to authenticated;
@@ -228,10 +242,10 @@ drop function public.child_profiles_limit();
 -- checked on the new row before the after-insert trigger writes the creator's link. It stops applying once any link exists or the
 -- child is in a class.
 create policy "linked or class teacher reads" on public.child_profiles for select to authenticated
-  using (private.has_link(id) or private.is_class_teacher(class_id) or (owner = (select auth.uid()) and class_id is null and not private.has_any_link(id)));
+  using (private.has_link(id) or private.is_class_teacher(class_id) or (owner = (select private.uid()) and class_id is null and not private.has_any_link(id)));
 create policy "linked or class teacher updates" on public.child_profiles for update to authenticated
-  using (private.has_link(id) or private.is_class_teacher(class_id) or (owner = (select auth.uid()) and class_id is null and not private.has_any_link(id)))
-  with check (private.has_link(id) or private.is_class_teacher(class_id) or (owner = (select auth.uid()) and class_id is null and not private.has_any_link(id)));
+  using (private.has_link(id) or private.is_class_teacher(class_id) or (owner = (select private.uid()) and class_id is null and not private.has_any_link(id)))
+  with check (private.has_link(id) or private.is_class_teacher(class_id) or (owner = (select private.uid()) and class_id is null and not private.has_any_link(id)));
 create policy "creator inserts" on public.child_profiles for insert to authenticated
   with check (owner = (select private.caller()) and (class_id is null or private.is_class_teacher(class_id)) and not private.is_tombstoned(id));
 -- No delete policy: a direct delete is revoked; deletion goes through delete_child, which writes the tombstone.
@@ -481,7 +495,7 @@ alter table public.accounts enable row level security;
 revoke all on public.accounts from anon, authenticated;
 grant select on public.accounts to authenticated;
 create policy "own account reads" on public.accounts for select to authenticated
-  using (user_id = (select auth.uid()));
+  using (user_id = (select private.uid()));
 
 alter table public.classes enable row level security;
 revoke all on public.classes from anon, authenticated;
@@ -496,13 +510,13 @@ alter table public.class_teachers enable row level security;
 revoke all on public.class_teachers from anon, authenticated;
 grant select on public.class_teachers to authenticated;
 create policy "own class rows read" on public.class_teachers for select to authenticated
-  using (teacher_id = (select auth.uid()));
+  using (teacher_id = (select private.uid()));
 
 alter table public.child_links enable row level security;
 revoke all on public.child_links from anon, authenticated;
 grant select (child_id, user_id) on public.child_links to authenticated; -- not granted_by: who granted a link is for the admin only
 create policy "own links read" on public.child_links for select to authenticated
-  using (user_id = (select auth.uid()));
+  using (user_id = (select private.uid()));
 
 -- Server-only tables: RLS on, no policy, no grant. Only the security definer functions read and write them.
 alter table public.invites enable row level security;
@@ -529,7 +543,7 @@ revoke all on sequence public.admin_log_id_seq, public.invite_attempts_id_seq fr
 create function private.claim_role() returns void
 language plpgsql volatile security definer set search_path = '' as $$
 declare
-  v_uid uuid := auth.uid();
+  v_uid uuid := private.uid();
   v_email text;
   v_inv public.role_invites;
 begin
@@ -555,7 +569,7 @@ declare
 begin
   if private.caller() is null then return jsonb_build_object('error', 'forbidden'); end if;
   perform private.claim_role();
-  select jsonb_build_object('role', a.role, 'teacher_ack_at', a.teacher_ack_at) into v_res from public.accounts a where a.user_id = auth.uid();
+  select jsonb_build_object('role', a.role, 'teacher_ack_at', a.teacher_ack_at) into v_res from public.accounts a where a.user_id = private.uid();
   return coalesce(v_res, jsonb_build_object('role', 'parent', 'teacher_ack_at', null));
 end $$;
 revoke execute on function public.whoami() from public, anon;
@@ -568,7 +582,7 @@ declare
   v_at timestamptz;
 begin
   if private.current_role() is distinct from 'teacher' then return jsonb_build_object('error', 'forbidden'); end if;
-  update public.accounts a set teacher_ack_at = coalesce(a.teacher_ack_at, now()) where a.user_id = auth.uid() returning a.teacher_ack_at into v_at;
+  update public.accounts a set teacher_ack_at = coalesce(a.teacher_ack_at, now()) where a.user_id = private.uid() returning a.teacher_ack_at into v_at;
   return jsonb_build_object('ok', true, 'teacher_ack_at', v_at);
 end $$;
 revoke execute on function public.ack_teacher() from public, anon;
@@ -733,7 +747,7 @@ begin
   if private.caller() is null then return jsonb_build_object('error', 'forbidden'); end if;
   select c.class_id into v_class from public.child_profiles c where c.id = p_child for update;
   if not found or not private.has_link(p_child) then return jsonb_build_object('error', 'not_found'); end if;
-  delete from public.child_links l where l.child_id = p_child and l.user_id = auth.uid();
+  delete from public.child_links l where l.child_id = p_child and l.user_id = private.uid();
   delete from public.invites i where i.child_id = p_child and i.used_at is null;
   if v_class is null and not private.has_any_link(p_child) then
     insert into public.deleted_children (id) values (p_child) on conflict do nothing;
@@ -867,9 +881,9 @@ declare
 begin
   if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
   if position('@' in v_email) <= 1 or char_length(v_email) > 254 then return jsonb_build_object('error', 'bad_input'); end if;
-  insert into public.role_invites (email, created_by, created_at, expires_at) values (v_email, auth.uid(), now(), v_exp)
+  insert into public.role_invites (email, created_by, created_at, expires_at) values (v_email, private.uid(), now(), v_exp)
     on conflict (email) do update set created_by = excluded.created_by, created_at = excluded.created_at, expires_at = excluded.expires_at;
-  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'invite_teacher', jsonb_build_object('email', v_email));
+  insert into public.admin_log (actor, action, detail) values (private.uid(), 'invite_teacher', jsonb_build_object('email', v_email));
   return jsonb_build_object('ok', true, 'email', v_email, 'expires_at', v_exp);
 end $$;
 revoke execute on function public.admin_invite_teacher(text) from public, anon;
@@ -883,7 +897,7 @@ begin
   if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
   delete from public.role_invites r where r.email = v_email;
   if not found then return jsonb_build_object('error', 'not_found'); end if;
-  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'revoke_invite', jsonb_build_object('email', v_email));
+  insert into public.admin_log (actor, action, detail) values (private.uid(), 'revoke_invite', jsonb_build_object('email', v_email));
   return jsonb_build_object('ok', true);
 end $$;
 revoke execute on function public.admin_revoke_invite(text) from public, anon;
@@ -906,7 +920,7 @@ begin
   delete from public.invites i where i.created_by = p_user and i.kind = 'to_parent' and i.used_at is null;
   select count(*) filter (where g.class_id is not null), count(*) filter (where g.class_id is null) into v_in, v_out
     from private.granted_links(p_user, null) g;
-  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'demote_teacher',
+  insert into public.admin_log (actor, action, detail) values (private.uid(), 'demote_teacher',
     jsonb_build_object('user_id', p_user, 'parent_links', v_in, 'outside_class', v_out));
   return jsonb_build_object('ok', true, 'parent_links', v_in, 'outside_class', v_out);
 end $$;
@@ -922,7 +936,7 @@ begin
   if not private.is_admin() then return jsonb_build_object('error', 'forbidden'); end if;
   if char_length(v_name) not between 1 and 40 then return jsonb_build_object('error', 'bad_input'); end if;
   insert into public.classes (name) values (v_name) returning id into v_id;
-  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'create_class', jsonb_build_object('class_id', v_id, 'name', v_name));
+  insert into public.admin_log (actor, action, detail) values (private.uid(), 'create_class', jsonb_build_object('class_id', v_id, 'name', v_name));
   return jsonb_build_object('ok', true, 'id', v_id, 'name', v_name);
 end $$;
 revoke execute on function public.admin_create_class(text) from public, anon;
@@ -937,7 +951,7 @@ begin
   if char_length(v_name) not between 1 and 40 then return jsonb_build_object('error', 'bad_input'); end if;
   update public.classes k set name = v_name where k.id = p_class;
   if not found then return jsonb_build_object('error', 'not_found'); end if;
-  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'rename_class', jsonb_build_object('class_id', p_class, 'name', v_name));
+  insert into public.admin_log (actor, action, detail) values (private.uid(), 'rename_class', jsonb_build_object('class_id', p_class, 'name', v_name));
   return jsonb_build_object('ok', true);
 end $$;
 revoke execute on function public.admin_rename_class(uuid, text) from public, anon;
@@ -963,7 +977,7 @@ begin
   if v_unclaimed > 0 then return jsonb_build_object('error', 'orphans', 'count', v_unclaimed); end if;
   delete from public.invites i using public.child_profiles c where i.child_id = c.id and c.class_id = p_class and i.used_at is null;
   delete from public.classes k where k.id = p_class;
-  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'delete_class', jsonb_build_object('class_id', p_class));
+  insert into public.admin_log (actor, action, detail) values (private.uid(), 'delete_class', jsonb_build_object('class_id', p_class));
   return jsonb_build_object('ok', true);
 end $$;
 revoke execute on function public.admin_delete_class(uuid) from public, anon;
@@ -979,7 +993,7 @@ begin
     return jsonb_build_object('error', 'not_found');
   end if;
   insert into public.class_teachers (class_id, teacher_id) values (p_class, p_user) on conflict do nothing;
-  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'assign_teacher', jsonb_build_object('class_id', p_class, 'user_id', p_user));
+  insert into public.admin_log (actor, action, detail) values (private.uid(), 'assign_teacher', jsonb_build_object('class_id', p_class, 'user_id', p_user));
   return jsonb_build_object('ok', true);
 end $$;
 revoke execute on function public.admin_assign_teacher(uuid, uuid) from public, anon;
@@ -999,7 +1013,7 @@ begin
   delete from public.invites i using public.child_profiles c
     where i.child_id = c.id and c.class_id = p_class and i.created_by = p_user and i.kind = 'to_parent' and i.used_at is null;
   select count(*) into v_in from private.granted_links(p_user, p_class) g;
-  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'unassign_teacher',
+  insert into public.admin_log (actor, action, detail) values (private.uid(), 'unassign_teacher',
     jsonb_build_object('class_id', p_class, 'user_id', p_user, 'parent_links', v_in));
   return jsonb_build_object('ok', true, 'parent_links', v_in, 'outside_class', 0);
 end $$;
@@ -1024,7 +1038,7 @@ begin
     and exists (select 1 from private.granted_links(p_user, p_class) g where g.child_id = l.child_id and g.user_id = l.user_id);
   get diagnostics v_n = row_count;
   delete from public.invites i where i.child_id = any(v_kids) and i.used_at is null;
-  insert into public.admin_log (actor, action, detail) values (auth.uid(), 'drop_teacher_links',
+  insert into public.admin_log (actor, action, detail) values (private.uid(), 'drop_teacher_links',
     jsonb_build_object('user_id', p_user, 'class_id', p_class, 'dropped', v_n));
   return jsonb_build_object('ok', true, 'dropped', v_n);
 end $$;

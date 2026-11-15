@@ -51,7 +51,7 @@ for (const t of READABLE) { const g = grantsOn(t); check(`teachers: ${t} grants 
 check('teachers: no table or function is granted to anon', tc.length > 0 && !/grant [^;]* to [^;]*\banon\b/i.test(tc));
 check('teachers: no policy is granted to anon or public', tc.length > 0 && !/create policy [^;]* to (anon|public)\b/i.test(tc));
 
-const HELPERS = ['caller', 'is_admin', 'current_role', 'is_class_teacher', 'has_link', 'has_any_link', 'is_tombstoned'];
+const HELPERS = ['uid', 'caller', 'is_admin', 'current_role', 'is_class_teacher', 'has_link', 'has_any_link', 'is_tombstoned'];
 for (const h of HELPERS) { const f = fn('private.' + h); check(`teachers: helper private.${h} exists, security definer and stable`, definer(f) && /\bstable\b/i.test(f.header)); }
 check('teachers: helpers take the agreed arguments (p_class, p_child)', /function private\.is_class_teacher\(p_class uuid\)/.test(tc) && ['has_link', 'has_any_link', 'is_tombstoned'].every((h) => new RegExp(`function private\\.${h}\\(p_child uuid\\)`).test(tc)) && /function private\.is_admin\(\)/.test(tc) && /function private\.current_role\(\)/.test(tc));
 check('teachers: the private schema exists and only authenticated gets usage', /create schema if not exists private;/.test(tc) && /grant usage on schema private to authenticated;/.test(tc));
@@ -75,7 +75,7 @@ check('teachers: child_profiles.owner becomes nullable with on delete set null',
 check('teachers: child_profiles.class_id references classes on delete set null', /add column class_id uuid references public\.classes\(id\) on delete set null/.test(tc));
 check('teachers: the old owner policies and the old limit trigger are dropped', ['owner reads', 'owner inserts', 'owner updates', 'owner deletes'].every((p) => tc.includes(`drop policy "${p}" on public.child_profiles;`)) && /drop trigger child_profiles_limit on public\.child_profiles;/.test(tc) && /drop function public\.child_profiles_limit\(\);/.test(tc));
 const sel = policy('child_profiles', 'select'), upd = policy('child_profiles', 'update'), ins = policy('child_profiles', 'insert');
-const access = /private\.has_link\(id\) or private\.is_class_teacher\(class_id\) or \(owner = \(select auth\.uid\(\)\) and class_id is null and not private\.has_any_link\(id\)\)/;
+const access = /private\.has_link\(id\) or private\.is_class_teacher\(class_id\) or \(owner = \(select private\.uid\(\)\) and class_id is null and not private\.has_any_link\(id\)\)/;
 check('teachers: the select policy is link, class teacher, or just inserted through private.has_any_link', access.test(sel), access.test(sel) ? '' : sel.trim());
 check('teachers: the update policy uses the same rule in using and with check', (upd.match(new RegExp(access.source, 'g')) || []).length === 2, (upd.match(new RegExp(access.source, 'g')) || []).length === 2 ? '' : upd.trim());
 check('teachers: the insert policy is own owner (an existing account: private.caller()), class-less or own class, and not tombstoned', /owner = \(select private\.caller\(\)\)/.test(ins) && /class_id is null or private\.is_class_teacher\(class_id\)/.test(ins) && /not private\.is_tombstoned\(id\)/.test(ins));
@@ -159,13 +159,25 @@ const admins = Object.keys(RPCS).filter((n) => n.startsWith('admin_'));
 { // a deleted account's token stays valid until it expires: every non-admin RPC takes its caller from private.caller() (null once the
   // account is gone) and answers forbidden; the admin ones go through private.is_admin(), which reads accounts too
   const cl = fn('private.caller'), cb = (cl && cl.body) || '';
-  check('teachers: private.caller() is auth.uid() only while public.accounts still has that user', /from public\.accounts a where a\.user_id = \(select auth\.uid\(\)\)/.test(cb) && /returns uuid/.test(cl.header));
+  check('teachers: private.caller() is private.uid() only while public.accounts still has that user', /from public\.accounts a where a\.user_id = \(select private\.uid\(\)\)/.test(cb) && /returns uuid/.test(cl.header));
   const callers = ['whoami', 'create_invite', 'redeem_invite', 'leave_class', 'unlink_me', 'delete_child', 'export_my_data', 'delete_my_account'];
   const raw = callers.filter((n) => !/private\.caller\(\)/.test(bodyOf('public.' + n)) || /auth\.uid\(\) is null|v_uid uuid := auth\.uid\(\)/.test(bodyOf('public.' + n)));
   check('rpc: every non-admin RPC checks its caller with private.caller() (a deleted account is forbidden), never a bare auth.uid()', !raw.length, raw.join());
   const rb = bodyOf('public.redeem_invite'), lk = rb.search(/from auth\.users u where u\.id = v_uid for key share;\s*if not found then return jsonb_build_object\('error', 'forbidden'\)/);
   check('rollback: private.caller() is dropped', /drop function private\.caller\(\);/.test(readFileSync('supabase/rollback/20261113000000_teachers_classes.down.sql', 'utf8')));
   check('rpc: redeem_invite holds the caller\'s auth.users row (for key share) before the rate limit, so a deletion cannot land mid-redeem', lk > 0 && lk < rb.indexOf("'rate'"));
+}
+{ // fix iteration (F001): a password proves nothing about the inbox. Whoever pre-registers an invited teacher's address with a password
+  // keeps it after the teacher confirms that address with an emailed code, so a session opened with a password (the JWT's amr, kept on
+  // every refresh) must reach nothing: private.uid() is null for it, and nothing else in the migration reads auth.uid().
+  const u = fn('private.uid'), ub = (u && u.body) || '';
+  check('teachers: private.uid() is auth.uid() unless the session\'s amr has a password (stable, security definer, granted to authenticated only)',
+    !!u && definer(u) && /\bstable\b/.test(u.header) && /returns uuid/.test(u.header) && /auth\.jwt\(\)\) -> 'amr' @> '\[\{"method":"password"\}\]'::jsonb/.test(ub)
+    && /then null else \(select auth\.uid\(\)\) end/.test(ub) && /grant execute on function private\.uid\(\) to authenticated;/.test(tc));
+  const code = tc.replace(/--[^\n]*/g, '').replace(ub, '');
+  const bare = (code.match(/auth\.uid\(\)/g) || []).length;
+  check('teachers: no policy, helper or RPC reads auth.uid() directly (only private.uid() does)', !!u && bare === 0, `${bare} bare auth.uid()`);
+  check('rollback: private.uid() is dropped after everything that calls it', /drop function private\.caller\(\);[\s\S]*drop function private\.uid\(\);/.test(readFileSync('supabase/rollback/20261113000000_teachers_classes.down.sql', 'utf8')));
 }
 check('rpc: every admin_* function first checks private.is_admin() and answers {error:forbidden}', admins.every((n) => /^\s*(declare[\s\S]*?)?begin\s+if not private\.is_admin\(\) then return jsonb_build_object\('error', 'forbidden'\); end if;/.test(bodyOf('public.' + n))), admins.filter((n) => !/^\s*(declare[\s\S]*?)?begin\s+if not private\.is_admin\(\) then return jsonb_build_object\('error', 'forbidden'\); end if;/.test(bodyOf('public.' + n))).join());
 const adminWrites = admins.filter((n) => !/^admin_list_/.test(n));
@@ -180,7 +192,7 @@ check('rpc: redeem_invite checks the class, ownership and limits before consumin
 const hp = fn('public.has_parent');
 check('rpc: public.has_parent(child_profiles) is a stable, security definer boolean with an empty search_path, revoked from public and anon and granted to authenticated',
   /function public\.has_parent\(public\.child_profiles\)/.test(tc) && definer(hp) && /returns boolean/.test(hp.header) && /\bstable\b/.test(hp.header) && /set search_path = ''/.test(hp.header) && revokes('public.has_parent') === 1 && /revoke execute on function public\.has_parent\(public\.child_profiles\) from public, anon;/.test(tc) && /grant execute on function public\.has_parent\(public\.child_profiles\) to authenticated;/.test(tc));
-check('rpc: has_parent repeats the select policy exactly (link, class teacher, creator one-shot clause) and returns nothing but a boolean', /private\.has_link\(c\.id\) or private\.is_class_teacher\(c\.class_id\)\s+or \(c\.owner = \(select auth\.uid\(\)\) and c\.class_id is null and not private\.has_any_link\(c\.id\)\)/.test(hp.body) && !/c\.owner = \(select auth\.uid\(\)\)\s*\)/.test(hp.body) && /coalesce\(/.test(hp.body) && !/child_links l/.test(hp.body) && !/user_id/.test(hp.body));
+check('rpc: has_parent repeats the select policy exactly (link, class teacher, creator one-shot clause) and returns nothing but a boolean', /private\.has_link\(c\.id\) or private\.is_class_teacher\(c\.class_id\)\s+or \(c\.owner = \(select private\.uid\(\)\) and c\.class_id is null and not private\.has_any_link\(c\.id\)\)/.test(hp.body) && !/c\.owner = \(select private\.uid\(\)\)\s*\)/.test(hp.body) && /coalesce\(/.test(hp.body) && !/child_links l/.test(hp.body) && !/user_id/.test(hp.body));
 check('rpc: redeem_invite refuses a to_parent code that comes with a class, uniformly (invalid) and before consuming it', /v_inv\.kind = 'to_parent' and p_class is not null then v_err := 'invalid'; exit checks/.test(redeem) && redeem.indexOf("p_class is not null then v_err := 'invalid'") < redeem.indexOf('update public.invites'));
 check('rpc: redeem_invite never generates codes; create_invite does, with extensions.gen_random_bytes', !/gen_random_bytes/.test(redeem) && /extensions\.gen_random_bytes\(/.test(create));
 const alpha = (/'([A-Za-z0-9]{20,})'/.exec(create) || [])[1] || '';
