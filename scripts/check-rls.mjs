@@ -422,7 +422,7 @@ try {
     const w = await rest(T1, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ data: planted }) });
     const cap = Date.now() + 600000 + 5000; // now() + 10 min on the server, with a little room for the two clocks
     const d = (await one(await svc(`child_profiles?id=eq.${kid}&select=data,version`))).data;
-    const clamped = w.status === 200 && d.modAt <= cap && d.modAt >= now0 && d.session.at === d.modAt && d.prefs.lang.at === d.modAt && d.level === 4 && d.resets.es === 4 && d.resets.ca === 'x' && d.prefs.mode.at === 'oops' && d.prefs.world === 5;
+    const clamped = w.status === 200 && d.modAt <= cap && d.modAt >= now0 && d.session.at === d.modAt && d.prefs.lang.at === d.modAt && d.level === 4 && d.resets.es === 4 && d.resets.ca === 0 && d.prefs.mode.at === 'oops' && d.prefs.world === 5;
     // the family takes the child back and edits (src/app.js stampAfter: one past what it pulled), then "Borrar progreso" in Spanish
     const left = await rpc(PS, 'leave_class', { p_child: kid });
     const row = await one(await rest(PS, `child_profiles?id=eq.${kid}&select=data,version`)), at = row.data.modAt + 1, ahead = Date.now() + 5 * 60000; // a device clock 5 min ahead
@@ -437,6 +437,19 @@ try {
     const born = await one(await rest(T1, 'child_profiles', { method: 'POST', body: JSON.stringify({ id: tid, name: 'T', kind: 'reader', class_id: C1, data: planted }) }));
     const bd = born && born.data, bornOk = !!bd && bd.modAt <= cap && bd.level === 4 && bd.resets.es === 1000 && bd.session.at <= cap && bd.prefs.lang.at <= cap;
     return [clamped && okr(left) && famOk && bornOk, JSON.stringify({ w: w.status, d, left: left.body, fam: fam.status, ad, bd })];
+  });
+  await t('resets never go down: a teacher PATCH that lowers resets, omits them or sends non-object data keeps the old counters (a +1 still lands)', async () => {
+    const PD = await mk('pdown'), kid = await mkKid(PD, { data: { level: 1, name: 'Elsa', modAt: Date.now(), resets: { es: 5, ca: 2 }, stats: {} } });
+    await share(PD, kid, T1, C1);
+    const patch = async (data) => { const w = await rest(T1, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ data }) }); return [w.status, ((await json(w)) || [])[0]?.data?.resets]; };
+    const planted = { 's:ma': { ok: 999, fail: 0 }, 's:pa': { ok: 999, fail: 0 } };
+    const lowered = await patch({ resets: { es: 0, ca: 'x' }, stats: planted, modAt: Date.now() });
+    const omitted = await patch({ stats: planted, modAt: Date.now() });
+    const badObj = await patch({ resets: [0], stats: planted });
+    const notObj = await patch([1, 2]);
+    const up = await patch({ resets: { es: 6, ca: 2 }, stats: planted });
+    const ok = (r, es, ca) => r[0] === 200 && !!r[1] && r[1].es === es && r[1].ca === ca;
+    return [ok(lowered, 5, 2) && ok(omitted, 5, 2) && ok(badObj, 5, 2) && ok(notObj, 5, 2) && ok(up, 6, 2), JSON.stringify({ lowered, omitted, badObj, notObj, up })];
   });
   if (!DB) console.log('SKIP  repeated +1 resets writes past 1e6 cannot disable «Borrar progreso» (needs the local db container: npm run test:rls)');
   else await t('repeated +1 resets writes past 1e6 (row seeded at 999999 past the trigger) cannot disable «Borrar progreso»: the family\'s reset still wins', async () => {

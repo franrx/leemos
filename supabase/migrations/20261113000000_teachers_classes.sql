@@ -266,9 +266,13 @@ create trigger child_profiles_version before insert or update on public.child_pr
 -- and they would outlive leave_class. Every write: data.modAt, data.session.at and each data.prefs.*.at at most now() + 10 min (epoch
 -- ms; a device clock a little ahead still passes); data.level at most 4, the last index of src/data/levels.{es,ca}.json (5 levels;
 -- tests/migration.mjs checks it); data.resets.es/ca at most old + 1 per update ("Borrar progreso" adds 1) and at most 1000 on insert.
+-- On update a counter never goes down: when the old one is a safe integer (0..2^53-1), the stored value is
+-- greatest(floor(old), least(new, floor(old) + 1)), and a write without a numeric value (or without a resets object, or with non-object
+-- data) keeps the old one. No client lowers it (src/sync.js capResets pushes at least the row's counter), so this only stops a writer
+-- from lowering or dropping it, which would make a stale family device's older stats win again after leave_class.
 -- A writer can still raise resets by 1 per write, any number of times, but src/merge.js puts no reachable cap on them (any safe
 -- integer, 2^53 writes away), so repetition only makes the family's next reset one higher: it never reaches a state that defeats it.
--- Only numbers are touched: a missing key or an odd type is left alone (merge.js ignores it), so no write ever fails here.
+-- Only numbers are touched: other keys with odd types are left alone (merge.js ignores them), so no write ever fails here.
 create function private.child_profiles_data() returns trigger
 language plpgsql set search_path = '' as $$
 declare
@@ -277,8 +281,20 @@ declare
   p jsonb;
   lang text;
   allowed numeric;
+  keep jsonb := '{}'::jsonb;
+  o numeric;
 begin
+  -- the old counters a write may not lower: safe integers >= 0 (anything else keeps the plain upper bound below)
+  if tg_op = 'UPDATE' and jsonb_typeof(old.data) = 'object' and jsonb_typeof(old.data->'resets') = 'object' then
+    foreach lang in array array['es', 'ca'] loop
+      if jsonb_typeof(old.data->'resets'->lang) = 'number' and (old.data->'resets'->>lang)::numeric between 0 and 9007199254740991 then
+        keep := keep || jsonb_build_object(lang, floor((old.data->'resets'->>lang)::numeric));
+      end if;
+    end loop;
+  end if;
+  if keep <> '{}'::jsonb and (d is null or jsonb_typeof(d) <> 'object') then d := '{}'::jsonb; end if;
   if d is null or jsonb_typeof(d) <> 'object' then return new; end if;
+  if keep <> '{}'::jsonb and jsonb_typeof(d->'resets') is distinct from 'object' then d := jsonb_set(d, '{resets}', '{}'::jsonb); end if;
   if jsonb_typeof(d->'modAt') = 'number' and (d->>'modAt')::numeric > cap then d := jsonb_set(d, '{modAt}', to_jsonb(cap)); end if;
   if jsonb_typeof(d->'session') = 'object' and jsonb_typeof(d->'session'->'at') = 'number' and (d->'session'->>'at')::numeric > cap then
     d := jsonb_set(d, '{session,at}', to_jsonb(cap));
@@ -292,6 +308,12 @@ begin
   if jsonb_typeof(d->'level') = 'number' and (d->>'level')::numeric > 4 then d := jsonb_set(d, '{level}', '4'::jsonb); end if;
   if jsonb_typeof(d->'resets') = 'object' then
     foreach lang in array array['es', 'ca'] loop
+      if keep ? lang then
+        o := (keep->>lang)::numeric;
+        if jsonb_typeof(d->'resets'->lang) = 'number' then o := greatest(o, least((d->'resets'->>lang)::numeric, o + 1)); end if;
+        if d->'resets'->lang is distinct from to_jsonb(o) then d := jsonb_set(d, array['resets', lang], to_jsonb(o)); end if;
+        continue;
+      end if;
       continue when jsonb_typeof(d->'resets'->lang) is distinct from 'number';
       allowed := 1000;
       if tg_op = 'UPDATE' then

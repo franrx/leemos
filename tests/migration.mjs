@@ -107,11 +107,12 @@ check('teachers: the class limit runs before insert or update of class_id', /bef
   const down = readFileSync(new URL('../supabase/rollback/20261113000000_teachers_classes.down.sql', import.meta.url), 'utf8');
   const lastLevel = Math.max(...['es', 'ca'].map((l) => JSON.parse(readFileSync(new URL(`../src/data/levels.${l}.json`, import.meta.url), 'utf8')).length)) - 1;
   const b = dat.length === 1 ? dat[0].body : '';
-  check('teachers: data stamps and counters are server-clamped (modAt, session.at, prefs.*.at to now()+10 min; level to the last index; resets old+1, 1000 on insert; plain, empty search_path; rollback drops it)',
+  check('teachers: data stamps and counters are server-clamped (modAt, session.at, prefs.*.at to now()+10 min; level to the last index; resets old+1 and never lower on update, 1000 on insert; plain, empty search_path; rollback drops it)',
     dat.length === 1 && !definer(dat[0]) && /set search_path = ''/.test(dat[0].header) && /extract\(epoch from now\(\)\) \* 1000\) \+ 600000/.test(b)
     && /'\{modAt\}'/.test(b) && /'\{session,at\}'/.test(b) && /jsonb_each\(d->'prefs'\)/.test(b)
     && new RegExp(`\\(d->>'level'\\)::numeric > ${lastLevel} then d := jsonb_set\\(d, '\\{level\\}', '${lastLevel}'::jsonb\\)`).test(b)
     && /allowed := 1000;/.test(b) && /old\.data->'resets'->>lang\)::numeric\)\) \+ 1/.test(b)
+    && /between 0 and 9007199254740991/.test(b) && /o := greatest\(o, least\(\(d->'resets'->>lang\)::numeric, o \+ 1\)\)/.test(b)
     && /before insert or update on public\.child_profiles\s+for each row execute function private\.child_profiles_data\(\)/.test(tc)
     && /drop trigger child_profiles_data on public\.child_profiles;/.test(down) && /drop function private\.child_profiles_data\(\);/.test(down), `last level ${lastLevel}`);
 }

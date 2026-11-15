@@ -155,7 +155,7 @@ const signedIn = async () => { const x = mk(); await x.sync.requestCode('m@e.c')
   const tok = (await sync.session()).access_token, END = 8.64e15;
   await srv.fetch(`${URL_}/rest/v1/child_profiles?id=eq.${RID}`, { method: 'PATCH', headers: { Authorization: 'Bearer ' + tok }, body: JSON.stringify({ data: { level: 1e6, name: 'X', modAt: END, resets: { es: 1e6, ca: 'x' }, stats: { 's:pa': { ok: 99 } }, prefs: { lang: { v: 'es', at: END } }, session: { done: 1, ok: 1, stk: 0, at: END } } }) });
   const d = srv.rows.get(RID).data, cap = Date.now() + 600000;
-  check('data: far-future stamps, a level past the last and a resets jump are clamped (fake follows the trigger)', d.modAt <= cap && d.prefs.lang.at <= cap && d.session.at <= cap && d.level === 4 && d.resets.es === 4 && d.resets.ca === 'x', JSON.stringify(d));
+  check('data: far-future stamps, a level past the last and a resets jump are clamped (fake follows the trigger)', d.modAt <= cap && d.prefs.lang.at <= cap && d.session.at <= cap && d.level === 4 && d.resets.es === 4 && d.resets.ca === 0, JSON.stringify(d));
   const at = d.modAt + 1;
   const r = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ level: 1, modAt: at, resets: { es: 5, ca: 0 }, stats: {}, prefs: { lang: { v: 'ca', at } } }) });
   const row = srv.rows.get(RID).data;
@@ -258,6 +258,34 @@ const as = async (srv, email) => { const storage = memoryStorage(); const sync =
   check('sync: after the hour the unused code still redeems and moves the child into the class', ok.ok === true && ok.child_id === RID && srv.rows.get(RID).class_id === cls);
   const again = await rejects(t.sync.redeemInvite(code, cls));
   check('sync: a code is single use (uniform invalid)', again instanceof SyncError && again.kind === 'code');
+}
+for (const variant of ['lowered', 'omitted']) {
+  // the server's resets counter never goes down: a class teacher plants stats, the family resets on device A, the teacher lowers (or
+  // drops) resets in one write, the family takes the child out of the class; then A, a stale device B and A again sync
+  const srv = createFakeSupabase();
+  const cls = srv.addClass('3A');
+  const t = await as(srv, 't@e.c'); srv.setRole('t@e.c', 'teacher', { ack: true }); srv.addTeacher(cls, 't@e.c');
+  const A = await as(srv, 'p@e.c'), B = await as(srv, 'p@e.c');
+  await A.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ resets: { es: 5, ca: 0 } }) });
+  await t.sync.redeemInvite((await A.sync.createInvite(RID, 'to_class')).code, cls);
+  const tok = (await t.sync.session()).access_token;
+  const teacherPatch = (d) => srv.fetch(`${URL_}/rest/v1/child_profiles?id=eq.${RID}`, { method: 'PATCH', headers: { Authorization: 'Bearer ' + tok }, body: JSON.stringify({ data: d }) });
+  const planted = { 's:ma': { ok: 999, fail: 0 }, 's:pa': { ok: 999, fail: 0 } };
+  await teacherPatch({ ...srv.rows.get(RID).data, stats: planted });
+  // what app.js does with a result (storeState): the device adopts the data the server holds
+  const dev = { A: null, B: null };
+  const round = async (name, who, local) => { dev[name] = (await who.sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: local })).data; };
+  await round('A', A, data({ resets: { es: 5, ca: 0 } })); await round('B', B, data({ resets: { es: 5, ca: 0 } }));
+  await round('A', A, { ...dev.A, stats: {}, resets: { ...dev.A.resets, es: dev.A.resets.es + 1 } }); // «Borrar progreso» on A
+  const { resets, ...rest } = srv.rows.get(RID).data;
+  const w = await teacherPatch(variant === 'lowered' ? { ...rest, resets: { es: 0, ca: 0 } } : rest);
+  const kept = srv.rows.get(RID).data.resets?.es;
+  await A.sync.leaveClass(RID);
+  await round('A', A, dev.A); await round('B', B, dev.B); await round('A', A, dev.A);
+  const row = srv.rows.get(RID).data;
+  check(`resets: a teacher write that ${variant} resets keeps the counter, and after leave_class a stale device cannot bring the planted stats back`,
+    w.status === 200 && kept === 6 && !row.stats['s:pa'] && !row.stats['s:ma'] && !dev.A.stats['s:pa'] && !dev.B.stats['s:pa'] && row.resets.es >= 6,
+    JSON.stringify({ kept, row: { resets: row.resets, stats: row.stats }, A: dev.A.stats, B: dev.B.stats }));
 }
 {
   const srv = createFakeSupabase();

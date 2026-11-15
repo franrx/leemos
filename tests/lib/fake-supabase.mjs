@@ -5,9 +5,14 @@
 // trigger child_profiles_data: stamps at most now + 10 min, level at most 4 (the last level index), resets at most old + 1 (1000 on
 // insert); only numbers are touched, an odd type is left alone
 const clampData = (d, old, now) => {
-  if (!d || typeof d !== 'object' || Array.isArray(d)) return d;
   const cap = Math.floor(now) + 600000, isNum = (v) => typeof v === 'number', isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  // on update, the old counters that are safe integers (>= 0) never go down: a lowered, missing or odd value keeps the old one
+  const keep = {};
+  if (old && isObj(old) && isObj(old.resets)) for (const L of ['es', 'ca']) { const v = old.resets[L]; if (isNum(v) && v >= 0 && v <= Number.MAX_SAFE_INTEGER) keep[L] = Math.floor(v); }
+  const kept = Object.keys(keep).length > 0;
+  if (!isObj(d)) { if (!kept) return d; d = {}; }
   const out = { ...d };
+  if (kept && !isObj(out.resets)) out.resets = {};
   if (isNum(out.modAt) && out.modAt > cap) out.modAt = cap;
   if (isObj(out.session) && isNum(out.session.at) && out.session.at > cap) out.session = { ...out.session, at: cap };
   if (isObj(out.prefs)) out.prefs = Object.fromEntries(Object.entries(out.prefs).map(([k, e]) => [k, isObj(e) && isNum(e.at) && e.at > cap ? { ...e, at: cap } : e]));
@@ -15,6 +20,7 @@ const clampData = (d, old, now) => {
   if (isObj(out.resets)) {
     out.resets = { ...out.resets };
     for (const L of ['es', 'ca']) {
+      if (L in keep) { const o = keep[L]; out.resets[L] = isNum(out.resets[L]) ? Math.max(o, Math.min(out.resets[L], o + 1)) : o; continue; }
       if (!isNum(out.resets[L])) continue;
       const o = old && isObj(old.resets) && isNum(old.resets[L]) ? Math.max(0, Math.floor(old.resets[L])) + 1 : 1;
       const allowed = old ? o : 1000;
