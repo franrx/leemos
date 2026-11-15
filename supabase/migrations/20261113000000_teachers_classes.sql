@@ -231,6 +231,24 @@ revoke all on public.child_profiles from authenticated;
 grant select, insert on public.child_profiles to authenticated;
 grant update (name, data, version, kind) on public.child_profiles to authenticated;
 
+-- version is the optimistic-lock token, now writable by lower-trust accounts (a class teacher, a code's redeemer): the server controls it.
+-- A new row starts at 1; an update moves it at most one step up (the client writes row.version + 1 under version=eq.<row.version>), so
+-- nobody can plant 2147483647 and make every later write overflow the integer (which would break that child's sync for every account).
+-- A plain trigger (no definer): it reads only old and new.
+create function private.child_profiles_version() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  if tg_op = 'INSERT' then
+    new.version := 1;
+  elsif new.version is distinct from old.version then
+    new.version := least(new.version, old.version + 1);
+  end if;
+  return new;
+end $$;
+revoke execute on function private.child_profiles_version() from public, anon;
+create trigger child_profiles_version before insert or update on public.child_profiles
+  for each row execute function private.child_profiles_version();
+
 -- A class-less child gets a parent link for its creator. security definer: the caller has no write grant on child_links.
 create function private.child_profiles_link_creator() returns trigger
 language plpgsql security definer set search_path = '' as $$

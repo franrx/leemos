@@ -135,6 +135,18 @@ const signedIn = async () => { const x = mk(); await x.sync.requestCode('m@e.c')
   const r = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
   check('remote data: a malformed remote row is merged as if empty and never crashes', r.data.total === 5 && r.version === 5);
 }
+{
+  // version is server-controlled (trigger child_profiles_version): a jump is flattened to one step, an insert always starts at 1
+  const { srv, sync } = await signedIn();
+  await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data() });
+  const tok = (await sync.session()).access_token;
+  const p = await srv.fetch(`${URL_}/rest/v1/child_profiles?id=eq.${RID}`, { method: 'PATCH', headers: { Authorization: 'Bearer ' + tok }, body: JSON.stringify({ version: 2147483647 }) });
+  check('version: a write that jumps the version is flattened to old + 1 (fake follows the trigger)', p.status === 200 && srv.rows.get(RID).version === 2, String(srv.rows.get(RID).version));
+  // a row poisoned before the trigger existed: version+1 overflows the integer (22003). The client resets it to 1 under the same filter.
+  srv.rows.get(RID).version = 2147483647;
+  const r = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ total: 12 }) });
+  check('version: a row at the integer maximum (22003 on version+1) still syncs: the client writes version 1 under the same filter', r.version === 1 && srv.rows.get(RID).version === 1 && srv.rows.get(RID).data.total === 12, JSON.stringify({ r: r.version, row: srv.rows.get(RID).version }));
+}
 
 // ---------- a project URL pasted with an API path still works ----------
 for (const pasted of ['https://x.supabase.co/rest/v1/', 'https://x.supabase.co/auth/v1', 'https://x.supabase.co/', 'https://x.supabase.co']) {

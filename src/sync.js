@@ -78,6 +78,7 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
     if (r.status === 401) { clearSession(); throw new SyncError('auth', 'not authorised', 401); }
     return r;
   }
+  const errCode = async (r) => { try { const j = await r.json(); return j && j.code; } catch (e) { return null; } };
   const rows = async (r) => { try { const j = await r.json(); return Array.isArray(j) ? j : []; } catch (e) { return []; } };
   const SELECT = 'select=id,name,kind,data,version,class_id,has_parent,child_links(user_id)'; // has_parent: a computed column (a boolean for rows the caller can read)
 
@@ -149,9 +150,12 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
       const push = kindChanged && kind !== row.kind;
       const nextKind = push ? kind : row.kind;
       if (sameData(merged, mergeData(row.data, {})) && row.name === name && !push) return { data: merged, version: row.version, kind: nextKind };
-      const p = await api(`child_profiles?id=eq.${encodeURIComponent(rid)}&version=eq.${row.version}`, { method: 'PATCH', body: JSON.stringify({ name, data: merged, version: row.version + 1, ...(push ? { kind } : {}) }) });
+      const write = (version) => api(`child_profiles?id=eq.${encodeURIComponent(rid)}&version=eq.${row.version}`, { method: 'PATCH', body: JSON.stringify({ name, data: merged, version, ...(push ? { kind } : {}) }) });
+      let next = row.version + 1, p = await write(next);
+      // a version at the integer maximum (planted before the server controlled it): version+1 overflows (22003). Start again at 1 under the same filter.
+      if (p.status === 400 && (await errCode(p)) === '22003') { next = 1; p = await write(next); }
       if (!p.ok) throw new SyncError('http', 'could not save the profile', p.status);
-      if ((await rows(p)).length) return { data: merged, version: row.version + 1, kind: nextKind };
+      if ((await rows(p)).length) return { data: merged, version: next, kind: nextKind };
       // empty result: someone else wrote first, go again from the read
     }
     throw new SyncError('conflict', 'too many concurrent writes');

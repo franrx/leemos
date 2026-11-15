@@ -93,6 +93,14 @@ const lim = fns.filter((f) => /check_violation/.test(f.body));
 check('teachers: limit triggers are security definer (8 class-less per owner, 60 per class, 1 parent link)', lim.length >= 3 && lim.every(definer) && lim.some((f) => />= 8/.test(f.body) && /class_id is null/.test(f.body)) && lim.some((f) => />= 60/.test(f.body)) && lim.some((f) => /public\.child_links/.test(f.body) && /user_id <> new\.user_id/.test(f.body)));
 check('teachers: limit triggers take advisory locks (per owner, per class, per child)', lim.length >= 3 && lim.every((f) => /pg_advisory_xact_lock\(/.test(f.body)));
 check('teachers: the class limit runs before insert or update of class_id', /before insert or update of class_id on public\.child_profiles/.test(tc));
+{
+  const ver = fns.filter((f) => /new\.version := 1/.test(f.body));
+  const down = readFileSync(new URL('../supabase/rollback/20261113000000_teachers_classes.down.sql', import.meta.url), 'utf8');
+  check('teachers: version is server-controlled (before insert or update: 1 on insert, at most old+1 on update; plain, empty search_path; rollback drops it)',
+    ver.length === 1 && !definer(ver[0]) && /set search_path = ''/.test(ver[0].header) && /least\(new\.version, old\.version \+ 1\)/.test(ver[0].body) && /new\.version is distinct from old\.version/.test(ver[0].body)
+    && new RegExp(`before insert or update on public\\.child_profiles\\s+for each row execute function ${esc(ver[0].name)}\\(\\)`).test(tc)
+    && /drop trigger child_profiles_version on public\.child_profiles;/.test(down) && /drop function private\.child_profiles_version\(\);/.test(down));
+}
 check('teachers: data stays capped below 200000 bytes (constraint untouched)', tc.length > 0 && !/octet_length/.test(tc) && !/drop constraint child_profiles_data_check/.test(tc));
 
 // ---- RPCs (spec sections 1, 4, 5 and 8). Each name with its exact argument list; the clients of later tasks call them by these names.

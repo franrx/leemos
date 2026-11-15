@@ -73,6 +73,7 @@ if(PROFILES.list.find(x=>x.id===PROFILES.active).hidden){PROFILES.active=fallbac
 const PROFILE=PROFILES.list.find(x=>x.id===PROFILES.active);
 let purgedActive=false; // the open profile was purged: its state must not be written back before the reload
 let switchAfterRound=false; // the open class profile was revoked during a sync round: the page switches after the round, never inside it
+let signingOut=false; // signOutAndClean / deleteAccount is running: a round that ends meanwhile leaves the switch to them (after signOut and the purge)
 const keyFor=id=>id==='elsa'?'leemos-v1':'leemos-v1:'+id;
 const profileSlug=n=>n.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 function switchProfile(id){PROFILES.active=id;saveProfiles();location.reload()}
@@ -787,7 +788,7 @@ async function syncAll({final=false}={}){
     else{syncState='idle';try{localStorage.setItem(SYNC_AT_KEY,String(started))}catch(e){}}
     if(again)schedSync();
     return worst;
-  }finally{syncBusy=false;renderAcct();if(switchAfterRound&&!final)switchNow({keepMsg:true})} // the final round leaves it to signOutAndClean: after signOut and the purge
+  }finally{syncBusy=false;renderAcct();if(switchAfterRound&&!final&&!signingOut)switchNow({keepMsg:true})} // the final round, or any round while signing out or deleting the account, leaves it to them: after signOut and the purge
 }
 // The pending switch away from a revoked open profile. keepMsg: the account message survives the reload (shown once by the next page).
 const NOTE_KEY='leemos-acct-note';
@@ -886,6 +887,10 @@ function askChoice(textKey,yesKey,noKey,titleKey='acctSignOut',vars){
 // Sign out: one last sync, then the class profiles go. If that sync failed and a class profile has progress not yet sent, ask first.
 async function signOutAndClean(){
   if(!sync)return;
+  signingOut=true; // before the wait: a background round in flight must not reload the page under it
+  try{await signOutSteps()}finally{signingOut=false;if(switchAfterRound)switchNow({keepMsg:true})} // every path (stay, failure) still leaves a revoked open profile
+}
+async function signOutSteps(){
   const wait=Date.now()+(window.__leemosSignOutWait||10000);
   while(syncBusy&&Date.now()<wait)await new Promise(r=>setTimeout(r,50)); // a sync in flight finishes first (if it does not, this round is 'busy': nothing counts as sent)
   const fail=await syncAll({final:true});
@@ -938,6 +943,10 @@ async function deleteAccount(){
   if(!sync||!sync.userId())return;
   if(!await askChoice('acctDelAsk1','acctDelYes1','acctDelNo','acctDelTitle'))return;
   if(!await askChoice('acctDelAsk2','acctDelYes2','acctDelNo','acctDelTitle'))return;
+  signingOut=true; // before the wait: a background round in flight must not reload the page before the deletion and its local cleanup
+  try{await deleteSteps()}finally{signingOut=false;if(switchAfterRound)switchNow({keepMsg:true})} // also after a failed deletion
+}
+async function deleteSteps(){
   const wait=Date.now()+(window.__leemosSignOutWait||10000);
   while(syncBusy&&Date.now()<wait)await new Promise(r=>setTimeout(r,50)); // a sync in flight finishes first
   try{await sync.deleteMyAccount()}catch(e){acctMsg(acctErrKey(e));return}

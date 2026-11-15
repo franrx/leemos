@@ -2775,6 +2775,33 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
       JSON.stringify({ navs: app.navs.map((n) => ({ auth: !!n.auth, logoutAt: n.log.indexOf('POST /auth/v1/logout'), list: n.profiles && n.profiles.list.map((p) => p.id) })), e: app.errors }));
   }
 
+  // fix iteration 5 (F001): a BACKGROUND round in flight revokes the open class child while "Cerrar sesión" / "Borrar mi cuenta" waits for it.
+  // That round must not reload the page: the reload comes only after signOut (or the deletion and its local cleanup) and the purge.
+  for (const how of ['signout', 'delete']) {
+    const RID_L = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    const t = await teacherWorld();
+    t.s.rows.set(RID_L, { id: RID_L, owner: null, class_id: t.cls, name: 'Lucía', kind: 'reader', data: dat({ total: 2, name: 'Lucía', modAt: 2 }), version: 1 });
+    // hold the SECOND read of Lucía's row (the first is the start-up round): a background round in flight
+    let reads = 0, held = false, release; const gate = new Promise((r) => { release = r; });
+    const hs = { ...t.s, fetch: async (u, o = {}) => { const r = await t.s.fetch(u, o); if ((o.method || 'GET') === 'GET' && String(u).includes('child_profiles') && String(u).includes('id=eq.' + RID_L) && ++reads === 2) { held = true; await gate; } return r; } };
+    const profiles = { 'leemos-profiles': { active: 'lucia', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'lucia', name: 'Lucía', kind: 'reader', rid: RID_L, via: 'class' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] } };
+    const app = await boot({ supa: hs, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...profiles, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 }, 'leemos-v1:lucia': { name: 'Lucía', total: 2, modAt: 2 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 } } });
+    await until(() => t.s.log.filter((l) => l.startsWith('GET /rest/v1/child_profiles')).length >= 3, 3000); await sleep(80);
+    t.s.hideRow(RID_L); // Lucía, open on the tablet, is taken out of the class
+    app.w.dispatchEvent(new app.w.Event('focus')); // a background round starts
+    await until(() => held, 3000);
+    if (how === 'signout') app.$('acctOutBtn').click();
+    else { app.$('acctDelete').click(); for (let i = 0; i < 2; i++) { await until(() => !app.$('link').hidden, 2000); linkButtons(app)[0].click(); await sleep(40); } }
+    await sleep(120);
+    release();
+    await until(() => app.navs.length > 0, 3000); await sleep(100);
+    const nav = app.navs[0] || {};
+    const done = how === 'signout' ? 'POST /auth/v1/logout' : 'POST /rest/v1/rpc/delete_my_account';
+    check(`${how === 'signout' ? 'sign-out' : 'delete account'}: an open class child revoked by a background round in flight reloads only after ${how === 'signout' ? 'signOut' : 'the deletion'} and the purge`,
+      held && app.navs.length === 1 && nav.auth === null && (nav.log || []).includes(done) && !!nav.profiles && !nav.profiles.list.some((p) => p.via === 'class') && nav.profiles.active === 'elsa' && app.errors.length === 0,
+      JSON.stringify({ held, navs: app.navs.map((n) => ({ auth: !!n.auth, done: n.log.includes(done), list: n.profiles && n.profiles.list.map((p) => p.id) })), e: app.errors }));
+  }
+
   // fix iteration 4 (F001): an open class child revoked in a normal round: the page reloads after the round, and the message survives the reload
   {
     const t = await teacherWorld();

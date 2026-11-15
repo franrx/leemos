@@ -320,15 +320,19 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
         if (rows.has(body.id)) return res(409, { message: 'duplicate key' });
         if (!cid && [...rows.values()].filter((r) => r.owner === uid && !r.class_id).length >= 8) return res(400, { message: 'profile limit reached' });
         if (cid && [...rows.values()].filter((r) => r.class_id === cid).length >= 60) return res(400, { message: 'class limit reached' });
-        const row = { id: body.id, owner: uid, class_id: cid, name: body.name, kind: body.kind, data: body.data || {}, version: 1 };
+        const row = { id: body.id, owner: uid, class_id: cid, name: body.name, kind: body.kind, data: body.data || {}, version: 1 }; // trigger child_profiles_version: an insert always starts at 1
         rows.set(row.id, row);
         if (!cid) linkSet(row.id).add(uid); // child_profiles_link_creator
         return res(201, [out(row)]);
       }
       if (method === 'PATCH') {
         const r = rows.get(f.id);
+        // PostgREST casts the body first: a version past the integer maximum is 22003 before any row is touched
+        if (typeof body.version === 'number' && body.version > 2147483647) return res(400, { code: '22003', message: `value "${body.version}" is out of range for type integer` });
         if (!r || !canSee(uid, r) || (f.version && String(r.version) !== f.version)) return res(200, []);
-        Object.assign(r, { name: body.name ?? r.name, kind: body.kind ?? r.kind, data: body.data ?? r.data, version: body.version ?? r.version + 1 });
+        // trigger child_profiles_version: a changed version moves at most one step up (least(new, old + 1)); an omitted one stays
+        const v = body.version === undefined || body.version === r.version ? r.version : Math.min(body.version, r.version + 1);
+        Object.assign(r, { name: body.name ?? r.name, kind: body.kind ?? r.kind, data: body.data ?? r.data, version: v });
         return res(200, [out(r)]);
       }
     }

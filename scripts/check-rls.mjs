@@ -379,6 +379,21 @@ try {
     const edit = await json(await rest(T1, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ name: 'Teacher' }) }));
     return [saw && okr(r) && !(await seen(T1, kid)) && Array.isArray(edit) && !edit.length && (await one(await svc(`child_profiles?id=eq.${kid}&select=name`))).name === 'Kid', JSON.stringify(r.body)];
   });
+  await t('version is server-controlled: a teacher cannot plant 2147483647 (update or insert), and the family keeps syncing with version+1', async () => {
+    const PV = await mk('pver'), kid = await mkKid(PV); await share(PV, kid, T1, C1);
+    const v0 = (await one(await svc(`child_profiles?id=eq.${kid}&select=version`))).version;
+    const poison = await one(await rest(T1, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ version: 2147483647 }) }));
+    const left = await rpc(PV, 'leave_class', { p_child: kid }); // the family takes the child back: its sync must keep working
+    const cur = (await one(await svc(`child_profiles?id=eq.${kid}&select=version`))).version;
+    const fam = await rest(PV, `child_profiles?id=eq.${kid}&version=eq.${cur}`, { method: 'PATCH', body: JSON.stringify({ name: 'Leo', version: cur + 1 }) });
+    const famRow = ((await json(fam)) || [])[0];
+    const tid = uuid(); kids.push(tid);
+    const born = await one(await rest(T1, 'child_profiles', { method: 'POST', body: JSON.stringify({ id: tid, name: 'T', kind: 'reader', class_id: C1, version: 2147483647 }) }));
+    // the answer src/sync.js recognises for a row poisoned before this trigger existed (version+1 past the integer): 400 with code 22003
+    const over = await rest(PV, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ version: 2147483648 }) }), ob = await json(over);
+    return [!!poison && poison.version === v0 + 1 && okr(left) && cur === v0 + 1 && fam.status === 200 && !!famRow && famRow.version === cur + 1 && famRow.name === 'Leo' && !!born && born.version === 1 && over.status === 400 && !!ob && ob.code === '22003',
+      JSON.stringify({ v0, poison: poison && poison.version, left: left.body, cur, fam: fam.status, famRow: famRow && famRow.version, born: born && born.version, over: over.status, code: ob && ob.code })];
+  });
 
   // Creating children, old clients and the exposed surface.
   await t('a parent and a teacher each create a child with return=representation (201)', async () => {

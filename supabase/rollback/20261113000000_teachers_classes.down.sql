@@ -36,6 +36,7 @@ drop trigger children_of_deleted_user on auth.users;
 drop trigger child_profiles_link_creator on public.child_profiles;
 drop trigger child_profiles_owner_limit on public.child_profiles;
 drop trigger child_profiles_class_limit on public.child_profiles;
+drop trigger child_profiles_version on public.child_profiles;
 
 -- Public functions (RPCs and the computed column).
 drop function public.has_parent(public.child_profiles);
@@ -74,6 +75,7 @@ drop function private.is_tombstoned(uuid);
 drop function private.child_profiles_link_creator();
 drop function private.child_profiles_owner_limit();
 drop function private.child_profiles_class_limit();
+drop function private.child_profiles_version();
 drop function private.child_links_limit();
 drop function private.child_links_clear_owner();
 drop function private.accounts_for_new_user();
