@@ -4,6 +4,8 @@
 // It creates users with the admin API, signs them in with a password, sets roles/classes with the service key (the only way, as in
 // production), and deletes everything it created at the end. Spec: docs/superpowers/specs/2026-11-13-teachers-classes-design.md section 9.
 import { readFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mergeData } from '../src/merge.js';
 
 const env = { ...process.env };
 if (existsSync('.env')) for (const l of readFileSync('.env', 'utf8').split('\n')) { const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(l); if (m && !(m[1] in env)) env[m[1]] = m[2].replace(/^["']|["']$/g, ''); }
@@ -55,6 +57,10 @@ const code = async (u, child, kind) => { const r = await rpc(u, 'create_invite',
 const redeem = (u, c, cls) => rpc(u, 'redeem_invite', { p_code: c, p_class: cls });
 const share = async (parent, kid, teacher, cls) => redeem(teacher, await code(parent, kid, 'to_class'), cls); // parent puts their child in the teacher's class
 const claim = async (teacher, cls, parent) => { const kid = await mkKid(teacher, { class_id: cls }); await redeem(parent, await code(teacher, kid, 'to_parent')); return kid; }; // teacher-created child, then a parent takes it
+// Set only by scripts/test-rls-local.mjs: the LOCAL db container, to seed what no API key can write (a row the triggers would never
+// produce). Against any other project the cases that need it are reported as SKIP.
+const DB = env.LEEMOS_RLS_DB_CONTAINER || '';
+const superSql = (sql) => { const r = spawnSync('docker', ['exec', '-i', DB, 'psql', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-At'], { input: sql, encoding: 'utf8' }); if (r.status !== 0) throw new Error('psql: ' + r.stderr); return r.stdout.trim(); };
 const t = async (name, fn) => { let ok = false, extra = ''; try { const r = await fn(); ok = Array.isArray(r) ? !!r[0] : r === true; if (Array.isArray(r)) extra = String(r[1] ?? ''); } catch (e) { extra = 'threw: ' + e.message; } check(name, ok, extra); };
 
 const A = await mk('a'), B = await mk('b');
@@ -315,7 +321,7 @@ try {
       const a = await redeem(PC, c1);
       await seedPending(kid, T1); // a pending row that the redeem did not void: only the deletion can remove it
       const seeded = (await pendingOf(kid)).length === 1;
-      const d = await del(PC), late = await redeem(await mk('plate'), c2);
+      const d = await del(PC), late = await redeem(await mk(how === 'delete_my_account' ? 'plate1' : 'plate2'), c2); // one tag per round: a reused email has no user, so no token
       return [okr(a) && seeded && d.status < 300 && errOf(late) === 'invalid' && !(await pendingOf(kid)).length && !(await linksOf(kid)).length && (await kidRow(kid) || {}).class_id === C1, `${seeded} ${d.status} ${JSON.stringify(late.body)}`];
     });
   }
@@ -393,6 +399,50 @@ try {
     const over = await rest(PV, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ version: 2147483648 }) }), ob = await json(over);
     return [!!poison && poison.version === v0 + 1 && okr(left) && cur === v0 + 1 && fam.status === 200 && !!famRow && famRow.version === cur + 1 && famRow.name === 'Leo' && !!born && born.version === 1 && over.status === 400 && !!ob && ob.code === '22003',
       JSON.stringify({ v0, poison: poison && poison.version, left: left.body, cur, fam: fam.status, famRow: famRow && famRow.version, born: born && born.version, over: over.status, code: ob && ob.code })];
+  });
+
+  if (!DB) console.log('SKIP  a row already at the integer maximum takes the version-1 recovery write (needs the local db container: npm run test:rls)');
+  else await t('a row already at the integer maximum (seeded past the trigger) takes the client recovery write: version 1 under version=eq.2147483647', async () => {
+    const PM = await mk('pmax'), kid = await mkKid(PM);
+    superSql(`set session_replication_role = replica; update public.child_profiles set version = 2147483647 where id = '${kid}';`);
+    const seeded = (await one(await svc(`child_profiles?id=eq.${kid}&select=version`))).version;
+    // what src/sync.js does: version+1 first (22003 in the cast), then 1 under the same filter
+    const first = await rest(PM, `child_profiles?id=eq.${kid}&version=eq.2147483647`, { method: 'PATCH', body: JSON.stringify({ name: 'Max', version: 2147483648 }) }), fb = await json(first);
+    const again = await rest(PM, `child_profiles?id=eq.${kid}&version=eq.2147483647`, { method: 'PATCH', body: JSON.stringify({ name: 'Max', version: 1 }) }), row = ((await json(again)) || [])[0];
+    return [seeded === 2147483647 && first.status === 400 && !!fb && fb.code === '22003' && again.status === 200 && !!row && row.version === 1 && row.name === 'Max',
+      JSON.stringify({ seeded, first: first.status, code: fb && fb.code, again: again.status, row: row && row.version })];
+  });
+  await t('the server owns the merge stamps: a teacher cannot plant far-future stamps, a level past the last, or a resets jump; the family takes the child back', async () => {
+    const PS = await mk('pstamp'), now0 = Date.now();
+    const fam0 = { level: 2, name: 'Elsa', modAt: now0, resets: { es: 3, ca: 0 }, stats: { 's:ma': { ok: 1 } }, prefs: { lang: { v: 'ca', at: now0 } }, session: { done: 1, ok: 1, stk: 0, at: now0 } };
+    const kid = await mkKid(PS, { data: fam0 }); await share(PS, kid, T1, C1);
+    const END = 8.64e15;
+    const planted = { level: 1e6, name: '\uffeeprofe', modAt: END, resets: { es: 1e6, ca: 'x' }, stats: { 's:pa': { ok: 99 } }, session: { done: 3, ok: 3, stk: 0, at: END },
+      prefs: { lang: { v: 'es', at: END }, mode: { v: 'syl', at: 'oops' }, world: 5 } };
+    const w = await rest(T1, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ data: planted }) });
+    const cap = Date.now() + 600000 + 5000; // now() + 10 min on the server, with a little room for the two clocks
+    const d = (await one(await svc(`child_profiles?id=eq.${kid}&select=data,version`))).data;
+    const clamped = w.status === 200 && d.modAt <= cap && d.modAt >= now0 && d.session.at === d.modAt && d.prefs.lang.at === d.modAt && d.level === 4 && d.resets.es === 4 && d.resets.ca === 'x' && d.prefs.mode.at === 'oops' && d.prefs.world === 5;
+    // the family takes the child back and edits (src/app.js stampAfter: one past what it pulled), then "Borrar progreso" in Spanish
+    const left = await rpc(PS, 'leave_class', { p_child: kid });
+    const row = await one(await rest(PS, `child_profiles?id=eq.${kid}&select=data,version`)), at = row.data.modAt + 1, ahead = Date.now() + 5 * 60000; // a device clock 5 min ahead
+    const local = { ...row.data, level: 1, name: 'Elsa', modAt: at, resets: { es: row.data.resets.es + 1, ca: 0 }, stats: {}, prefs: { lang: { v: 'ca', at }, theme: { v: 'dark', at: ahead } } };
+    const merged = mergeData(local, row.data);
+    const fam = await rest(PS, `child_profiles?id=eq.${kid}&version=eq.${row.version}`, { method: 'PATCH', body: JSON.stringify({ name: 'Elsa', data: merged, version: row.version + 1 }) });
+    const after = ((await json(fam)) || [])[0], ad = after && after.data;
+    const back = mergeData(ad, {});
+    const famOk = fam.status === 200 && !!ad && after.version === row.version + 1 && back.level === 1 && back.name === 'Elsa' && back.prefs.lang.v === 'ca' && ad.resets.es === 5 && !ad.stats['s:pa'] && ad.prefs.theme.at === ahead && ad.modAt === at;
+    // an insert is clamped too (a teacher-created child a parent may claim): stamps, level, and resets at most 1000
+    const tid = uuid(); kids.push(tid);
+    const born = await one(await rest(T1, 'child_profiles', { method: 'POST', body: JSON.stringify({ id: tid, name: 'T', kind: 'reader', class_id: C1, data: planted }) }));
+    const bd = born && born.data, bornOk = !!bd && bd.modAt <= cap && bd.level === 4 && bd.resets.es === 1000 && bd.session.at <= cap && bd.prefs.lang.at <= cap;
+    return [clamped && okr(left) && famOk && bornOk, JSON.stringify({ w: w.status, d, left: left.body, fam: fam.status, ad, bd })];
+  });
+  await t('malformed data never makes a write fail (odd types are left alone)', async () => {
+    const PO = await mk('podd'), kid = await mkKid(PO, { data: { modAt: 'soon', level: 'two', resets: [1], prefs: [], session: 7 } });
+    const r = await one(await rest(PO, `child_profiles?id=eq.${kid}&select=data`));
+    const u = await rest(PO, `child_profiles?id=eq.${kid}`, { method: 'PATCH', body: JSON.stringify({ data: { modAt: null, level: -3, resets: { es: 'a', ca: null }, prefs: { lang: null, mode: { v: 'syl' } }, session: { at: [] } } }) }), ub = ((await json(u)) || [])[0];
+    return [!!r && r.data.modAt === 'soon' && r.data.level === 'two' && u.status === 200 && !!ub && ub.data.level === -3 && ub.data.resets.es === 'a', JSON.stringify({ r, u: u.status, ub })];
   });
 
   // Creating children, old clients and the exposed surface.

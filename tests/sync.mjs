@@ -147,6 +147,20 @@ const signedIn = async () => { const x = mk(); await x.sync.requestCode('m@e.c')
   const r = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ total: 12 }) });
   check('version: a row at the integer maximum (22003 on version+1) still syncs: the client writes version 1 under the same filter', r.version === 1 && srv.rows.get(RID).version === 1 && srv.rows.get(RID).data.total === 12, JSON.stringify({ r: r.version, row: srv.rows.get(RID).version }));
 }
+{
+  // the merge tokens inside data are server-owned (trigger child_profiles_data): a planted end-of-time stamp, a level past the last
+  // and a resets jump are clamped, so the family's next edit (one past what it pulled, as stampAfter does) wins again
+  const { srv, sync } = await signedIn();
+  await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ level: 2, modAt: Date.now(), resets: { es: 3, ca: 0 }, prefs: { lang: { v: 'ca', at: Date.now() } } }) });
+  const tok = (await sync.session()).access_token, END = 8.64e15;
+  await srv.fetch(`${URL_}/rest/v1/child_profiles?id=eq.${RID}`, { method: 'PATCH', headers: { Authorization: 'Bearer ' + tok }, body: JSON.stringify({ data: { level: 1e6, name: 'X', modAt: END, resets: { es: 1e6, ca: 'x' }, stats: { 's:pa': { ok: 99 } }, prefs: { lang: { v: 'es', at: END } }, session: { done: 1, ok: 1, stk: 0, at: END } } }) });
+  const d = srv.rows.get(RID).data, cap = Date.now() + 600000;
+  check('data: far-future stamps, a level past the last and a resets jump are clamped (fake follows the trigger)', d.modAt <= cap && d.prefs.lang.at <= cap && d.session.at <= cap && d.level === 4 && d.resets.es === 4 && d.resets.ca === 'x', JSON.stringify(d));
+  const at = d.modAt + 1;
+  const r = await sync.syncProfile({ rid: RID, name: 'Elsa', kind: 'reader', data: data({ level: 1, modAt: at, resets: { es: 5, ca: 0 }, stats: {}, prefs: { lang: { v: 'ca', at } } }) });
+  const row = srv.rows.get(RID).data;
+  check('data: after the clamp the family wins again (level, language, "Borrar progreso" drops the planted stats)', r.data.level === 1 && row.level === 1 && row.prefs.lang.v === 'ca' && row.resets.es === 5 && !row.stats['s:pa'], JSON.stringify(row));
+}
 
 // ---------- a project URL pasted with an API path still works ----------
 for (const pasted of ['https://x.supabase.co/rest/v1/', 'https://x.supabase.co/auth/v1', 'https://x.supabase.co/', 'https://x.supabase.co']) {

@@ -2999,6 +2999,9 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   { // one Catalan term per role in the account and class strings: «mestre» and «infant» (as in teachShare, teachClasses…)
     const mixed = Object.entries(ica2).filter(([k, v]) => /^(teach|acct)/.test(k) && /\b(professors?|nens?)\b/i.test(v)).map(([k]) => k);
     check('i18n ca: the account and class strings say «mestre» and «infant», never «professor» or «nen»', !mixed.length, mixed.join()); }
+  { // stickers are «enganxines» everywhere in Catalan (album, rewards, privacy.html), also in the consent text of teachShareAsk
+    const adh = Object.entries(ica2).filter(([, v]) => /adhesius?\b/i.test(v)).map(([k]) => k);
+    check('i18n ca: stickers are «enganxines», never «adhesius»', !adh.length && /enganxines/.test(ica2.teachShareAsk), adh.join()); }
 }
 
 // ---------- parent and teacher UI (src/teach.js): sharing, code redeem, class panel ----------

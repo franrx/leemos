@@ -2,6 +2,28 @@
 // It enforces what the real project enforces: link/class-based row visibility, the 8-profile and 60-per-class limits, optimistic version
 // filters, JWT expiry, and the RPCs of supabase/migrations/20261113000000_teachers_classes.sql (same codes, same return shapes).
 // Invitation expiry uses an injectable clock (`now` option, `srv.advance(ms)`); JWT expiry keeps using the real clock.
+// trigger child_profiles_data: stamps at most now + 10 min, level at most 4 (the last level index), resets at most old + 1 (1000 on
+// insert); only numbers are touched, an odd type is left alone
+const clampData = (d, old, now) => {
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return d;
+  const cap = Math.floor(now) + 600000, isNum = (v) => typeof v === 'number', isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  const out = { ...d };
+  if (isNum(out.modAt) && out.modAt > cap) out.modAt = cap;
+  if (isObj(out.session) && isNum(out.session.at) && out.session.at > cap) out.session = { ...out.session, at: cap };
+  if (isObj(out.prefs)) out.prefs = Object.fromEntries(Object.entries(out.prefs).map(([k, e]) => [k, isObj(e) && isNum(e.at) && e.at > cap ? { ...e, at: cap } : e]));
+  if (isNum(out.level) && out.level > 4) out.level = 4;
+  if (isObj(out.resets)) {
+    out.resets = { ...out.resets };
+    for (const L of ['es', 'ca']) {
+      if (!isNum(out.resets[L])) continue;
+      const o = old && isObj(old.resets) && isNum(old.resets[L]) ? Math.max(0, Math.floor(old.resets[L])) + 1 : 1;
+      const allowed = old ? o : 1000;
+      if (out.resets[L] > allowed) out.resets[L] = allowed;
+    }
+  }
+  return out;
+};
+
 export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: baseNow = Date.now } = {}) {
   const users = new Map();      // email -> {id, email}
   const asked = new Set();      // emails that requested a code
@@ -320,7 +342,7 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
         if (rows.has(body.id)) return res(409, { message: 'duplicate key' });
         if (!cid && [...rows.values()].filter((r) => r.owner === uid && !r.class_id).length >= 8) return res(400, { message: 'profile limit reached' });
         if (cid && [...rows.values()].filter((r) => r.class_id === cid).length >= 60) return res(400, { message: 'class limit reached' });
-        const row = { id: body.id, owner: uid, class_id: cid, name: body.name, kind: body.kind, data: body.data || {}, version: 1 }; // trigger child_profiles_version: an insert always starts at 1
+        const row = { id: body.id, owner: uid, class_id: cid, name: body.name, kind: body.kind, data: clampData(body.data || {}, null, clock()), version: 1 }; // trigger child_profiles_version: an insert always starts at 1
         rows.set(row.id, row);
         if (!cid) linkSet(row.id).add(uid); // child_profiles_link_creator
         return res(201, [out(row)]);
@@ -332,7 +354,7 @@ export function createFakeSupabase({ code = '123456', ttlSeconds = 3600, now: ba
         if (!r || !canSee(uid, r) || (f.version && String(r.version) !== f.version)) return res(200, []);
         // trigger child_profiles_version: a changed version moves at most one step up (least(new, old + 1)); an omitted one stays
         const v = body.version === undefined || body.version === r.version ? r.version : Math.min(body.version, r.version + 1);
-        Object.assign(r, { name: body.name ?? r.name, kind: body.kind ?? r.kind, data: body.data ?? r.data, version: v });
+        Object.assign(r, { name: body.name ?? r.name, kind: body.kind ?? r.kind, data: clampData(body.data ?? r.data, r.data, clock()), version: v });
         return res(200, [out(r)]);
       }
     }

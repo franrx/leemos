@@ -96,10 +96,24 @@ check('teachers: the class limit runs before insert or update of class_id', /bef
 {
   const ver = fns.filter((f) => /new\.version := 1/.test(f.body));
   const down = readFileSync(new URL('../supabase/rollback/20261113000000_teachers_classes.down.sql', import.meta.url), 'utf8');
-  check('teachers: version is server-controlled (before insert or update: 1 on insert, at most old+1 on update; plain, empty search_path; rollback drops it)',
-    ver.length === 1 && !definer(ver[0]) && /set search_path = ''/.test(ver[0].header) && /least\(new\.version, old\.version \+ 1\)/.test(ver[0].body) && /new\.version is distinct from old\.version/.test(ver[0].body)
+  check('teachers: version is server-controlled (before insert or update: 1 on insert, at most old+1 on update, computed in bigint so a row at the maximum can go back to 1; plain, empty search_path; rollback drops it)',
+    ver.length === 1 && !definer(ver[0]) && /set search_path = ''/.test(ver[0].header) && /least\(new\.version::bigint, old\.version::bigint \+ 1\)::integer/.test(ver[0].body) && /new\.version is distinct from old\.version/.test(ver[0].body)
     && new RegExp(`before insert or update on public\\.child_profiles\\s+for each row execute function ${esc(ver[0].name)}\\(\\)`).test(tc)
     && /drop trigger child_profiles_version on public\.child_profiles;/.test(down) && /drop function private\.child_profiles_version\(\);/.test(down));
+}
+{
+  // the merge tokens inside data are clamped by the server (a class teacher must not pin a family's level, name, language or reset)
+  const dat = fns.filter((f) => f.name === 'private.child_profiles_data');
+  const down = readFileSync(new URL('../supabase/rollback/20261113000000_teachers_classes.down.sql', import.meta.url), 'utf8');
+  const lastLevel = Math.max(...['es', 'ca'].map((l) => JSON.parse(readFileSync(new URL(`../src/data/levels.${l}.json`, import.meta.url), 'utf8')).length)) - 1;
+  const b = dat.length === 1 ? dat[0].body : '';
+  check('teachers: data stamps and counters are server-clamped (modAt, session.at, prefs.*.at to now()+10 min; level to the last index; resets old+1, 1000 on insert; plain, empty search_path; rollback drops it)',
+    dat.length === 1 && !definer(dat[0]) && /set search_path = ''/.test(dat[0].header) && /extract\(epoch from now\(\)\) \* 1000\) \+ 600000/.test(b)
+    && /'\{modAt\}'/.test(b) && /'\{session,at\}'/.test(b) && /jsonb_each\(d->'prefs'\)/.test(b)
+    && new RegExp(`\\(d->>'level'\\)::numeric > ${lastLevel} then d := jsonb_set\\(d, '\\{level\\}', '${lastLevel}'::jsonb\\)`).test(b)
+    && /allowed := 1000;/.test(b) && /old\.data->'resets'->>lang\)::numeric\)\) \+ 1/.test(b)
+    && /before insert or update on public\.child_profiles\s+for each row execute function private\.child_profiles_data\(\)/.test(tc)
+    && /drop trigger child_profiles_data on public\.child_profiles;/.test(down) && /drop function private\.child_profiles_data\(\);/.test(down), `last level ${lastLevel}`);
 }
 check('teachers: data stays capped below 200000 bytes (constraint untouched)', tc.length > 0 && !/octet_length/.test(tc) && !/drop constraint child_profiles_data_check/.test(tc));
 

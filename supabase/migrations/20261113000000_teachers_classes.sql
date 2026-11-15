@@ -234,20 +234,66 @@ grant update (name, data, version, kind) on public.child_profiles to authenticat
 -- version is the optimistic-lock token, now writable by lower-trust accounts (a class teacher, a code's redeemer): the server controls it.
 -- A new row starts at 1; an update moves it at most one step up (the client writes row.version + 1 under version=eq.<row.version>), so
 -- nobody can plant 2147483647 and make every later write overflow the integer (which would break that child's sync for every account).
--- A plain trigger (no definer): it reads only old and new.
+-- A plain trigger (no definer): it reads only old and new. The step is computed in bigint: on a row already at the maximum (planted
+-- before the server controlled it) old.version + 1 would overflow the integer even when the client writes 1 to start again.
 create function private.child_profiles_version() returns trigger
 language plpgsql set search_path = '' as $$
 begin
   if tg_op = 'INSERT' then
     new.version := 1;
   elsif new.version is distinct from old.version then
-    new.version := least(new.version, old.version + 1);
+    new.version := least(new.version::bigint, old.version::bigint + 1)::integer;
   end if;
   return new;
 end $$;
 revoke execute on function private.child_profiles_version() from public, anon;
 create trigger child_profiles_version before insert or update on public.child_profiles
   for each row execute function private.child_profiles_version();
+
+-- The merge tokens inside data are server-owned too (src/merge.js trusts them on every family device): a class teacher or a code's
+-- redeemer could otherwise plant end-of-time stamps or capped counters that pin level, name and language and disable "Borrar progreso",
+-- and they would outlive leave_class. Every write: data.modAt, data.session.at and each data.prefs.*.at at most now() + 10 min (epoch
+-- ms; a device clock a little ahead still passes); data.level at most 4, the last index of src/data/levels.{es,ca}.json (5 levels;
+-- tests/migration.mjs checks it); data.resets.es/ca at most old + 1 per update ("Borrar progreso" adds 1) and at most 1000 on insert.
+-- Only numbers are touched: a missing key or an odd type is left alone (merge.js ignores it), so no write ever fails here.
+create function private.child_profiles_data() returns trigger
+language plpgsql set search_path = '' as $$
+declare
+  d jsonb := new.data;
+  cap numeric := floor(extract(epoch from now()) * 1000) + 600000;
+  p jsonb;
+  lang text;
+  allowed numeric;
+begin
+  if d is null or jsonb_typeof(d) <> 'object' then return new; end if;
+  if jsonb_typeof(d->'modAt') = 'number' and (d->>'modAt')::numeric > cap then d := jsonb_set(d, '{modAt}', to_jsonb(cap)); end if;
+  if jsonb_typeof(d->'session') = 'object' and jsonb_typeof(d->'session'->'at') = 'number' and (d->'session'->>'at')::numeric > cap then
+    d := jsonb_set(d, '{session,at}', to_jsonb(cap));
+  end if;
+  if jsonb_typeof(d->'prefs') = 'object' then
+    select coalesce(jsonb_object_agg(e.key, case when jsonb_typeof(e.value) = 'object' and jsonb_typeof(e.value->'at') = 'number'
+                                                  and (e.value->>'at')::numeric > cap then jsonb_set(e.value, '{at}', to_jsonb(cap)) else e.value end), '{}'::jsonb)
+      into p from jsonb_each(d->'prefs') e;
+    d := jsonb_set(d, '{prefs}', p);
+  end if;
+  if jsonb_typeof(d->'level') = 'number' and (d->>'level')::numeric > 4 then d := jsonb_set(d, '{level}', '4'::jsonb); end if;
+  if jsonb_typeof(d->'resets') = 'object' then
+    foreach lang in array array['es', 'ca'] loop
+      continue when jsonb_typeof(d->'resets'->lang) is distinct from 'number';
+      allowed := 1000;
+      if tg_op = 'UPDATE' then
+        allowed := 1;
+        if jsonb_typeof(old.data->'resets'->lang) = 'number' then allowed := greatest(0, floor((old.data->'resets'->>lang)::numeric)) + 1; end if;
+      end if;
+      if (d->'resets'->>lang)::numeric > allowed then d := jsonb_set(d, array['resets', lang], to_jsonb(allowed)); end if;
+    end loop;
+  end if;
+  new.data := d;
+  return new;
+end $$;
+revoke execute on function private.child_profiles_data() from public, anon;
+create trigger child_profiles_data before insert or update on public.child_profiles
+  for each row execute function private.child_profiles_data();
 
 -- A class-less child gets a parent link for its creator. security definer: the caller has no write grant on child_links.
 create function private.child_profiles_link_creator() returns trigger

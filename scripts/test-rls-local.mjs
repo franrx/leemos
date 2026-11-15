@@ -19,8 +19,9 @@ const run = () => {
   for (const l of String(st.stdout).split('\n')) { const m = /^([A-Z0-9_]+)="?(.*?)"?$/.exec(l.trim()); if (m) vars[m[1]] = m[2]; }
   const [SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY] = [vars.API_URL, vars.ANON_KEY, vars.SERVICE_ROLE_KEY];
   if (st.status !== 0 || !SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_KEY) { console.error('No se pudieron leer las claves locales de supabase status'); return 2; }
-  // The process environment wins over .env in check-rls, so production keys in .env are never used here.
-  return spawnSync('node', ['scripts/check-rls.mjs'], { stdio: 'inherit', env: { ...process.env, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY } }).status ?? 2;
+  // The process environment wins over .env in check-rls, so production keys in .env are never used here. The db container name
+  // (supabase_db_<project_id>, supabase/config.toml) lets check-rls seed rows past the triggers with docker exec psql.
+  return spawnSync('node', ['scripts/check-rls.mjs'], { stdio: 'inherit', env: { ...process.env, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY, LEEMOS_RLS_DB_CONTAINER: 'supabase_db_leemos' } }).status ?? 2;
 };
 let code = 2;
 try { code = run(); } finally { if (!keep) cli(['stop'], { stdio: 'inherit' }); }
