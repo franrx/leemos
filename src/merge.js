@@ -6,10 +6,15 @@ const CAP = 1e6; // counters stay below this, so a hostile 1e300 can never absor
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(CAP, Math.floor(v)) : 0);
 const MAX_AT = 8.64e15; // the largest date JavaScript can represent: a stamp beyond it is invalid
 const stamp = (v) => (Number.isSafeInteger(v) && v > 0 && v <= MAX_AT ? v : 0); // modAt and the other stamps are millisecond timestamps, not counters
-const ITEM_KEY = /^(ca:)?(s|w|snd):.{1,40}$/; // the stat keys the app really writes
+const ITEM_KEY = /^(ca:)?(s|w|snd):.{1,24}$/; // the stat keys the app really writes (the longest real name after the prefix has 12 characters)
 const unsafe = (k) => k === '__proto__' || k === 'constructor' || k === 'prototype';
 const langOf = (k) => (k.indexOf('ca:') === 0 ? 'ca' : 'es');
 const pair = (o) => ({ es: num(isObj(o) ? o.es : 0), ca: num(isObj(o) ? o.ca : 0) });
+// "Borrar progreso" counters have no reachable cap: the server lets them grow by at most 1 per write (trigger child_profiles_data), so
+// a cap like CAP could be reached by repetition and a reset would then tie the planted stats. Any safe integer is valid; beyond that
+// (2^53 writes away) the value cannot come from the server and is ignored, like a broken stamp.
+const rnum = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 && Math.floor(v) <= Number.MAX_SAFE_INTEGER ? Math.floor(v) : 0);
+const rpair = (o) => ({ es: rnum(isObj(o) ? o.es : 0), ca: rnum(isObj(o) ? o.ca : 0) });
 const lvl = (x) => Math.floor(num(x && x.level));
 const nm = (x) => (x && typeof x.name === 'string' ? x.name.trim().slice(0, 40) : '');
 // ---------- stickers per world (spec: 2026-10-17-world-stickers-design.md) ----------
@@ -66,9 +71,10 @@ const pickSession = (a, b) => {
 };
 
 
+const STAT_FIELDS = ['ok', 'fail']; // the only fields the app writes (stat() in app.js and sounds.js): nothing else is carried along
 const cleanStat = (s) => {
   const o = {};
-  if (isObj(s)) for (const f of Object.keys(s).slice(0, 8)) if (!unsafe(f) && f.length <= 16 && typeof s[f] === 'number' && Number.isFinite(s[f]) && s[f] >= 0) o[f] = Math.min(CAP, Math.floor(s[f]));
+  if (isObj(s)) for (const f of STAT_FIELDS) if (Object.prototype.hasOwnProperty.call(s, f) && typeof s[f] === 'number' && Number.isFinite(s[f]) && s[f] >= 0) o[f] = Math.min(CAP, Math.floor(s[f]));
   return o;
 };
 const statsOf = (d, L) => {
@@ -85,7 +91,7 @@ const maxStat = (x, y) => {
 export function mergeData(a, b) {
   a = isObj(a) ? a : {};
   b = isObj(b) ? b : {};
-  const ra = pair(a.resets), rb = pair(b.resets);
+  const ra = rpair(a.resets), rb = rpair(b.resets);
   const stats = {};
   for (const L of LANGS) {
     const sa = statsOf(a, L), sb = statsOf(b, L);

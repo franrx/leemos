@@ -19,7 +19,12 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
   const errors = [];
   const audioCalls = [];
   const vc = new VirtualConsole();
-  vc.on('jsdomError', (e) => { if (!/Not implemented: navigation/.test(e.message)) console.error(e.message); });
+  // jsdom does not navigate; navs records what a real browser would have left behind when the page asked to reload (location.reload)
+  const navs = []; let wRef = null;
+  vc.on('jsdomError', (e) => {
+    if (!/Not implemented: navigation/.test(e.message)) { console.error(e.message); return; }
+    if (wRef) navs.push({ auth: wRef.localStorage.getItem('leemos-auth'), profiles: JSON.parse(wRef.localStorage.getItem('leemos-profiles') || 'null'), note: wRef.sessionStorage.getItem('leemos-acct-note'), log: supa ? [...supa.log] : [] });
+  });
   const dom = new JSDOM(html, {
     runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://localhost/', virtualConsole: vc,
     beforeParse(w) {
@@ -82,13 +87,13 @@ async function boot({ manifest = null, lang = 'en-US', storage = {}, swMock = nu
       w.addEventListener('error', (e) => errors.push(e.message));
     },
   });
-  const w = dom.window;
+  const w = dom.window; wRef = w;
   if (onDom) onDom(w); // a test can observe the page from the start
   const p = w.eval(`(async()=>{'use strict';${appJs}\n})()`);
   p.catch((e) => errors.push('boot: ' + e.message));
   for (let i = 0; i < 100 && !w.document.getElementById('hello').textContent.startsWith('¡Hola') && !w.document.getElementById('hello').textContent.startsWith('Hola,'); i++) await sleep(20);
   await sleep(30);
-  return { w, d: w.document, $: (id) => w.document.getElementById(id), errors, audioCalls };
+  return { w, d: w.document, $: (id) => w.document.getElementById(id), errors, audioCalls, navs };
 }
 
 async function playSession(app, n, verdict = () => true) {
@@ -670,6 +675,7 @@ check('account: the first sign-in uploads the local profile', supa.rows.size ===
 a.$('acctOutBtn').click();
 await sleep(20);
 check('account: sign out returns to the sign-in view and keeps local progress and the link', !a.$('acctOut').hidden && a.$('acctIn').hidden && !!JSON.parse(a.w.localStorage.getItem('leemos-profiles')).list[0].rid && a.w.localStorage.getItem('leemos-auth') === null);
+check('account: after sign-out the form keeps nothing of the previous adult (empty email and code, consent unticked, code row hidden)', a.$('acctEmail').value === '' && a.$('acctCode').value === '' && a.$('acctConsent').checked === false && a.$('acctCodeRow').hidden, JSON.stringify({ e: a.$('acctEmail').value, c: a.$('acctConsent').checked }));
 
 const swText = readFileSync(join(ROOT, 'sw.js'), 'utf8');
 check('account: the service worker pre-caches the sync modules and config', ['src/merge.js', 'src/sync.js', 'src/data/sync.config.json'].every((f) => swText.includes(`'${f}'`)));
@@ -689,7 +695,7 @@ const withAccount = async (rows) => { // a fake project whose account already ha
   await s.fetch('https://x/auth/v1/otp', { method: 'POST', body: JSON.stringify({ email: 'mama@example.com' }) });
   await s.fetch('https://x/auth/v1/verify', { method: 'POST', body: JSON.stringify({ email: 'mama@example.com', token: '123456', type: 'email' }) });
   const uid = s.userByEmail('mama@example.com').id;
-  rows.forEach(([id, name, kind, d]) => s.rows.set(id, { id, owner: uid, name, kind, data: d, version: 1 }));
+  rows.forEach(([id, name, kind, d]) => { s.rows.set(id, { id, owner: uid, name, kind, data: d, version: 1 }); s.links.set(id, new Set([uid])); }); // the account's own children: a parent link each
   return s;
 };
 const dat = (o = {}) => ({ stats: {}, total: 0, stickers: 0, pre: { es: 0, ca: 0 }, resets: { es: 0, ca: 0 }, level: 0, name: '', modAt: 1, ...o });
@@ -872,6 +878,23 @@ const future = Date.now() + 3600 * 1000;
 a = await boot({ storage: { 'leemos-v1': { name: 'Elsa', total: 1, modAt: future } } });
 a.$('joinBtn').click(); a.$('okBtn').click();
 check('review I4: modAt is always newer than the stamp already stored', JSON.parse(a.w.localStorage.getItem('leemos-v1')).modAt > future);
+
+// 26g: two "Borrar progreso" before a push: the server keeps old + 1 (trigger child_profiles_data). The device must settle on the
+// server's counter in the same round, or its next round would wipe what another device played at that counter.
+supa = createFakeSupabase();
+sa = await signedAuth(supa);
+supa.rows.set(RID_A, { id: RID_A, owner: sa.uid, name: 'Elsa', kind: 'reader', data: dat({ stats: { 's:pa': { ok: 3, fail: 0 } }, total: 3, name: 'Elsa' }), version: 1 });
+supa.links.set(RID_A, new Set([sa.uid]));
+a = await boot({ supa, syncConfig: CFG, storage: { 'leemos-auth': sa.auth, 'leemos-auth-user': sa.uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', total: 5, stats: { 's:ma': { ok: 1, fail: 0 } }, resets: { es: 2, ca: 0 }, modAt: 10 } } });
+await until(() => !!supa.rows.get(RID_A).data.stats['s:ma'], 3000);
+await sleep(60);
+const rsLocal = () => JSON.parse(a.w.localStorage.getItem('leemos-v1')).resets.es;
+check('resets jump: the server keeps old + 1 and the device settles on it in the same round', supa.rows.get(RID_A).data.resets.es === 1 && rsLocal() === 1, `server ${supa.rows.get(RID_A).data.resets.es} device ${rsLocal()}`);
+{ const r = supa.rows.get(RID_A); r.data = { ...r.data, stats: { ...r.data.stats, 's:pe': { ok: 4, fail: 0 } } }; r.version++; } // the school tablet pulled resets 1 and played at it
+a.w.dispatchEvent(new a.w.Event('focus'));
+await until(() => !!(JSON.parse(a.w.localStorage.getItem('leemos-v1')).stats['s:pe']), 3000);
+await sleep(80);
+check("resets jump: the device's next round keeps what the other device played (nothing wiped on either side)", !!supa.rows.get(RID_A).data.stats['s:pe'] && !!JSON.parse(a.w.localStorage.getItem('leemos-v1')).stats['s:pe'] && !!supa.rows.get(RID_A).data.stats['s:ma'], JSON.stringify(supa.rows.get(RID_A).data.stats));
 
 // ---------- 27. review minors: init once, safe linking, level clamp, texts, blocked storage ----------
 // m1: opening the panel twice at once loads the sync modules once
@@ -1103,6 +1126,51 @@ const OLD = () => NOW() - 120000; // idle for two minutes
   await until(() => app.w.localStorage.getItem('leemos-sync-at'), 3000); await sleep(40);
   const st = localState(app);
   check('pull h: invalid remote preferences are never applied and nothing crashes', app.errors.length === 0 && (st.theme || '') !== 'purple' && st.mode !== 'x' && st.sessionLen !== 7 && st.rate !== 99 && st.lang !== 'fr', app.errors.join(' | '));
+}
+// fix iteration (F001): a row filled with planted item-shaped stat keys up to the 200 KB check. The family device, which has every real
+// key of both languages (syllables, words, letter sounds) and one planted key it took from an earlier round, must get its push through:
+// the refused write is retried with the keys the app knows (knownKeys), every real key reaches the server, the planted ones leave the
+// row AND the device, and the next round writes nothing (no endless refused push every 5 s).
+{
+  const real = [];
+  for (const [l, p] of [['es', ''], ['ca', 'ca:']]) {
+    readJSON(`src/data/levels.${l}.json`).forEach((x) => { x.syl.forEach((s) => real.push(p + 's:' + s)); x.words.forEach((o) => real.push(p + 'w:' + o.w)); });
+    readJSON(`src/data/sounds.${l}.json`).groups.forEach((g) => g.letters.forEach((x) => real.push(p + 'snd:' + x.l)));
+  }
+  const mine = Object.fromEntries([...new Set(real)].map((k) => [k, { ok: 1, fail: 0 }]));
+  mine['ca:s:planted-before'] = { ok: 1, fail: 0 };
+  const junk = {}; for (let i = 0; JSON.stringify(junk).length < 190000; i++) junk['s:j' + String(i).padStart(19, '0')] = { ok: 1 };
+  const { s, app } = await seed({ stats: junk }, { stats: mine, modAt: 6 });
+  const isJunk = (k) => /^s:j\d{19}$/.test(k); // not just "s:j": the real syllables ja, je… start like that
+  await until(() => !Object.keys(s.rows.get(RID_A).data.stats).some(isJunk), 4000); await sleep(80);
+  const row = s.rows.get(RID_A).data.stats, loc = localState(app).stats;
+  const n = s.log.filter((l) => l.startsWith('PATCH')).length;
+  app.w.dispatchEvent(new app.w.Event('focus')); await sleep(200);
+  const after = s.log.filter((l) => l.startsWith('PATCH')).length;
+  check('stats: a planted row at the size limit no longer stops the sync: every real key lands, the planted ones leave the row and the device, the next round writes nothing',
+    Object.keys(junk).length > 4000 && real.every((k) => row[k] && row[k].ok === 1) && Object.keys(row).length === new Set(real).size && !('ca:s:planted-before' in loc) && !Object.keys(loc).some(isJunk)
+    && after === n && app.errors.length === 0,
+    JSON.stringify({ row: Object.keys(row).length, real: new Set(real).size, missing: real.filter((k) => !row[k]).slice(0, 5), loc: Object.keys(loc).length, n, after, e: app.errors }));
+}
+// fix iteration (F001): planted world ids in data.stk. merge.js reads at most 32 ids per side; a row with 30 planted ids (two letters, which
+// jsonb sorts first) plus the child's 2 real worlds is within the server's bound. The device took them in on a pull, so a sticker earned in
+// a NEW world was the 33rd key and the push cut it. The device pushes only the app's worlds: the sticker lands on the row after two rounds,
+// stays on the device, and a fresh device sees every real world.
+{
+  const planted = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [String.fromCharCode(97 + Math.floor(i / 26)) + String.fromCharCode(97 + (i % 26)), 6]));
+  const { s, app } = await seed({ stk: { ...planted, bosque: 3, playa: 2 }, stickers: 5 }, { stk: { bosque: 3, playa: 2 }, stickers: 5, world: 5, sessionLen: 5 });
+  await until(() => app.w.localStorage.getItem('leemos-sync-at'), 3000); await sleep(60);
+  await playSession(app, 5);
+  const earned = localState(app).stk.mar === 1;
+  for (let i = 0; i < 2; i++) { app.w.localStorage.removeItem('leemos-sync-at'); app.w.dispatchEvent(new app.w.Event('online')); await until(() => app.w.localStorage.getItem('leemos-sync-at'), 3000); await sleep(60); }
+  const row = s.rows.get(RID_A).data.stk, loc = localState(app).stk;
+  const { auth, uid } = await signedAuth(s);
+  const fresh = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A, 'leemos-v1': { name: 'Elsa' } } });
+  await until(() => fresh.w.localStorage.getItem('leemos-sync-at'), 3000); await sleep(60);
+  const fst = localState(fresh).stk || {};
+  check('stk: with 30 planted world ids on the row, a sticker earned in a new world reaches the row, stays on the device, and a fresh device sees every real world',
+    earned && row.mar === 1 && row.bosque === 3 && row.playa === 2 && loc.mar === 1 && fst.mar === 1 && fst.bosque === 3 && fst.playa === 2 && app.errors.length === 0 && fresh.errors.length === 0,
+    JSON.stringify({ earned, row, loc, fst, e: app.errors.concat(fresh.errors) }));
 }
 
 // ---------- 31. review fixes for the session/preferences sync ----------
@@ -2607,6 +2675,913 @@ check('review M8: clamping a bad saved level at load does not stamp modAt', loca
   const swJs = readFileSync(join(ROOT, 'sw.js'), 'utf8'), cssL = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
   check('lumi: the old antics are gone (code and css) and src/lumi.js is cached for offline', !/antic-/.test(appJs) && !/antic/.test(cssL) && /'src\/lumi\.js'/.test(swJs));
   check('lumi: no errors anywhere', lx.errors.length === 0 && gx.errors.length === 0 && rx.errors.length === 0, [...lx.errors, ...gx.errors, ...rx.errors].join(' | '));
+}
+
+// ---------- teachers and classes: role at sign-in, linked-only linking, tablet cleanup (spec 2026-11-13-teachers-classes-design.md §6) ----------
+{
+  const T_EMAIL = 'profe@example.com';
+  // a teacher who is also the parent of RID_A (linked) and teaches a class holding RID_B (Mateo, nobody's link)
+  const teacherWorld = async ({ signed = true } = {}) => {
+    const s = createFakeSupabase();
+    const { auth, uid } = await signedAuth(s, T_EMAIL);
+    s.setRole(T_EMAIL, 'teacher', { ack: true });
+    const cls = s.addClass('3A'); s.addTeacher(cls, T_EMAIL);
+    s.rows.set(RID_A, { id: RID_A, owner: uid, class_id: null, name: 'Elsa', kind: 'reader', data: dat({ total: 4, name: 'Elsa', modAt: 2 }), version: 1 });
+    s.links.set(RID_A, new Set([uid]));
+    s.rows.set(RID_B, { id: RID_B, owner: null, class_id: cls, name: 'Mateo', kind: 'reader', data: dat({ total: 5, name: 'Mateo', modAt: 2 }), version: 1 });
+    return { s, uid, auth: signed ? auth : null, cls };
+  };
+  const CLASS_PROFILES = (extra = {}) => ({ 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }, { id: 'ana', name: 'Ana', kind: 'reader' }], ...extra } });
+  const stOf = (app, id) => JSON.parse(app.w.localStorage.getItem(id === 'elsa' ? 'leemos-v1' : 'leemos-v1:' + id) || 'null');
+  const signedTeacherBoot = async (storage = {}) => {
+    const t = await teacherWorld();
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...CLASS_PROFILES(), 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 }, 'leemos-v1:ana': { name: 'Ana', total: 3 }, ...storage } });
+    await until(() => t.s.log.filter((l) => l.startsWith('GET /rest/v1/child_profiles')).length >= 2, 3000); await sleep(80); // the start-up sync read both linked rows
+    return { ...t, app };
+  };
+
+  // linking: the class child is neither a candidate nor auto-added
+  {
+    const t = await teacherWorld({ signed: false });
+    const app = await boot({ supa: t.s, syncConfig: CFG });
+    await signInUi(app, T_EMAIL);
+    await until(() => !app.$('link').hidden, 3000);
+    const opts = linkButtons(app).map((b) => b.textContent);
+    check('sign-in: a teacher with a local profile is not offered a class child in askLink', !app.$('link').hidden && opts.length === 2 && opts.some((x) => /Elsa/.test(x)) && !opts.some((x) => /Mateo/.test(x)), opts.join('|'));
+    linkButtons(app)[0].click();
+    await until(() => profList(app).some((p) => p.rid === RID_A), 3000); await sleep(60);
+    check('sign-in: class children are not auto-added', !profList(app).some((p) => p.rid === RID_B || p.name === 'Mateo') && profList(app).length === 1, JSON.stringify(profList(app)));
+  }
+
+  // sign-out: final sync, then only the via:'class' profiles go
+  {
+    const { s, app } = await signedTeacherBoot();
+    app.w.localStorage.setItem('leemos-v1:mateo', JSON.stringify({ ...stOf(app, 'mateo'), total: 9, modAt: Date.now() + 1000 })); // played just before signing out
+    app.$('acctOutBtn').click();
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(40);
+    const ids = profList(app).map((p) => p.id);
+    check('sign-out: removes only via:class profiles and their state, keeps linked and unmarked ones',
+      ids.join(',') === 'elsa,ana' && stOf(app, 'mateo') === null && stOf(app, 'elsa').total === 4 && stOf(app, 'ana').total === 3 && profList(app)[0].rid === RID_A && s.rows.get(RID_B).data.total === 9 && app.errors.length === 0,
+      JSON.stringify({ ids, server: s.rows.get(RID_B).data.total, e: app.errors }));
+  }
+
+  // sign-out offline with unsent progress: asks; "stay" keeps everything, "sign out anyway" purges
+  {
+    const { s, app } = await signedTeacherBoot();
+    app.w.localStorage.setItem('leemos-v1:mateo', JSON.stringify({ ...stOf(app, 'mateo'), total: 9, modAt: Date.now() + 1000 }));
+    s.setOffline(true);
+    app.$('acctOutBtn').click();
+    await until(() => !app.$('link').hidden, 3000);
+    const asked = !app.$('link').hidden && app.$('linkAsk').textContent === ies.acctUnsentAsk && linkButtons(app).length === 2;
+    (linkButtons(app)[1] || app.$('linkCancel')).click(); // stay signed in
+    await sleep(60);
+    check('sign-out: offline with unsent progress asks and keeps everything on "stay"',
+      asked && app.$('link').hidden && app.w.localStorage.getItem('leemos-auth') !== null && profList(app).some((p) => p.id === 'mateo') && stOf(app, 'mateo').total === 9,
+      JSON.stringify({ asked, ask: app.$('linkAsk').textContent, list: profList(app).map((p) => p.id) }));
+    app.$('acctOutBtn').click();
+    await until(() => !app.$('link').hidden, 3000);
+    (linkButtons(app)[0] || app.$('linkCancel')).click(); // sign out anyway
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(40);
+    check('sign-out: offline, "sign out anyway" then removes the class profiles', !profList(app).some((p) => p.id === 'mateo') && stOf(app, 'mateo') === null && stOf(app, 'ana').total === 3);
+  }
+
+  // fix round 1: a final sync that never ran (another round hangs) is not "everything sent"
+  {
+    const t = await teacherWorld();
+    let hang = false;
+    const s = { ...t.s, fetch: async (u, o) => { if (hang && String(u).includes('/rest/v1/')) await new Promise(() => {}); return t.s.fetch(u, o); } };
+    const app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...CLASS_PROFILES(), 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 } } });
+    await until(() => t.s.log.filter((l) => l.startsWith('GET /rest/v1/child_profiles')).length >= 2, 3000); await sleep(80);
+    app.w.__leemosSignOutWait = 150;
+    app.w.localStorage.setItem('leemos-v1:mateo', JSON.stringify({ ...stOf(app, 'mateo'), total: 9, modAt: Date.now() + 1000 }));
+    hang = true; // slow school wifi: a background round never finishes
+    Object.defineProperty(app.d, 'hidden', { value: true, configurable: true });
+    app.d.dispatchEvent(new app.w.Event('visibilitychange'));
+    await sleep(20);
+    app.$('acctOutBtn').click();
+    await until(() => !app.$('link').hidden, 3000);
+    const asked = !app.$('link').hidden && app.$('linkAsk').textContent === ies.acctUnsentAsk;
+    (linkButtons(app)[1] || app.$('linkCancel')).click(); await sleep(40);
+    check('sign-out: a final sync that could not run (another round hangs) asks instead of purging', asked && profList(app).some((p) => p.id === 'mateo') && stOf(app, 'mateo').total === 9 && app.w.localStorage.getItem('leemos-auth') !== null, JSON.stringify({ asked, list: profList(app).map((p) => p.id) }));
+  }
+
+  // destructive buttons (Borrar mi cuenta, Eliminar…): text at 18px bold needs 4.5:1 on the panel in both themes
+  {
+    const css = readFileSync(join(ROOT, 'src/styles.css'), 'utf8');
+    const block = (sel) => (new RegExp(sel.replace(/[[\]"()]/g, '\\$&') + '\\{([^}]*)\\}').exec(css) || [])[1] || '';
+    const tok = (b, n) => (new RegExp('--' + n + ':(#[0-9A-Fa-f]{6})').exec(b) || [])[1];
+    const lum = (h) => { const c = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+    const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+    const light = block(':root'), dark = block(':root[data-theme="dark"]');
+    const rl = tok(light, 'danger-text') && ratio(tok(light, 'danger-text'), tok(light, 'panel')), rd = tok(dark, 'danger-text') && ratio(tok(dark, 'danger-text'), tok(dark, 'panel'));
+    check('contrast: danger buttons use --danger-text (≥ 4.5:1 on the panel in light and dark) and keep --retry for the border',
+      /\.icon-btn\.danger\{border-color:var\(--retry\);color:var\(--danger-text\)\}/.test(css) && rl >= 4.5 && rd >= 4.5, `${rl} ${rd}`);
+  }
+
+  // the teacher's roster bar and the child's own bar use one mastery rule (Dominado = ok >= 2 && ok > fail)
+  check('mastery: one predicate (isMastered) serves the level bars and the roster percentage (pctOfData)',
+    (appJs.match(/ok>=2&&\w+\.ok>\w+\.fail/g) || []).length === 1 && /const mastered=k=>isMastered\(S\.stats\[k\]\)/.test(appJs) && /function pctOfData[\s\S]{0,300}isMastered\(st\[x\.key\]\)/.test(appJs));
+
+  // a class profile without rid can never send anything: signing out removes it without asking
+  {
+    const { app } = await signedTeacherBoot({ 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'mateo', name: 'Mateo', kind: 'reader', via: 'class' }] } });
+    app.$('acctOutBtn').click();
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(40);
+    check('sign-out: a class profile without rid (nothing to send) is removed without asking', app.$('link').hidden && !profList(app).some((p) => p.id === 'mateo') && stOf(app, 'mateo') === null, JSON.stringify({ list: profList(app) }));
+  }
+
+  // revoked class child (the family took it out of the class or deleted it, or the teacher lost the class): it leaves this tablet at once
+  for (const active of ['elsa', 'mateo']) {
+    const t = await teacherWorld();
+    t.s.hideRow(RID_B); // the policy no longer lets this teacher have Mateo
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...CLASS_PROFILES({ active }), 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 }, 'leemos-v1:ana': { name: 'Ana', total: 3 } } });
+    await until(() => !profList(app).some((p) => p.id === 'mateo'), 3000); await sleep(60);
+    const pf = JSON.parse(app.w.localStorage.getItem('leemos-profiles'));
+    check(`sync revoked: a class profile is removed from the device with its saved state (open profile: ${active})`,
+      !pf.list.some((p) => p.id === 'mateo') && stOf(app, 'mateo') === null && pf.active === 'elsa' && pf.list.find((p) => p.id === 'elsa').rid === RID_A && stOf(app, 'ana').total === 3
+      && app.$('acctMsg').textContent === ies.acctRevokedClass.replace('{n}', 'Mateo') && app.errors.length === 0, JSON.stringify({ pf, msg: app.$('acctMsg').textContent, e: app.errors }));
+  }
+
+  // fix iteration 3 (F001): a class child revoked in the final sign-out round must not make the round skip the next class child
+  {
+    const RID_L = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    const t = await teacherWorld();
+    t.s.rows.set(RID_L, { id: RID_L, owner: null, class_id: t.cls, name: 'Lucía', kind: 'reader', data: dat({ total: 2, name: 'Lucía', modAt: 2 }), version: 1 });
+    const profiles = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'lucia', name: 'Lucía', kind: 'reader', rid: RID_L, via: 'class' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] } };
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...profiles, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 }, 'leemos-v1:lucia': { name: 'Lucía', total: 2, modAt: 2 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 } } });
+    await until(() => t.s.log.filter((l) => l.startsWith('GET /rest/v1/child_profiles')).length >= 3, 3000); await sleep(80); // the start-up sync read the three linked rows
+    t.s.hideRow(RID_L); // the family takes Lucía out of the class just before the teacher signs out
+    app.w.localStorage.setItem('leemos-v1:mateo', JSON.stringify({ ...stOf(app, 'mateo'), total: 9, modAt: Date.now() + 1000 })); // played just before signing out
+    app.$('acctOutBtn').click();
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null || !app.$('link').hidden, 3000); await sleep(40);
+    check('sign-out: a class child revoked in the final round does not skip the next one (its progress is sent before the purge)',
+      t.s.rows.get(RID_B).data.total === 9 && !profList(app).some((p) => p.id === 'lucia' || p.id === 'mateo') && app.errors.length === 0,
+      JSON.stringify({ server: t.s.rows.get(RID_B).data.total, list: profList(app).map((p) => p.id), e: app.errors }));
+  }
+
+  // fix iteration 4 (F001): the OPEN class child is revoked in the final sign-out round. The page reloads (switch to another profile)
+  // only after signOut and the purge: a reload inside the round would unload it before signing out, leaving the session and the class children.
+  {
+    const RID_L = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    const t = await teacherWorld();
+    t.s.rows.set(RID_L, { id: RID_L, owner: null, class_id: t.cls, name: 'Lucía', kind: 'reader', data: dat({ total: 2, name: 'Lucía', modAt: 2 }), version: 1 });
+    const profiles = { 'leemos-profiles': { active: 'lucia', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'lucia', name: 'Lucía', kind: 'reader', rid: RID_L, via: 'class' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] } };
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...profiles, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 }, 'leemos-v1:lucia': { name: 'Lucía', total: 2, modAt: 2 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 } } });
+    await until(() => t.s.log.filter((l) => l.startsWith('GET /rest/v1/child_profiles')).length >= 3, 3000); await sleep(80);
+    t.s.hideRow(RID_L); // Lucía, open on the tablet, is taken out of the class just before the teacher signs out
+    app.$('acctOutBtn').click();
+    await until(() => app.navs.length > 0 || !app.$('link').hidden, 3000); await sleep(60);
+    const nav = app.navs[0] || {};
+    const logoutAt = (nav.log || []).indexOf('POST /auth/v1/logout');
+    check('sign-out: an open class child revoked in the final round reloads only after signOut and the purge',
+      app.navs.length >= 1 && nav.auth === null && logoutAt >= 0 && !!nav.profiles && !nav.profiles.list.some((p) => p.via === 'class') && nav.profiles.active === 'elsa' && app.errors.length === 0,
+      JSON.stringify({ navs: app.navs.map((n) => ({ auth: !!n.auth, logoutAt: n.log.indexOf('POST /auth/v1/logout'), list: n.profiles && n.profiles.list.map((p) => p.id) })), e: app.errors }));
+  }
+
+  // fix iteration 5 (F001): a BACKGROUND round in flight revokes the open class child while "Cerrar sesión" / "Borrar mi cuenta" waits for it.
+  // That round must not reload the page: the reload comes only after signOut (or the deletion and its local cleanup) and the purge.
+  for (const how of ['signout', 'delete']) {
+    const RID_L = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    const t = await teacherWorld();
+    t.s.rows.set(RID_L, { id: RID_L, owner: null, class_id: t.cls, name: 'Lucía', kind: 'reader', data: dat({ total: 2, name: 'Lucía', modAt: 2 }), version: 1 });
+    // hold the SECOND read of Lucía's row (the first is the start-up round): a background round in flight
+    let reads = 0, held = false, release; const gate = new Promise((r) => { release = r; });
+    const hs = { ...t.s, fetch: async (u, o = {}) => { const r = await t.s.fetch(u, o); if ((o.method || 'GET') === 'GET' && String(u).includes('child_profiles') && String(u).includes('id=eq.' + RID_L) && ++reads === 2) { held = true; await gate; } return r; } };
+    const profiles = { 'leemos-profiles': { active: 'lucia', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'lucia', name: 'Lucía', kind: 'reader', rid: RID_L, via: 'class' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] } };
+    const app = await boot({ supa: hs, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...profiles, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 }, 'leemos-v1:lucia': { name: 'Lucía', total: 2, modAt: 2 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 } } });
+    await until(() => t.s.log.filter((l) => l.startsWith('GET /rest/v1/child_profiles')).length >= 3, 3000); await sleep(80);
+    t.s.hideRow(RID_L); // Lucía, open on the tablet, is taken out of the class
+    app.w.dispatchEvent(new app.w.Event('focus')); // a background round starts
+    await until(() => held, 3000);
+    if (how === 'signout') app.$('acctOutBtn').click();
+    else { app.$('acctDelete').click(); for (let i = 0; i < 2; i++) { await until(() => !app.$('link').hidden, 2000); linkButtons(app)[0].click(); await sleep(40); } }
+    await sleep(120);
+    release();
+    await until(() => app.navs.length > 0, 3000); await sleep(100);
+    const nav = app.navs[0] || {};
+    const done = how === 'signout' ? 'POST /auth/v1/logout' : 'POST /rest/v1/rpc/delete_my_account';
+    check(`${how === 'signout' ? 'sign-out' : 'delete account'}: an open class child revoked by a background round in flight reloads only after ${how === 'signout' ? 'signOut' : 'the deletion'} and the purge`,
+      held && app.navs.length === 1 && nav.auth === null && (nav.log || []).includes(done) && !!nav.profiles && !nav.profiles.list.some((p) => p.via === 'class') && nav.profiles.active === 'elsa' && app.errors.length === 0,
+      JSON.stringify({ held, navs: app.navs.map((n) => ({ auth: !!n.auth, done: n.log.includes(done), list: n.profiles && n.profiles.list.map((p) => p.id) })), e: app.errors }));
+  }
+
+  // fix iteration 4 (F001): an open class child revoked in a normal round: the page reloads after the round, and the message survives the reload
+  {
+    const t = await teacherWorld();
+    t.s.hideRow(RID_B);
+    const profiles = { 'leemos-profiles': { active: 'mateo', list: [{ id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }, { id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }] } };
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...profiles, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 } } });
+    await until(() => app.navs.length > 0, 3000); await sleep(60);
+    const nav = app.navs[0] || {};
+    const msg = ies.acctRevokedClass.replace('{n}', 'Mateo');
+    const elsaSynced = (nav.log || []).some((l) => l.includes('child_profiles') && l.includes(RID_A));
+    check('sync revoked: the open class child reloads the page only after the round (the profiles after it are synced first)',
+      app.navs.length === 1 && elsaSynced && nav.profiles.active === 'elsa' && !nav.profiles.list.some((p) => p.id === 'mateo') && app.errors.length === 0,
+      JSON.stringify({ navs: app.navs.length, elsaSynced, e: app.errors }));
+    check('sync revoked: the message is kept for the reloaded page', nav.note === msg, JSON.stringify(nav.note));
+    const again = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, 'leemos-profiles': nav.profiles, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 2 } }, onDom: (w) => w.sessionStorage.setItem('leemos-acct-note', nav.note || '') });
+    await sleep(60);
+    check('sync revoked: the reloaded page shows the message once', again.$('acctMsg').textContent === msg && again.w.sessionStorage.getItem('leemos-acct-note') === null, again.$('acctMsg').textContent);
+  }
+
+  // fix round 1: the session dies during the final sync and the adult stays: the class profiles are hidden
+  {
+    const { s, app } = await signedTeacherBoot();
+    app.w.localStorage.setItem('leemos-v1:mateo', JSON.stringify({ ...stOf(app, 'mateo'), total: 9, modAt: Date.now() + 1000 }));
+    s.expireAccessTokens(); s.revokeRefreshTokens();
+    app.$('acctOutBtn').click();
+    await until(() => !app.$('link').hidden, 3000);
+    (linkButtons(app)[1] || app.$('linkCancel')).click(); await sleep(40);
+    const m = profList(app).find((p) => p.id === 'mateo');
+    app.$('profileBtn').click();
+    const listed = [...app.d.querySelectorAll('#profileList .wbtn')].map((b) => b.textContent);
+    app.$('profilesClose').click();
+    check('sign-out: an auth error on the final sync plus "stay" hides the class profiles', !!m && m.hidden === true && !listed.some((x) => /Mateo/.test(x)) && stOf(app, 'mateo').total === 9, JSON.stringify({ m, listed }));
+  }
+
+  // fix round 1: another account cancels at the link question: the class profiles are not purged
+  {
+    const s = await withAccount([[RID_A, 'Elsa', 'reader', dat({ total: 1, name: 'Elsa' })]]);
+    const app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] }, 'leemos-auth-user': 'user-of-the-teacher', 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    await signInUi(app, 'mama@example.com');
+    await until(() => !app.$('link').hidden, 3000);
+    app.$('linkCancel').click(); await sleep(60);
+    const m = profList(app).find((p) => p.id === 'mateo');
+    check('a different account that cancels the sign-in does not purge the class profiles', !!m && m.rid === RID_B && m.via === 'class' && stOf(app, 'mateo').total === 5 && app.w.localStorage.getItem('leemos-auth') === null, JSON.stringify(profList(app)));
+  }
+
+  // revoked: the server no longer lets this account have the child
+  {
+    const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);
+    s.rows.set(RID_A, { id: RID_A, owner: null, class_id: null, name: 'Elsa', kind: 'reader', data: dat({ total: 1, name: 'Elsa' }), version: 1 });
+    s.hideRow(RID_A);
+    const app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', total: 6, modAt: 10 } } });
+    await until(() => !profList(app)[0].rid, 3000); await sleep(40);
+    check('sync revoked: keeps local data and drops the rid',
+      !profList(app)[0].rid && JSON.parse(app.w.localStorage.getItem('leemos-v1')).total === 6 && app.$('acctMsg').textContent === ies.acctRevoked.replace('{n}', 'Elsa') && s.rows.size === 1 && s.rows.get(RID_A).data.total === 1,
+      JSON.stringify({ list: profList(app), msg: app.$('acctMsg').textContent }));
+  }
+
+  // auth error: the class profiles are hidden until the same account signs in again
+  {
+    const t = await teacherWorld();
+    t.s.expireAccessTokens(); t.s.revokeRefreshTokens(); // the session is dead (revoked or expired refresh token)
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': t.auth, 'leemos-auth-user': t.uid, ...CLASS_PROFILES(), 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    await until(() => (profList(app).find((p) => p.id === 'mateo') || {}).hidden === true, 3000);
+    app.$('profileBtn').click();
+    const listed = [...app.d.querySelectorAll('#profileList .wbtn')].map((b) => b.textContent);
+    app.$('profilesClose').click();
+    const hiddenOk = (profList(app).find((p) => p.id === 'mateo') || {}).hidden === true && !listed.some((x) => /Mateo/.test(x)) && listed.length === 2 && stOf(app, 'mateo').total === 5;
+    await signInUi(app, T_EMAIL);
+    await until(() => !(profList(app).find((p) => p.id === 'mateo') || {}).hidden, 3000); await sleep(60);
+    const m = profList(app).find((p) => p.id === 'mateo');
+    check('auth error: marked profiles are hidden, and unhidden after the same account signs in again', hiddenOk && !!m && !m.hidden && m.rid === RID_B && m.via === 'class' && stOf(app, 'mateo').total === 5, JSON.stringify({ hiddenOk, listed, m }));
+    const h = await boot({ storage: { 'leemos-profiles': { active: 'mateo', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class', hidden: true }] }, 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    check('auth error: a hidden profile cannot be opened (the app starts on a visible one)', h.$('hello').textContent === '¡Hola, Elsa!' && JSON.parse(h.w.localStorage.getItem('leemos-profiles')).active === 'elsa', h.$('hello').textContent);
+  }
+
+  // another account signs in on the tablet: the hidden class profiles go
+  {
+    const s = createFakeSupabase();
+    const app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class', hidden: true }] }, 'leemos-auth-user': 'user-of-the-teacher', 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    await signInUi(app, 'mama@example.com');
+    await until(() => s.rows.size === 1, 3000); await sleep(40);
+    check('a different account signing in purges the hidden ones', profList(app).map((p) => p.id).join(',') === 'elsa' && stOf(app, 'mateo') === null && profList(app)[0].rid !== RID_A && !s.rows.has(RID_B), JSON.stringify(profList(app)));
+  }
+
+  // the purge removes the active profile: the app moves to a remaining one
+  {
+    const { app } = await signedTeacherBoot({ ...CLASS_PROFILES({ active: 'mateo' }) });
+    app.$('acctOutBtn').click();
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(60);
+    const pf = JSON.parse(app.w.localStorage.getItem('leemos-profiles'));
+    const ok1 = pf.active === 'elsa' && !pf.list.some((p) => p.id === 'mateo') && stOf(app, 'mateo') === null;
+    app.$('joinBtn').click(); app.$('okBtn').click(); await sleep(20); // the old screen keeps running until the reload: it must not write the state back
+    const t2 = await teacherWorld();
+    const only = await boot({ supa: t2.s, syncConfig: CFG, storage: { 'leemos-auth': t2.auth, 'leemos-auth-user': t2.uid, 'leemos-profiles': { active: 'mateo', list: [{ id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] }, 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    await sleep(80);
+    only.$('acctOutBtn').click();
+    await until(() => only.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(60);
+    const pf2 = JSON.parse(only.w.localStorage.getItem('leemos-profiles'));
+    check('purging the active profile switches to a remaining one', ok1 && stOf(app, 'mateo') === null && pf2.list.length === 1 && pf2.active === pf2.list[0].id && !pf2.list[0].via && pf2.list[0].kind === 'reader' && stOf(only, 'mateo') === null, JSON.stringify({ pf, pf2 }));
+  }
+
+  // the kind: pushed once when switched here, adopted from the server otherwise
+  {
+    const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);
+    s.rows.set(RID_A, { id: RID_A, owner: uid, class_id: null, name: 'Elsa', kind: 'reader', data: dat({ total: 1, name: 'Elsa' }), version: 1 });
+    s.links.set(RID_A, new Set([uid]));
+    let app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A, 'leemos-v1': { name: 'Elsa', total: 1, modAt: 10 } } });
+    await until(() => s.log.some((l) => l.startsWith('GET /rest/v1/child_profiles')), 3000); await sleep(60);
+    app.$('pfSwitch').click(); // the adult switches Elsa to the pre-reader screen; the page reloads
+    const dirty = profList(app)[0].kindDirty === true;
+    app = await boot({ supa: s, syncConfig: CFG, storage: dump(app.w) });
+    await until(() => s.rows.get(RID_A).kind === 'pre' && !profList(app)[0].kindDirty, 3000);
+    const pushed = s.rows.get(RID_A).kind === 'pre' && !profList(app)[0].kindDirty;
+    const r = s.rows.get(RID_A); r.kind = 'reader'; r.version++; // another device switches it back
+    Object.defineProperty(app.d, 'hidden', { value: true, configurable: true });
+    app.d.dispatchEvent(new app.w.Event('visibilitychange'));
+    await until(() => profList(app)[0].kind === 'reader', 3000); await sleep(40);
+    check('kind switched here is pushed once (kindDirty) and then adopted from the server', dirty && pushed && profList(app)[0].kind === 'reader' && s.rows.get(RID_A).kind === 'reader' && app.errors.length === 0, JSON.stringify({ dirty, pushed, list: profList(app), server: s.rows.get(RID_A).kind }));
+  }
+
+  // upgrade: before this version the kind was local only, so the server row may still hold the creation kind. The device's kind is
+  // pushed once on the first sync of this version, never replaced by that stale value.
+  {
+    const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s);
+    s.rows.set(RID_A, { id: RID_A, owner: uid, class_id: null, name: 'Elsa', kind: 'reader', data: dat({ total: 1, name: 'Elsa' }), version: 1 });
+    s.links.set(RID_A, new Set([uid]));
+    const app = await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'pre', rid: RID_A }] }, 'leemos-v1': { name: 'Elsa', total: 1, modAt: 10 } } });
+    await until(() => s.log.some((l) => l.startsWith('GET /rest/v1/child_profiles')), 3000); await sleep(80);
+    const after = profList(app)[0], sealed = JSON.parse(dump(app.w)['leemos-profiles']).kindSynced === true;
+    const r = s.rows.get(RID_A); r.kind = 'reader'; r.version++; // another device switches it back before this one starts again
+    const again = await boot({ supa: s, syncConfig: CFG, storage: dump(app.w) }); // a later start: the migration must not run again
+    await until(() => profList(again)[0].kind === 'reader', 3000); await sleep(80);
+    check('upgrade: a kind switched before this version is pushed once, not replaced by the server\'s stale kind; a later start adopts a switch made elsewhere',
+      after.kind === 'pre' && !after.kindDirty && sealed && profList(again)[0].kind === 'reader' && !profList(again)[0].kindDirty && s.rows.get(RID_A).kind === 'reader' && app.errors.length === 0 && again.errors.length === 0, JSON.stringify({ after, sealed, server: s.rows.get(RID_A).kind, again: profList(again) }));
+  }
+
+  // the role is read at start when a session is stored (whoami also claims a pending teacher invitation)
+  {
+    const s = createFakeSupabase(); const { auth, uid } = await signedAuth(s, T_EMAIL);
+    s.inviteTeacher(T_EMAIL);
+    s.log.length = 0;
+    await boot({ supa: s, syncConfig: CFG, storage: { 'leemos-auth': auth, 'leemos-auth-user': uid, ...PROF_A } });
+    await until(() => s.accounts.get(uid).role === 'teacher', 3000);
+    check('role is read at app start with a stored session', s.log.includes('POST /rest/v1/rpc/whoami') && s.accounts.get(uid).role === 'teacher', s.log.join(' | '));
+  }
+
+  // final review 1: the session dies outside syncAll (a request from the panel refreshes and fails): the next round hides the class profiles
+  {
+    const { s, app } = await signedTeacherBoot();
+    s.expireAccessTokens(); s.revokeRefreshTokens();
+    app.$('parents').open = true; app.$('parents').dispatchEvent(new app.w.Event('toggle')); // the panel's first request refreshes, gets a 400, clears the session
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000);
+    const cleared = app.w.localStorage.getItem('leemos-auth') === null;
+    Object.defineProperty(app.d, 'hidden', { value: true, configurable: true });
+    app.d.dispatchEvent(new app.w.Event('visibilitychange'));
+    await until(() => (profList(app).find((p) => p.id === 'mateo') || {}).hidden === true, 2000);
+    const m = profList(app).find((p) => p.id === 'mateo');
+    check('final review: a session cleared outside syncAll makes the next round hide the class profiles', cleared && !!m && m.hidden === true && stOf(app, 'mateo').total === 5 && profList(app).some((p) => p.id === 'ana' && !p.hidden), JSON.stringify({ cleared, m }));
+  }
+  // final review 1: no stored session at start (expired before the reload, or the admin page's "Salir" on the same origin): hidden, not listed, not opened
+  {
+    const app = await boot({ supa: createFakeSupabase(), syncConfig: CFG, storage: { ...CLASS_PROFILES({ active: 'mateo' }), 'leemos-auth-user': 'user-1', 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    app.$('profileBtn').click();
+    const listed = [...app.d.querySelectorAll('#profileList .wbtn')].map((b) => b.textContent);
+    app.$('profilesClose').click();
+    const m = profList(app).find((p) => p.id === 'mateo');
+    check('final review: with no stored session at start the class profiles are hidden, not listed and not opened', !!m && m.hidden === true && !listed.some((x) => /Mateo/.test(x)) && app.$('hello').textContent === '¡Hola, Elsa!' && stOf(app, 'mateo').total === 5 && !profList(app).find((p) => p.id === 'ana').hidden, JSON.stringify({ m, listed, hello: app.$('hello').textContent }));
+  }
+  // final review: another account's session replaced A's (the admin page signed in on this origin): A's class profiles are hidden, not deleted
+  {
+    const t = await teacherWorld();
+    const adm = await signedAuth(t.s, 'admin@example.com');
+    const app = await boot({ supa: t.s, syncConfig: CFG, storage: { 'leemos-auth': adm.auth, 'leemos-auth-user': t.uid, ...CLASS_PROFILES(), 'leemos-v1:mateo': { name: 'Mateo', total: 5 } } });
+    await until(() => (profList(app).find((p) => p.id === 'mateo') || {}).hidden === true, 3000);
+    app.$('profileBtn').click();
+    const listed = [...app.d.querySelectorAll('#profileList .wbtn')].map((b) => b.textContent);
+    app.$('profilesClose').click();
+    const m = profList(app).find((p) => p.id === 'mateo');
+    const hiddenOk = !!m && m.hidden === true && m.rid === RID_B && !listed.some((x) => /Mateo/.test(x)) && stOf(app, 'mateo').total === 5 && !t.s.log.some((l) => /child_profiles/.test(l));
+    await signInUi(app, T_EMAIL);
+    await until(() => !(profList(app).find((p) => p.id === 'mateo') || {}).hidden, 3000); await sleep(60);
+    const back = profList(app).find((p) => p.id === 'mateo');
+    check('final review: a session of another account (admin page on this origin) hides the class profiles, and A signing in again unhides them', hiddenOk && !!back && !back.hidden && back.via === 'class' && stOf(app, 'mateo').total === 5, JSON.stringify({ m, listed, back }));
+  }
+  // final review 3: a new profile never adopts a leftover saved state whose id it would take
+  {
+    const app = await boot({ storage: { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader' }] }, 'leemos-v1:ana': { name: 'Ana', total: 7 } } });
+    app.$('pfName').value = 'Ana'; app.$('pfKind').value = 'reader'; app.$('pfAdd').click();
+    const a = profList(app).find((p) => p.name === 'Ana');
+    check('final review: adding "Ana" next to a leftover leemos-v1:ana takes another id', !!a && a.id !== 'ana' && JSON.parse(app.w.localStorage.getItem('leemos-v1:ana')).total === 7, JSON.stringify(profList(app)));
+  }
+
+  const ies2 = readJSON('src/data/i18n.es.json'), ica2 = readJSON('src/data/i18n.ca.json');
+  check('i18n parity still holds', Object.keys(ies2).length === Object.keys(ica2).length && Object.keys(ies2).every((k) => k in ica2) && ['acctRevoked', 'acctRevokedClass', 'acctUnsentAsk', 'acctUnsentOut', 'acctUnsentStay'].every((k) => typeof ies2[k] === 'string' && typeof ica2[k] === 'string'));
+  { // one Catalan term per role in the account and class strings: «mestre» and «infant» (as in teachShare, teachClasses…)
+    const mixed = Object.entries(ica2).filter(([k, v]) => /^(teach|acct)/.test(k) && /\b(professors?|nens?)\b/i.test(v)).map(([k]) => k);
+    check('i18n ca: the account and class strings say «mestre» and «infant», never «professor» or «nen»', !mixed.length, mixed.join()); }
+  { // stickers are «enganxines» everywhere in Catalan (album, rewards, privacy.html), also in the consent text of teachShareAsk
+    const adh = Object.entries(ica2).filter(([, v]) => /adhesius?\b/i.test(v)).map(([k]) => k);
+    check('i18n ca: stickers are «enganxines», never «adhesius»', !adh.length && /enganxines/.test(ica2.teachShareAsk), adh.join()); }
+}
+
+// ---------- parent and teacher UI (src/teach.js): sharing, code redeem, class panel ----------
+{
+  const P_EMAIL = 'mama@example.com', T_EMAIL = 'profe@example.com';
+  const RID_C = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const rpcAs = async (s, auth, name, args) => (await s.fetch('https://x/rest/v1/rpc/' + name, { method: 'POST', headers: { Authorization: 'Bearer ' + auth.access_token }, body: JSON.stringify(args) })).json();
+  // a project with a class 3A (teacher T), Mateo (RID_B, in 3A, nobody's link) and Elsa (RID_A, linked to the parent, in no class)
+  const world = async ({ who = 'parent', ack = true, teacher = true } = {}) => {
+    const s = createFakeSupabase();
+    const par = await signedAuth(s, P_EMAIL);
+    const tea = await signedAuth(s, T_EMAIL);
+    if (teacher) s.setRole(T_EMAIL, 'teacher', { ack });
+    const cls = s.addClass('3A'); if (teacher) s.addTeacher(cls, T_EMAIL);
+    s.rows.set(RID_A, { id: RID_A, owner: par.uid, class_id: null, name: 'Elsa', kind: 'reader', data: dat({ total: 4, name: 'Elsa', modAt: 2 }), version: 1 });
+    s.links.set(RID_A, new Set([par.uid]));
+    s.rows.set(RID_B, { id: RID_B, owner: null, class_id: cls, name: 'Mateo', kind: 'reader', data: dat({ total: 5, name: 'Mateo', modAt: 2, stats: { 's:ma': { ok: 3, fail: 0 }, 's:me': { ok: 2, fail: 0 } } }), version: 1 });
+    const me = who === 'parent' ? par : tea;
+    return { s, par, tea, me, cls };
+  };
+  const bootWorld = async (w, storage = {}, extra = {}) => {
+    const app = await boot({ supa: w.s, syncConfig: CFG, storage: { 'leemos-auth': w.me.auth, 'leemos-auth-user': w.me.uid, ...(w.me === w.par ? PROF_A : { 'leemos-profiles': { active: 'ana', list: [{ id: 'ana', name: 'Ana', kind: 'reader' }] } }), ...storage }, ...extra });
+    app.$('parents').open = true; app.$('parents').dispatchEvent(new app.w.Event('toggle'));
+    await until(() => !app.$('teach').hidden && app.$('teach').querySelector('[data-block]'), 4000);
+    await sleep(60);
+    return app;
+  };
+  const qs = (app, sel) => app.$('teach').querySelector(sel), qsa = (app, sel) => [...app.$('teach').querySelectorAll(sel)];
+  const msgOf = (app) => (app.$('teachMsg') || { textContent: '' }).textContent;
+  const confirmWith = async (app, yes) => { await until(() => !app.$('link').hidden, 2000); const ask = app.$('linkAsk').textContent; const b = [...app.$('linkOpts').querySelectorAll('button')]; (yes ? b[0] : b[1]).click(); await sleep(40); return ask; };
+  const type = (app, id, v) => { const i = app.$(id); i.value = v; i.dispatchEvent(new app.w.Event('input', { bubbles: true })); };
+  const imports = (w) => { const o = w.__leemosImport; w.__leemosImport = (p) => { (w.__imps ||= []).push(p); return o(p); }; };
+
+  {
+    const supa0 = createFakeSupabase();
+    const app = await boot({ supa: supa0, onDom: imports });
+    app.$('parents').open = true; app.$('parents').dispatchEvent(new app.w.Event('toggle')); await sleep(80);
+    check('teach: panels hidden with empty config', app.$('teach').hidden && app.$('teach').children.length === 0 && supa0.log.length === 0 && !(app.w.__imps || []).some((p) => /teach/.test(p)) && app.errors.length === 0, JSON.stringify(app.w.__imps));
+  }
+
+  {
+    const w = await world();
+    const app = await bootWorld(w, {}, { onDom: imports });
+    check('teach: a parent session sees the parent block and not the teacher block',
+      !!qs(app, '[data-block=parent]') && !!qs(app, '[data-act=share][data-child="' + RID_A + '"]') && !!app.$('teachRedeem') && !qs(app, '[data-block=teacher]') && !qs(app, '[data-act=open]') && (app.w.__imps || []).some((p) => /teach/.test(p)) && app.errors.length === 0, app.$('teach').textContent);
+  }
+
+  {
+    const w = await world({ who: 'teacher', ack: false });
+    const app = await bootWorld(w);
+    const only = !!app.$('teachAck') && !qs(app, '[data-act=open]') && !qs(app, '[data-act=newchild]') && !qs(app, '[data-roster]') && app.$('teachAck').textContent.includes(ies.teachAckText);
+    app.$('teachAckBtn').click();
+    await until(() => !!qs(app, '[data-roster]'), 3000);
+    check('teach: a teacher without acknowledgement sees only the acknowledgement', only && !!w.s.accounts.get(w.tea.uid).ack && !app.$('teachAck') && !!qs(app, '[data-act=open][data-child="' + RID_B + '"]'), app.$('teach').textContent);
+  }
+
+  // fix iteration (F002): another account's child data reaches the roster percentage; a stat whose ok is an object with non-callable
+  // valueOf/toString (valid JSON) must not blank the class panel nor abort the language switch
+  {
+    const w = await world({ who: 'teacher' });
+    const bad = { ok: { valueOf: 1, toString: 1 }, fail: 0 };
+    w.s.rows.get(RID_B).data.stats = { 's:ma': bad, 'ca:s:ma': bad, 's:me': { ok: 3, fail: { valueOf: 1 } } };
+    w.s.rows.set(RID_C, { id: RID_C, owner: null, class_id: w.cls, name: 'Nuria', kind: 'reader', data: dat({ name: 'Nuria', modAt: 2, stats: { 's:ma': { ok: 3, fail: 0 }, 's:me': { ok: 3, fail: 0 }, 's:mi': { ok: 3, fail: 0 } } }), version: 1 });
+    const app = await bootWorld(w);
+    await until(() => !!qs(app, '[data-roster]'), 3000); await sleep(40);
+    const label = (id) => { const b = qs(app, '[data-child="' + id + '"] .teach-bar'); return b ? b.getAttribute('aria-label') : ''; };
+    const rows = qsa(app, '[data-roster] .teach-row').length, lb = label(RID_B), lc = label(RID_C);
+    const before = app.$('hint').textContent;
+    app.$('langBtn').click(); await sleep(60);
+    check('teach: a roster child with crafted non-numeric stats still renders (0%) and the language switch completes',
+      rows === 2 && /Mateo: 0%/.test(lb) && /Nuria: [1-9]\d*%/.test(lc) && !!qs(app, '[data-act=newchild]') && !!qs(app, '[data-act=open][data-child="' + RID_B + '"]')
+      && app.$('langBtn').textContent === 'CA' && app.$('hint').textContent !== before && !!qs(app, '[data-roster] [data-child="' + RID_B + '"]') && app.errors.length === 0,
+      JSON.stringify({ rows, lb, lc, before, after: app.$('hint').textContent, e: app.errors }));
+  }
+
+  {
+    const w = await world();
+    const app = await bootWorld(w);
+    qs(app, '[data-act=share]').click();
+    const askNo = await confirmWith(app, false);
+    const none = w.s.invites.length === 0;
+    qs(app, '[data-act=share]').click();
+    await confirmWith(app, true);
+    await until(() => !!qs(app, '[data-code]'), 3000);
+    const code = qs(app, '[data-code]').textContent;
+    const inv = w.s.invites[0];
+    const exp = qs(app, '[data-expiry]').textContent;
+    const day = new Date(inv.exp).toLocaleDateString('es', { day: 'numeric', month: 'long' });
+    check('teach: sharing shows an 8-character code and its expiry after confirming',
+      none && askNo.includes('Elsa') && /nombre|progreso/i.test(askNo) && /^[A-Z2-9]{8}$/.test(code) && inv.code === code && inv.kind === 'to_class' && exp.includes(day) && !!qs(app, '[data-act=copy]') && app.$('teach').querySelectorAll('button').length > 0,
+      JSON.stringify({ askNo, code, exp, day }));
+  }
+
+  {
+    const w = await world();
+    const app = await bootWorld(w);
+    type(app, 'teachCode', 'ZZZZ2222'); app.$('teachRedeem').click();
+    await until(() => msgOf(app).length > 0, 3000);
+    const m1 = msgOf(app);
+    const own = await rpcAs(w.s, w.par.auth, 'create_invite', { p_child: RID_A, p_kind: 'to_class' });
+    type(app, 'teachCode', own.code); app.$('teachRedeem').click();
+    await until(() => w.s.log.filter((l) => /redeem_invite/.test(l)).length >= 2 && !app.$('teachRedeem').disabled, 3000); await sleep(40);
+    const m2 = msgOf(app);
+    const tried = async (c) => { const n = w.s.log.filter((l) => /redeem_invite/.test(l)).length; type(app, 'teachCode', c); app.$('teachRedeem').click(); await until(() => w.s.log.filter((l) => /redeem_invite/.test(l)).length > n && !app.$('teachRedeem').disabled, 3000); await sleep(40); return msgOf(app); };
+    const other = await signedAuth(w.s, 'otro@example.com');
+    const used = await rpcAs(w.s, w.tea.auth, 'create_invite', { p_child: RID_B, p_kind: 'to_parent' });
+    await rpcAs(w.s, other.auth, 'redeem_invite', { p_code: used.code, p_class: null }); // somebody else already used it
+    const m3 = await tried(used.code);
+    const RID_X = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    w.s.rows.set(RID_X, { id: RID_X, owner: null, class_id: w.cls, name: 'Xavi', kind: 'reader', data: dat({ name: 'Xavi' }), version: 1 });
+    const old = await rpcAs(w.s, w.tea.auth, 'create_invite', { p_child: RID_X, p_kind: 'to_parent' });
+    w.s.advance(8 * 24 * 3600 * 1000); // the week is over
+    const m4 = await tried(old.code);
+    check('teach: redeeming a wrong code shows one generic message (wrong, own, used and expired alike)', [m1, m2, m3, m4].every((m) => m === ies.teachBadCode) && w.s.rows.get(RID_A).class_id === null && !(w.s.links.get(RID_X) || new Set()).size, JSON.stringify({ m1, m2, m3, m4 }));
+  }
+
+  // fix (F001): what an adult typed in the panel and did not send is gone after sign-out, for the next account on the same page
+  {
+    const w = await world({ who: 'teacher' });
+    const app = await bootWorld(w);
+    type(app, 'teachCode', 'ABCD2345'); type(app, 'teachClassCode', 'EFGH6789'); type(app, 'teachNewName-' + w.cls, 'Nuria');
+    app.$('acctOutBtn').click();
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null && !app.$('acctOut').hidden, 3000); await sleep(40);
+    const gone = app.$('teach').hidden && !app.$('teachCode');
+    app.$('acctEmail').value = T_EMAIL; app.$('acctConsent').checked = true; app.$('acctSend').click();
+    await until(() => !app.$('acctCodeRow').hidden, 3000);
+    app.$('acctCode').value = '123456'; app.$('acctVerify').click();
+    await until(() => !app.$('teach').hidden && !!app.$('teachClassCode') && !!app.$('teachNewName-' + w.cls), 4000); await sleep(40);
+    const vals = { code: app.$('teachCode').value, cls: app.$('teachClassCode').value, name: app.$('teachNewName-' + w.cls).value };
+    check('teach: sign-out forgets the typed redeem code, class code and new-child name (the next sign-in shows empty fields)',
+      gone && app.navs.length === 0 && vals.code === '' && vals.cls === '' && vals.name === '' && app.errors.length === 0, JSON.stringify({ gone, navs: app.navs.length, vals, e: app.errors }));
+  }
+
+  {
+    const w = await world({ who: 'teacher' });
+    const app = await bootWorld(w);
+    type(app, 'teachNewName-' + w.cls, 'Nuria');
+    qs(app, '[data-act=newchild][data-class="' + w.cls + '"]').click();
+    await until(() => [...w.s.rows.values()].some((r) => r.name === 'Nuria'), 3000); await sleep(100);
+    const row = [...w.s.rows.values()].find((r) => r.name === 'Nuria');
+    const local = profList(app).find((p) => p.rid === (row && row.id));
+    check('teach: "New child in this class" creates the row with class_id and marks via:class',
+      !!row && row.class_id === w.cls && !(w.s.links.get(row.id) || new Set()).size && !!local && local.via === 'class' && local.name === 'Nuria' && local.kind === 'reader' && !!qs(app, '[data-roster] [data-child="' + row.id + '"]') && w.s.log.some((l) => l === 'POST /rest/v1/child_profiles') && app.errors.length === 0,
+      JSON.stringify({ row, local, errors: app.errors }));
+  }
+
+  {
+    const w = await world({ who: 'teacher' });
+    const app = await bootWorld(w);
+    const leave = qs(app, '[data-act=leave][data-child="' + RID_B + '"]'), del = qs(app, '[data-act=delete][data-child="' + RID_B + '"]');
+    leave.click(); const askLeave = await confirmWith(app, false);
+    const intact1 = w.s.rows.get(RID_B).class_id === w.cls;
+    const fa = app.d.activeElement;
+    check('teach: after an action the focus returns to the same button (the panel is rebuilt)', !!fa && fa.dataset.act === 'leave' && fa.dataset.child === RID_B && app.$('teach').contains(fa) && app.$('teachMsg') && app.$('teachMsg').getAttribute('role') === 'status', fa && fa.outerHTML);
+    qs(app, '[data-act=delete][data-child="' + RID_B + '"]').click(); const askDel = await confirmWith(app, false);
+    const intact2 = w.s.rows.has(RID_B);
+    qs(app, '[data-act=delete][data-child="' + RID_B + '"]').click(); await confirmWith(app, true);
+    await until(() => !w.s.rows.has(RID_B), 3000); await sleep(60);
+    check('teach: delete and take-out are different buttons and each asks to confirm',
+      !!leave && !!del && leave !== del && leave.textContent !== del.textContent && askLeave !== askDel && /Mateo/.test(askLeave) && /Mateo/.test(askDel) && intact1 && intact2 && !w.s.rows.has(RID_B) && w.s.tombstones.has(RID_B) && !qs(app, '[data-roster] [data-child="' + RID_B + '"]'),
+      JSON.stringify({ askLeave, askDel }));
+  }
+
+  {
+    const w = await world({ who: 'teacher' });
+    const cls2 = w.s.addClass('3B'); w.s.addTeacher(cls2, T_EMAIL); // two classes: the picker decides
+    const own = await rpcAs(w.s, w.par.auth, 'create_invite', { p_child: RID_A, p_kind: 'to_class' });
+    const app = await bootWorld(w);
+    const opts = [...app.$('teachPick').options].map((o) => o.value);
+    app.$('teachPick').value = cls2; app.$('teachPick').dispatchEvent(new app.w.Event('change', { bubbles: true }));
+    type(app, 'teachClassCode', own.code); app.$('teachClassRedeem').click();
+    await until(() => w.s.rows.get(RID_A).class_id, 3000); await sleep(100);
+    check('teach: redeeming a valid to_class code as a teacher puts the child in the chosen class', opts.length === 2 && cls2 !== w.cls && w.s.rows.get(RID_A).class_id === cls2 && !!qs(app, '[data-class="' + cls2 + '"] [data-child="' + RID_A + '"]') && msgOf(app) === ies.teachRedeemedClass && !!qs(app, '[data-roster] [data-child="' + RID_A + '"]'), msgOf(app));
+  }
+
+  {
+    const w = await world();
+    const inv = await rpcAs(w.s, w.tea.auth, 'create_invite', { p_child: RID_B, p_kind: 'to_parent' });
+    const app = await bootWorld(w);
+    type(app, 'teachCode', inv.code.slice(0, 4).toLowerCase() + '-' + inv.code.slice(4)); app.$('teachRedeem').click();
+    await until(() => w.s.links.get(RID_B) && w.s.links.get(RID_B).has(w.par.uid), 3000); await sleep(100);
+    const local = profList(app).find((p) => p.rid === RID_B);
+    check('teach: redeeming a valid to_parent code as a parent links the child', w.s.links.get(RID_B).has(w.par.uid) && msgOf(app) === ies.teachRedeemedParent && !!qs(app, '[data-block=parent] [data-child="' + RID_B + '"]') && !!local && !local.via, JSON.stringify({ msg: msgOf(app), local }));
+  }
+
+  {
+    const w = await world({ who: 'teacher' });
+    const app = await bootWorld(w);
+    qs(app, '[data-act=open][data-child="' + RID_B + '"]').click();
+    await until(() => profList(app).some((p) => p.rid === RID_B), 3000); await sleep(60);
+    const p = profList(app).find((x) => x.rid === RID_B);
+    const pf = JSON.parse(app.w.localStorage.getItem('leemos-profiles'));
+    check('teach: Open here creates the local profile with rid and via:class',
+      !!p && p.via === 'class' && p.name === 'Mateo' && p.kind === 'reader' && pf.active === p.id && JSON.parse(app.w.localStorage.getItem('leemos-v1:' + p.id)).total === 5, JSON.stringify(pf));
+  }
+
+  {
+    const w = await world();
+    w.s.rows.get(RID_A).class_id = w.cls;
+    const app = await bootWorld(w);
+    const label = qs(app, '[data-block=parent] [data-child="' + RID_A + '"]').textContent;
+    qs(app, '[data-act=leave][data-child="' + RID_A + '"]').click();
+    await confirmWith(app, true);
+    await until(() => w.s.rows.get(RID_A).class_id === null, 3000); await sleep(100);
+    check('teach: a parent takes the child out of the class and the roster updates', /3A/.test(label) && w.s.rows.get(RID_A).class_id === null && !qs(app, '[data-act=leave]') && !!qs(app, '[data-act=share][data-child="' + RID_A + '"]') && !/3A/.test(qs(app, '[data-block=parent]').textContent), label);
+  }
+
+  {
+    const w = await world({ who: 'teacher' });
+    const app = await bootWorld(w);
+    qs(app, '[data-act=leave][data-child="' + RID_B + '"]').click();
+    await confirmWith(app, true);
+    await until(() => msgOf(app).length > 0, 3000); await sleep(40);
+    check('teach: leaving a class with an unclaimed child shows the orphan message', msgOf(app) === ies.teachOrphan && w.s.rows.get(RID_B).class_id === w.cls && !!qs(app, '[data-roster] [data-child="' + RID_B + '"]'), msgOf(app));
+  }
+
+  {
+    // the parents' code is offered only for a child nobody has claimed (has_parent comes from the server, not from the caller's own link)
+    const w = await world({ who: 'teacher' });
+    w.s.rows.get(RID_A).class_id = w.cls; // Elsa: in 3A and claimed by her parent
+    const app = await bootWorld(w);
+    check('teach: "Código para los padres" is absent for a claimed child and present for an unclaimed one', !!qs(app, '[data-act=parentcode][data-child="' + RID_B + '"]') && !qs(app, '[data-act=parentcode][data-child="' + RID_A + '"]') && !!qs(app, '[data-roster] [data-child="' + RID_A + '"]'), app.$('teach').textContent);
+  }
+
+  {
+    // a parents' code typed into the teacher's class box is refused and stays valid for the family
+    const w = await world({ who: 'teacher' });
+    const inv = await rpcAs(w.s, w.tea.auth, 'create_invite', { p_child: RID_B, p_kind: 'to_parent' });
+    const app = await bootWorld(w);
+    app.$('teachPick').value = w.cls;
+    type(app, 'teachClassCode', inv.code); app.$('teachClassRedeem').click();
+    await until(() => msgOf(app).length > 0, 3000); await sleep(40);
+    const refused = msgOf(app) === ies.teachBadCode && !(w.s.links.get(RID_B) || new Set()).size;
+    const later = await rpcAs(w.s, w.par.auth, 'redeem_invite', { p_code: inv.code, p_class: null });
+    check('teach: a to_parent code typed in the class box is refused, links nobody and still works for the family', refused && later.ok === true && w.s.links.get(RID_B).has(w.par.uid), JSON.stringify({ msg: msgOf(app), later }));
+  }
+
+  {
+    const w = await world();
+    const inv = await rpcAs(w.s, w.tea.auth, 'create_invite', { p_child: RID_B, p_kind: 'to_parent' });
+    const app = await bootWorld(w);
+    w.s.setOffline(true);
+    const before = JSON.stringify(w.s.invites);
+    type(app, 'teachCode', inv.code); app.$('teachRedeem').click();
+    await until(() => msgOf(app).length > 0, 3000);
+    const m1 = msgOf(app);
+    qs(app, '[data-act=share]').click(); await confirmWith(app, true);
+    await until(() => msgOf(app) === ies.acctNetwork && !qs(app, '[data-code]'), 3000); await sleep(40);
+    const untouched = JSON.stringify(w.s.invites) === before && !qs(app, '[data-code]') && app.$('teachCode').value === inv.code; // nothing was consumed or created while offline, and the typed code is still in the box
+    w.s.setOffline(false);
+    type(app, 'teachCode', inv.code); app.$('teachRedeem').click();
+    await until(() => w.s.links.get(RID_B) && w.s.links.get(RID_B).has(w.par.uid), 3000);
+    check('teach: offline code actions show the network message and consume nothing', m1 === ies.acctNetwork && untouched && w.s.links.get(RID_B).has(w.par.uid), m1);
+  }
+
+  // final review: a fetch wrapper that holds the first GET of one child's row until release() (a slow round in flight)
+  const holdRow = (s, rid) => {
+    const h = { held: false, release: null };
+    const gate = new Promise((r) => { h.release = r; });
+    h.s = { ...s, fetch: async (u, o = {}) => { const r = await s.fetch(u, o); if (!h.held && (o.method || 'GET') === 'GET' && String(u).includes('child_profiles') && String(u).includes('id=eq.' + rid)) { h.held = true; await gate; } return r; } };
+    return h;
+  };
+
+  {
+    // final review 2: a teacher whose own child is in a colleague's class does not get that class as one of theirs
+    const w = await world({ who: 'teacher' });
+    w.s.setRole('colega@example.com', 'teacher', { ack: true });
+    const k2 = w.s.addClass('4B'); w.s.addTeacher(k2, 'colega@example.com');
+    w.s.rows.set(RID_C, { id: RID_C, owner: w.tea.uid, class_id: k2, name: 'Pau', kind: 'reader', data: dat({ total: 1, name: 'Pau', modAt: 2 }), version: 1 });
+    w.s.links.set(RID_C, new Set([w.tea.uid]));
+    const app = await bootWorld(w);
+    const blocks = qsa(app, '[data-block=teacher] .teach-class').map((e) => e.dataset.class);
+    const opts = [...app.$('teachPick').options].map((o) => o.value);
+    const own = qs(app, '[data-block=parent] [data-child="' + RID_C + '"]');
+    check('final review: a colleague\'s class (seen through the teacher\'s own child) is not in the teacher block nor in the picker, and still names the chip',
+      blocks.join() === w.cls && opts.join() === w.cls && !qs(app, '[data-act=newchild][data-class="' + k2 + '"]') && !!own && /4B/.test(own.textContent) && app.errors.length === 0, JSON.stringify({ blocks, opts, k2, own: own && own.textContent }));
+  }
+
+  {
+    // final review 3: a round that finishes after the child left this device writes nothing back
+    const w = await world({ who: 'teacher' });
+    const h = holdRow(w.s, RID_B);
+    const profs = { 'leemos-profiles': { active: 'ana', list: [{ id: 'ana', name: 'Ana', kind: 'reader' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] }, 'leemos-v1:mateo': { name: 'Mateo', total: 5, modAt: 2 } };
+    const app = await bootWorld({ ...w, s: h.s }, profs);
+    await until(() => h.held, 3000); // the start-up round now waits on Mateo's read
+    qs(app, '[data-act=delete][data-child="' + RID_B + '"]').click(); await confirmWith(app, true);
+    await until(() => !profList(app).some((p) => p.id === 'mateo'), 3000);
+    const gone = app.w.localStorage.getItem('leemos-v1:mateo') === null;
+    h.release(); await sleep(200);
+    check('final review: a sync round resolving after the class child was removed does not write its state back', h.held && gone && app.w.localStorage.getItem('leemos-v1:mateo') === null && !profList(app).some((p) => p.id === 'mateo') && app.errors.length === 0, JSON.stringify({ gone, after: app.w.localStorage.getItem('leemos-v1:mateo') }));
+  }
+
+  {
+    // final review 6: "Volver a guardar" while a round is in flight syncs once that round ends
+    const RID_C2 = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const w = await world();
+    w.s.rows.delete(RID_A); w.s.links.delete(RID_A); // Elsa's server copy was deleted
+    w.s.rows.set(RID_C2, { id: RID_C2, owner: w.par.uid, class_id: null, name: 'Ana', kind: 'reader', data: dat({ total: 2, name: 'Ana', modAt: 2 }), version: 1 });
+    w.s.links.set(RID_C2, new Set([w.par.uid]));
+    const h = holdRow(w.s, RID_C2);
+    const profs = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', noSync: true }, { id: 'ana', name: 'Ana', kind: 'reader', rid: RID_C2 }] }, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 5 }, 'leemos-v1:ana': { name: 'Ana', total: 2, modAt: 2 } };
+    const app = await bootWorld({ ...w, s: h.s }, profs);
+    await until(() => h.held, 3000); // a round is in flight (Elsa was already skipped: no rid yet)
+    qs(app, '[data-act=resync][data-child="elsa"]').click();
+    await until(() => !!profList(app).find((x) => x.id === 'elsa').rid, 2000); await sleep(40);
+    const mark = w.s.log.length;
+    h.release();
+    await until(() => [...w.s.rows.values()].some((r) => r.name === 'Elsa'), 8000);
+    const row = [...w.s.rows.values()].find((r) => r.name === 'Elsa');
+    check('final review: "Volver a guardar" during a round in flight is synced when that round ends', !!row && row.data.total === 4 && row.id === profList(app).find((x) => x.id === 'elsa').rid && w.s.log.slice(mark).includes('POST /rest/v1/child_profiles') && app.errors.length === 0, JSON.stringify({ row: row && row.id, log: w.s.log.slice(mark) }));
+  }
+
+  // ---------- privacy: page, export, deletion (spec §8) ----------
+  const captureDownloads = (w) => {
+    w.__dl = []; w.__rev = [];
+    w.URL.createObjectURL = (b) => { const u = 'blob:t' + w.__dl.length; w.__dl.push({ blob: b, url: u }); return u; };
+    w.URL.revokeObjectURL = (u) => { w.__rev.push(u); };
+    w.HTMLAnchorElement.prototype.click = function () { const d = w.__dl.find((x) => x.url === this.href || x.url === this.getAttribute('href')); if (d) d.name = this.download; };
+  };
+  const blobJSON = (w, b) => new Promise((res, rej) => { const f = new w.FileReader(); f.onload = () => { try { res(JSON.parse(f.result)); } catch (e) { rej(e); } }; f.onerror = () => rej(f.error); f.readAsText(b); });
+
+  {
+    const app = await boot({});
+    const a1 = app.$('acctConsentLink'), a2 = app.$('acctPrivacy');
+    const t1 = app.$('acctOut').contains(a1), t2 = app.$('acctIn').contains(a2);
+    check('privacy: the consent line and the account block link to privacy.html',
+      !!a1 && !!a2 && t1 && t2 && a1.getAttribute('href') === 'privacy.html' && a2.getAttribute('href') === 'privacy.html' && existsSync(join(ROOT, 'privacy.html')) && a1.textContent.length > 3 && a2.textContent.length > 3, [a1 && a1.outerHTML, a2 && a2.outerHTML].join(' '));
+  }
+
+  {
+    const w = await world();
+    const RID_Z = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    const other = await signedAuth(w.s, 'otra@example.com');
+    w.s.rows.set(RID_Z, { id: RID_Z, owner: other.uid, class_id: null, name: 'Zoe', kind: 'reader', data: dat({ total: 1, name: 'Zoe', modAt: 2 }), version: 1 });
+    w.s.links.set(RID_Z, new Set([other.uid]));
+    const app = await bootWorld(w, {}, { onDom: captureDownloads });
+    const reqs = w.s.log.length;
+    app.$('acctExport').click();
+    await until(() => app.w.__dl.length === 1, 3000); await sleep(40);
+    const dl = app.w.__dl[0], j = await blobJSON(app.w, dl.blob);
+    const names = (j.children || []).map((c) => c.name);
+    const after = w.s.log.slice(reqs);
+    check('export: "Download my data" produces JSON with the account\'s children and no other account\'s',
+      names.join(',') === 'Elsa' && !JSON.stringify(j).includes('Zoe') && !JSON.stringify(j).includes(RID_Z) && j.children[0].id === RID_A && dl.name === 'leemos-mis-datos.json' && /json/.test(dl.blob.type) && app.w.__rev.includes(dl.url) && after.filter((l) => /export_my_data/.test(l)).length === 1 && after.every((l) => !/^(PUT|PATCH|DELETE)/.test(l)) && app.errors.length === 0,
+      JSON.stringify({ names, name: dl.name, rev: app.w.__rev, after }));
+    // a child's own download: only that child
+    const b = qs(app, '[data-act=download][data-child="' + RID_A + '"]');
+    b.click(); await until(() => app.w.__dl.length === 2, 3000); await sleep(40);
+    const j2 = await blobJSON(app.w, app.w.__dl[1].blob);
+    check('export: a child\'s "Download" has that child only', !!b && j2.child && j2.child.id === RID_A && j2.child.name === 'Elsa' && !JSON.stringify(j2).includes('Zoe') && !/Elsa|Mateo/.test(app.w.__dl[1].name || ''), JSON.stringify(j2).slice(0, 200));
+  }
+
+  {
+    const RID_C2 = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const w = await world();
+    w.s.rows.set(RID_C2, { id: RID_C2, owner: w.par.uid, class_id: null, name: 'Ana', kind: 'reader', data: dat({ total: 2, name: 'Ana', modAt: 2 }), version: 1 });
+    w.s.links.set(RID_C2, new Set([w.par.uid]));
+    const profs = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'ana', name: 'Ana', kind: 'reader', rid: RID_C2 }] }, 'leemos-v1': { name: 'Elsa', total: 4 }, 'leemos-v1:ana': { name: 'Ana', total: 2 } };
+    const app = await bootWorld(w, profs);
+    qs(app, '[data-act=wipe][data-child="' + RID_A + '"]').click();
+    const askNo = await confirmWith(app, false);
+    const intact = w.s.rows.has(RID_A);
+    qs(app, '[data-act=wipe][data-child="' + RID_A + '"]').click(); await confirmWith(app, true);
+    await until(() => !w.s.rows.has(RID_A), 3000); await sleep(100);
+    const list = profList(app);
+    const elsa = list.find((p) => p.id === 'elsa'), ana = list.find((p) => p.id === 'ana');
+    check('delete: deleting a child calls deleteChild and removes only its rid',
+      /Elsa/.test(askNo) && intact && w.s.log.filter((l) => /delete_child/.test(l)).length === 1 && w.s.tombstones.has(RID_A) && w.s.rows.has(RID_C2) && !!elsa && elsa.rid === undefined && !!ana && ana.rid === RID_C2 && JSON.parse(app.w.localStorage.getItem('leemos-v1')).total === 4 && !qs(app, '[data-block=parent] [data-child="' + RID_A + '"]') && !!qs(app, '[data-block=parent] [data-child="' + RID_C2 + '"]') && app.errors.length === 0,
+      JSON.stringify({ askNo, list, tomb: [...w.s.tombstones] }));
+    // a child in a class gets a different question (the class teachers lose it too)
+    w.s.rows.get(RID_C2).class_id = w.cls;
+    app.$('acctSync').click(); await sleep(80);
+    await app.$('parents').dispatchEvent(new app.w.Event('toggle')); await sleep(120);
+    const wb = qs(app, '[data-act=wipe][data-child="' + RID_C2 + '"]');
+    wb.click(); const askClass = await confirmWith(app, false);
+    check('delete: a child in a class asks a different confirmation than a class-less one', !!wb && askClass !== askNo && /Ana/.test(askClass) && askClass.includes('3A') && w.s.rows.has(RID_C2), askClass);
+  }
+
+  {
+    const w = await world();
+    const profs = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'ana', name: 'Ana', kind: 'reader' }, { id: 'mateo', name: 'Mateo', kind: 'reader', rid: RID_B, via: 'class' }] }, 'leemos-v1': { name: 'Elsa', total: 4 }, 'leemos-v1:ana': { name: 'Ana', total: 3 }, 'leemos-v1:mateo': { name: 'Mateo', total: 5 }, 'leemos-sync-at': '123' };
+    const app = await bootWorld(w, profs);
+    const ls = app.w.localStorage;
+    ls.setItem('leemos-sync-at', String(Date.now())); // a round has run
+    const keysBefore = Object.keys(ls).filter((k) => !/^leemos-(auth|auth-user|sync-at)$/.test(k)).sort();
+    const asks = [];
+    const ask = async (yes) => { asks.push(await confirmWith(app, yes)); };
+    app.$('acctDelete').click(); await ask(false); await sleep(60);
+    const afterNo1 = w.s.log.filter((l) => /delete_my_account/.test(l)).length;
+    app.$('acctDelete').click(); await ask(true); await ask(false); await sleep(60);
+    const afterNo2 = w.s.log.filter((l) => /delete_my_account/.test(l)).length;
+    const stillIn = ls.getItem('leemos-auth') !== null;
+    app.$('acctEmail').value = 'mama@example.com'; app.$('acctConsent').checked = true; app.$('acctCode').value = '123456'; // left in the (hidden) sign-in form
+    app.$('acctDelete').click(); await ask(true); await ask(true);
+    await until(() => ls.getItem('leemos-auth') === null, 3000); await sleep(100);
+    check('delete account: the sign-in form shown afterwards is empty and the consent unticked', app.$('acctEmail').value === '' && app.$('acctCode').value === '' && app.$('acctConsent').checked === false, JSON.stringify({ e: app.$('acctEmail').value, c: app.$('acctConsent').checked }));
+    const list = profList(app);
+    const keysAfter = Object.keys(ls).filter((k) => !/^leemos-(auth|auth-user|sync-at)$/.test(k)).sort();
+    check('delete account: asks twice, clears the auth keys and keeps local progress',
+      afterNo1 === 0 && afterNo2 === 0 && stillIn && asks.length === 5 && asks[1] !== '' && asks[2] !== asks[1] && w.s.log.filter((l) => /delete_my_account/.test(l)).length === 1 && !w.s.accounts.has(w.par.uid)
+      && ls.getItem('leemos-auth') === null && ls.getItem('leemos-auth-user') === null && ls.getItem('leemos-sync-at') === null
+      && list.every((p) => p.rid === undefined) && list.map((p) => p.id).join(',') === 'elsa,ana' && JSON.parse(ls.getItem('leemos-v1')).total === 4 && JSON.parse(ls.getItem('leemos-v1:ana')).total === 3
+      && app.$('acctOut').hidden === false && app.$('acctIn').hidden === true && app.$('teach').hidden && app.errors.length === 0,
+      JSON.stringify({ afterNo1, afterNo2, asks, list, keys: Object.keys(ls) }));
+    check('delete account: via:class profiles are purged', !profList(app).some((p) => p.id === 'mateo' || p.via === 'class') && ls.getItem('leemos-v1:mateo') === null && keysBefore.filter((k) => k !== 'leemos-v1:mateo').join() === keysAfter.join(), JSON.stringify({ keysBefore, keysAfter }));
+  }
+
+  {
+    const w = await world();
+    const app = await bootWorld(w, {}, {});
+    w.s.setOffline(true);
+    app.$('acctDelete').click(); await confirmWith(app, true); await confirmWith(app, true);
+    await until(() => app.$('acctMsg').textContent.length > 0, 3000);
+    check('delete account: offline keeps the session and says there is no connection', app.$('acctMsg').textContent === ies.acctNetwork && app.w.localStorage.getItem('leemos-auth') !== null && w.s.accounts.has(w.par.uid), app.$('acctMsg').textContent);
+  }
+
+  // ---------- fix round 1: a deletion the adult chose stays deleted (noSync) ----------
+  {
+    const RID_C2 = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const w = await world();
+    w.s.rows.set(RID_C2, { id: RID_C2, owner: w.par.uid, class_id: null, name: 'Ana', kind: 'reader', data: dat({ total: 2, name: 'Ana', modAt: 2 }), version: 1 }); // a sibling of the same kind, not on this device
+    w.s.links.set(RID_C2, new Set([w.par.uid]));
+    const profs = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }] }, 'leemos-v1': { name: 'Elsa', total: 4 } };
+    const app = await bootWorld(w, profs);
+    qs(app, '[data-act=wipe][data-child="' + RID_A + '"]').click(); await confirmWith(app, true);
+    await until(() => !w.s.rows.has(RID_A), 3000); await sleep(100);
+    const marked = profList(app).find((x) => x.id === 'elsa');
+    const resyncBtn = qs(app, '[data-act=resync][data-child="elsa"]');
+    const rows0 = w.s.rows.size, mark = w.s.log.length;
+    app.$('acctOutBtn').click();
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(60);
+    await signInUi(app, P_EMAIL);
+    await until(() => app.w.localStorage.getItem('leemos-auth') !== null && profList(app).some((x) => x.rid === RID_C2), 4000); await sleep(150);
+    const after = w.s.log.slice(mark);
+    const el = profList(app).find((x) => x.id === 'elsa');
+    check('noSync: wiping a child, signing out and in again uploads nothing and asks nothing (no askLink for the wiped profile)',
+      !!marked && marked.noSync === true && !marked.rid && !!resyncBtn && resyncBtn.getAttribute('aria-label').includes('Elsa') && app.$('link').hidden && !after.some((l) => l === 'POST /rest/v1/child_profiles') && w.s.rows.size === rows0 && !!el && !el.rid && el.noSync === true && JSON.parse(app.w.localStorage.getItem('leemos-v1')).total === 4 && app.errors.length === 0,
+      JSON.stringify({ marked, el, rows0, rows: w.s.rows.size, linkHidden: app.$('link').hidden, post: after.filter((l) => /^POST/.test(l)) }));
+  }
+
+  {
+    const w = await world();
+    const profs = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', rid: RID_A }, { id: 'ana', name: 'Ana', kind: 'reader', rid: 'ffffffff-ffff-4fff-8fff-ffffffffffff' }] }, 'leemos-v1': { name: 'Elsa', total: 4 }, 'leemos-v1:ana': { name: 'Ana', total: 3 } };
+    const app = await bootWorld(w, profs);
+    await sleep(100);
+    app.$('acctDelete').click(); await confirmWith(app, true); await confirmWith(app, true);
+    await until(() => app.w.localStorage.getItem('leemos-auth') === null, 3000); await sleep(100);
+    const afterDel = profList(app);
+    const rows0 = w.s.rows.size, mark = w.s.log.length;
+    await signInUi(app, 'nueva@example.com');
+    await until(() => app.w.localStorage.getItem('leemos-auth') !== null, 4000); await sleep(200);
+    const after = w.s.log.slice(mark);
+    const list = profList(app);
+    check('noSync: after deleting the account, a new account does not receive the former profiles',
+      afterDel.find((x) => x.id === 'elsa').noSync === true && !afterDel.find((x) => x.id === 'elsa').rid && !after.some((l) => l === 'POST /rest/v1/child_profiles') && w.s.rows.size === rows0 && list.find((x) => x.id === 'elsa').noSync === true && !list.find((x) => x.id === 'elsa').rid && app.errors.length === 0,
+      JSON.stringify({ afterDel, list, post: after.filter((l) => /^POST/.test(l)) }));
+  }
+
+  {
+    const w = await world();
+    const profs = { 'leemos-profiles': { active: 'elsa', list: [{ id: 'elsa', name: 'Elsa', kind: 'reader', noSync: true }] }, 'leemos-v1': { name: 'Elsa', total: 4, modAt: 5 } };
+    const app = await bootWorld(w, profs);
+    w.s.rows.delete(RID_A); w.s.links.delete(RID_A);
+    const btn = qs(app, '[data-act=resync][data-child="elsa"]');
+    const kept = !!btn; // the marker survived the profile sanitizer on load
+    const mark = w.s.log.length;
+    btn.click();
+    await until(() => profList(app).find((x) => x.id === 'elsa').rid, 3000);
+    await until(() => [...w.s.rows.values()].some((r) => r.name === 'Elsa'), 4000); await sleep(100);
+    const el = profList(app).find((x) => x.id === 'elsa');
+    const row = [...w.s.rows.values()].find((r) => r.name === 'Elsa');
+    check('noSync: the marker survives a reload and "Volver a guardar" clears it and syncs the profile again',
+      kept && !el.noSync && el.rid === row.id && row.data.total === 4 && w.s.log.slice(mark).some((l) => l === 'POST /rest/v1/child_profiles') && !qs(app, '[data-act=resync]') && app.errors.length === 0,
+      JSON.stringify({ kept, el, row: row && row.id }));
+  }
+
+  {
+    const w = await world({ who: 'teacher' });
+    const app = await bootWorld(w);
+    qs(app, '[data-act=open][data-child="' + RID_B + '"]').click();
+    await until(() => profList(app).some((p) => p.rid === RID_B), 3000); await sleep(60);
+    const id = profList(app).find((p) => p.rid === RID_B).id;
+    qs(app, '[data-act=delete][data-child="' + RID_B + '"]').click(); await confirmWith(app, true);
+    await until(() => !w.s.rows.has(RID_B), 3000); await sleep(100);
+    check('delete: a teacher deleting a class child drops its via:class profile from this device at once',
+      !profList(app).some((p) => p.id === id) && app.w.localStorage.getItem('leemos-v1:' + id) === null && profList(app).some((p) => p.id === 'ana') && app.errors.length === 0, JSON.stringify(profList(app)));
+  }
+
+  {
+    const w = await world();
+    w.s.setRole(P_EMAIL, 'admin'); // the only admin
+    const app = await bootWorld(w, { 'leemos-v1': { name: 'Elsa', total: 4 } });
+    app.$('acctDelete').click(); await confirmWith(app, true); await confirmWith(app, true);
+    await until(() => app.$('acctMsg').textContent.length > 0, 3000); await sleep(40);
+    check('delete account: the only admin cannot delete: the session and local data stay and the message says why',
+      app.$('acctMsg').textContent === ies.acctLastAdmin && app.w.localStorage.getItem('leemos-auth') !== null && w.s.accounts.has(w.par.uid) && JSON.parse(app.w.localStorage.getItem('leemos-v1')).total === 4 && !profList(app).some((p) => p.noSync) && profList(app).some((p) => p.rid === RID_A), app.$('acctMsg').textContent);
+  }
+
+  {
+    const page = existsSync(join(ROOT, 'privacy.html')) ? readFileSync(join(ROOT, 'privacy.html'), 'utf8') : '';
+    const text = page.replace(/<style[\s\S]*?<\/style>/g, '');
+    const marks = ['responsable', 'correo', 'región'].map((w2) => new RegExp('PENDIENTE[^<]{0,80}' + w2, 'i').test(text));
+    const marksCa = (text.match(/PENDENT|PENDIENTE/g) || []).length;
+    check('privacy.html contains the PENDIENTE markers',
+      page.length > 2000 && (text.match(/PENDIENTE/g) || []).length >= 6 && marks.every(Boolean) && /borrador sin revisi[oó]n legal/i.test(text) && /esborrany sense revisi[oó] legal/i.test(text) && !/borrador sense/i.test(text) && /lang="es"/.test(page) && /lang="ca"/.test(page) && /prefers-color-scheme:\s*dark/.test(page) && /name="viewport"/.test(page) && !new RegExp('service' + '_role').test(page) && !/[\w.-]+@[\w-]+\.[a-z]{2,}/i.test(text) && !/(href|src)="(\/|https?:)/.test(page.replace(/https:\/\/(fonts\.googleapis\.com|fonts\.gstatic\.com)[^"]*/g, '')) && marksCa >= 6,
+      JSON.stringify({ n: (text.match(/PENDIENTE/g) || []).length, marks, len: page.length }));
+  }
+
+  {
+    const es = readJSON('src/data/i18n.es.json'), ca = readJSON('src/data/i18n.ca.json');
+    // every key the panel code names exists in both files (a literal key in teach.js is t('key') or a table value)
+    const src = existsSync(join(ROOT, 'src/teach.js')) ? readFileSync(join(ROOT, 'src/teach.js'), 'utf8') : '';
+    const ids = new Set(['teacher', 'teachCode', 'teachAck', 'teachAckBtn', 'teachPick', 'teachClassCode', 'teachClassRedeem', 'teachRedeem', 'teachMsg']); // element ids, not strings
+    const named = [...new Set([...src.matchAll(/'((?:teach|acct)[A-Za-z]+)'/g)].map((m) => m[1]))].filter((k) => !ids.has(k));
+    const esK = Object.keys(es), caK = Object.keys(ca);
+    check('i18n: es and ca have the same keys', esK.length === caK.length && esK.every((k) => k in ca) && caK.every((k) => k in es) && named.length > 30 && named.every((k) => k in es && k in ca) && ['teachBadCode', 'teachOrphan', 'teachShareAsk', 'teachAckText'].every((k) => typeof es[k] === 'string' && typeof ca[k] === 'string' && es[k] !== ca[k]), named.filter((k) => !(k in es && k in ca)).join(','));
+  }
 }
 
 console.log(failures ? `\n${failures} test(s) FAILED` : '\nAll tests passed');

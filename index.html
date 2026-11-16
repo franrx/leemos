@@ -192,6 +192,7 @@
           <input type="email" id="acctEmail" autocomplete="email" maxlength="120">
         </div>
         <label class="row acct-consent"><input type="checkbox" id="acctConsent"> <span data-i="acctConsent">Soy el padre, la madre o tutor y acepto la política de privacidad.</span></label>
+        <p class="small"><a id="acctConsentLink" href="privacy.html" target="_blank" rel="noopener" data-i="acctPrivacyLink">Leer la política de privacidad</a></p>
         <div class="row"><button class="icon-btn" id="acctSend" data-i="acctSend">Enviar código</button></div>
         <div class="row" id="acctCodeRow" hidden>
           <label for="acctCode" data-i="acctCode">Código</label>
@@ -205,6 +206,12 @@
         <div class="row">
           <button class="icon-btn" id="acctSync" data-i="acctSync">Sincronizar ahora</button>
           <button class="icon-btn" id="acctOutBtn" data-i="acctSignOut">Cerrar sesión</button>
+        </div>
+        <div class="teach" id="teach" hidden></div>
+        <div class="acct-data">
+          <div class="row"><button class="icon-btn" id="acctExport" data-i="acctExport">Descargar mis datos</button></div>
+          <p class="small"><a id="acctPrivacy" href="privacy.html" target="_blank" rel="noopener" data-i="acctPrivacyLink">Leer la política de privacidad</a></p>
+          <div class="row"><button class="icon-btn danger" id="acctDelete" data-i="acctDelete">Borrar mi cuenta</button></div>
         </div>
       </div>
       <p class="small" id="acctMsg" aria-live="polite"></p>

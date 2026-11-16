@@ -43,29 +43,50 @@ const cleanProfiles=p=>{
     if(!x||typeof x.id!=='string'||!x.id||seen.has(x.id))return;
     seen.add(x.id);
     list.push({id:x.id,name:typeof x.name==='string'&&x.name.trim()?x.name.trim():x.id,kind:x.kind==='pre'?'pre':'reader',
-      ...(typeof x.rid==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x.rid)?{rid:x.rid}:{})});
+      ...(typeof x.rid==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x.rid)?{rid:x.rid}:{}),
+      // via:'class' = reached this device through a class (purged at sign-out); kindDirty = kind changed here, not pushed yet; noSync = its server copy was deleted or revoked: never uploaded again unless the adult chooses; hidden = class profile after an auth error
+      ...(x.via==='class'?{via:'class'}:{}),...(x.kindDirty===true?{kindDirty:true}:{}),...(x.hidden===true?{hidden:true}:{}),...(x.noSync===true?{noSync:true}:{})});
   });
-  return list.some(x=>x.id===p.active)?{active:p.active,list}:null;
+  return list.some(x=>x.id===p.active)?{active:p.active,list,...(p.kindSynced===true?{kindSynced:true}:{})}:null;
 };
 const loadProfiles=()=>{
   try{const c=cleanProfiles(JSON.parse(localStorage.getItem(PKEY)));if(c)return c}catch(e){}
   return {active:'elsa',list:[{id:'elsa',name:'Elsa',kind:'reader'}]};
 };
 const PROFILES=loadProfiles();
-const PROFILE=PROFILES.list.find(x=>x.id===PROFILES.active);
 const saveProfiles=()=>{try{localStorage.setItem(PKEY,JSON.stringify(PROFILES));return true}catch(e){return false}};
+// Upgrade, once per device (kindSynced): before this version the kind was local only and the server row kept its creation kind, so each
+// linked profile pushes the kind it has here (kindDirty) instead of adopting that stale value. Class profiles did not exist then.
+if(!PROFILES.kindSynced){PROFILES.list.forEach(x=>{if(x.rid&&x.via!=='class')x.kindDirty=true});PROFILES.kindSynced=true;saveProfiles()}
+// Where the app goes when the open profile is purged or hidden: the first one that did not come through a class, else a new default reader.
+function fallbackId(){
+  const f=PROFILES.list.find(x=>x.via!=='class'&&!x.hidden);
+  if(f)return f.id;
+  let id='elsa',i=2;while(PROFILES.list.some(x=>x.id===id))id='elsa-'+i++;
+  PROFILES.list.push({id,name:'Elsa',kind:'reader'});
+  return id;
+}
+// No stored session (it died outside a sync round, or the admin page signed out on this origin): nobody can vouch for the class
+// profiles, so they are hidden until the same account signs in again (a different account drops them).
+try{if(!localStorage.getItem('leemos-auth')&&PROFILES.list.some(x=>x.via==='class'&&!x.hidden)){PROFILES.list.forEach(x=>{if(x.via==='class')x.hidden=true});saveProfiles()}}catch(e){}
+if(PROFILES.list.find(x=>x.id===PROFILES.active).hidden){PROFILES.active=fallbackId();saveProfiles()} // a hidden profile is never opened
+const PROFILE=PROFILES.list.find(x=>x.id===PROFILES.active);
+let purgedActive=false; // the open profile was purged: its state must not be written back before the reload
+let switchAfterRound=false; // the open class profile was revoked during a sync round: the page switches after the round, never inside it
+let signingOut=false; // signOutAndClean / deleteAccount is running: a round that ends meanwhile leaves the switch to them (after signOut and the purge)
 const keyFor=id=>id==='elsa'?'leemos-v1':'leemos-v1:'+id;
 const profileSlug=n=>n.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 function switchProfile(id){PROFILES.active=id;saveProfiles();location.reload()}
 function addProfile(name,kind){
   const base=profileSlug(name)||'nino';let id=base,i=2;
-  while(PROFILES.list.some(x=>x.id===id))id=base+'-'+i++;
+  while(PROFILES.list.some(x=>x.id===id)||localStorage.getItem(keyFor(id))!==null)id=base+'-'+i++; // never adopt a leftover saved state (same rule as openChild)
   PROFILES.list.push({id,name:name.trim(),kind:kind==='pre'?'pre':'reader'});
   switchProfile(id);
 }
 const KEY=keyFor(PROFILE.id);
 const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||{}}catch(e){return {}}};
 const save=()=>{
+  if(purgedActive)return;
   const fp=fpOf();
   if(fp!==lastFp){lastFp=fp;S.modAt=stampAfter(S.modAt);onProgressChange()} // never older than a stamp that came from a device with a faster clock
   if(lastSessFp!==null){
@@ -84,6 +105,7 @@ const S=Object.assign({stats:{},level:0,mode:'syl',upper:true,rate:.75,theme:'',
 // An old save has only the counter S.stickers: its stickers are the first ones of the old order, each in its world's set.
 // Runs before lastFp is taken, so loading an old state is not a progress change (modAt decides level and name in the sync).
 WORLDS.forEach(w=>{if(!Array.isArray(w.stk))w.stk=[]}); // a stale cached worlds.json from before the sets must not stop the app from starting
+const WORLD_IDS=new Set(WORLDS.map(w=>w.id)); // the worlds this version knows (what a device pushes in stk: syncedOf)
 const stkTotal=()=>WORLDS.reduce((n,w)=>n+Math.min(Math.max(0,Math.floor(Number(S.stk[w.id]))||0),w.stk.length),0);
 if(!S.stk||typeof S.stk!=='object'||Array.isArray(S.stk)){
   const stk={};
@@ -138,7 +160,8 @@ let curWorld=Math.floor(Math.random()*WORLDS.length);
 
 const $=id=>document.getElementById(id);
 const stat=k=>S.stats[k]||(S.stats[k]={ok:0,fail:0});
-const mastered=k=>{const s=S.stats[k];return !!s&&s.ok>=2&&s.ok>s.fail};
+const isMastered=s=>!!s&&s.ok>=2&&s.ok>s.fail; // Dominado = ok >= 2 && ok > fail: the one rule, for this child and for a child's server data
+const mastered=k=>isMastered(S.stats[k]);
 
 // ---------- voice ----------
 let voice=null,esVoices=[];
@@ -650,7 +673,7 @@ function syncInit(){
       const imp=window.__leemosImport||(p=>import(p));
       const [sm,mm]=await Promise.all([imp('./sync.js'),imp('./merge.js')]);
       mergeMod=mm;
-      sync=sm.createSync({url:cfg.url,anonKey:cfg.anonKey,fetch:window.__leemosSyncFetch||undefined,storage:localStorage}); // the page's own localStorage, also under the jsdom tests
+      sync=sm.createSync({url:cfg.url,anonKey:cfg.anonKey,fetch:window.__leemosSyncFetch||undefined,storage:localStorage,knownKeys:knownStatKeys,knownWorlds:id=>WORLD_IDS.has(id)}); // the page's own localStorage, also under the jsdom tests
       // Push when the page is hidden or closing; PULL what other devices did when it is shown again, focused, back online,
       // and once a minute while it stays visible (an open page never asks the server by itself otherwise).
       const wake=()=>{if(!document.hidden)syncAll()};
@@ -663,6 +686,32 @@ function syncInit(){
     }catch(err){syncP=null;return null} // a failed load can be retried later
   })());
 }
+// Every stat key this version can write, in both languages: syllables, words and letter sounds. Only the fallback for a write the server
+// refuses (sync.js knownKeys: planted item-shaped keys over the size or key bound) uses it, so an ordinary round never drops the keys of
+// a newer device. Without the letter sounds it cannot tell, and answers null (nothing is pruned).
+let knownP=null;
+function knownStatKeys(){
+  return knownP||(knownP=(async()=>{
+    const ks=new Set();
+    for(const l of ['es','ca']){
+      const p=l==='ca'?'ca:':'',snd=await loadJSON('src/data/sounds.'+l+'.json');
+      (LV[l]||[]).forEach(x=>{x.syl.forEach(y=>ks.add(p+'s:'+y));x.words.forEach(o=>ks.add(p+'w:'+o.w))});
+      snd.groups.forEach(g=>g.letters.forEach(x=>ks.add(p+'snd:'+x.l)));
+    }
+    return k=>ks.has(k);
+  })().catch(()=>{knownP=null;return null}));
+}
+// After a pruned push the device drops the same keys: kept here, they would be merged into the next push and refused again every round.
+function pruneLocalStats(id,known){
+  const active=id===PROFILE.id,cur=active?S:stateOf(id);
+  if(!cur.stats||typeof cur.stats!=='object')return;
+  for(const k of Object.keys(cur.stats))if(!known(k))delete cur.stats[k];
+  if(!active)try{localStorage.setItem(keyFor(id),JSON.stringify(cur))}catch(e){}
+}
+// The synced snapshot of a saved state, with only the worlds of this app in stk. merge.js reads at most 32 world ids per side, and a pull
+// can bring in ids somebody planted on the row: kept in the push, a sticker of a NEW world would be the 33rd and be cut. The row's other
+// ids still merge in (sync.js), so this never drops a newer device's world from the server.
+const syncedOf=st=>mergeMod.pickSynced(st&&st.stk&&typeof st.stk==='object'&&!Array.isArray(st.stk)?{...st,stk:Object.fromEntries(Object.entries(st.stk).filter(([k])=>WORLD_IDS.has(k)))}:st);
 const stateOf=id=>{
   if(id===PROFILE.id)return S;
   try{return JSON.parse(localStorage.getItem(keyFor(id)))||{}}catch(e){return {}}
@@ -699,9 +748,12 @@ function applyMerged(m,adoptSession){
 }
 // Returns the merged data. The child may have answered while the request was in flight, so the server's data is merged
 // into the CURRENT local state (never copied over it): a sync can only add progress, never take it away.
-function storeState(id,data){
+// sent: the snapshot that was pushed. The server stores at most old + 1 resets per language (sync.js capResets): what this device sent
+// beyond that is dropped here too (those resets cleared the same stats, already on the row); one made while the request was in flight stays.
+function storeState(id,data,sent){
   const active=id===PROFILE.id,cur=active?S:stateOf(id);
-  const mine=mergeMod.pickSynced(cur);
+  const mine=syncedOf(cur);
+  if(sent)for(const L of ['es','ca']){const drop=sent.resets[L]-data.resets[L];if(drop>0)mine.resets[L]=Math.max(data.resets[L],mine.resets[L]-drop)}
   const merged=mergeMod.mergeData(mine,data);
   if(active){
     const now=Date.now();
@@ -727,45 +779,232 @@ function storeState(id,data){
 }
 function schedSync(){if(!sync)return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncAll(),5000)}
 onProgressChange=schedSync;
-async function syncAll(){
-  if(syncBusy||!sync)return;
+// Resolves with the worst error kind of this round: null when everything synced (or no profile is linked), 'busy' / 'nosession' / 'skipped'
+// when the round did not run at all (another round in flight, signed out, a session of another account): nothing was sent.
+// final: the last sync before signing out, which decides itself what an auth error means (no hiding, no profile switch).
+async function syncAll({final=false}={}){
+  if(!sync)return null;
+  if(syncBusy)return 'busy';
   syncBusy=true; // before the first await: two triggers at once (visibilitychange + pagehide, a double tap) must run ONE sync
   try{
     let s=null;
-    try{s=await sync.session()}catch(e){renderAcct();return}
-    if(!s)return;
+    try{s=await sync.session()}catch(e){if(e&&e.kind==='auth'&&!final)hideClassProfiles();renderAcct();return e&&e.kind||'error'}
+    if(!s){if(!final)hideClassProfiles();return 'nosession'} // the session died outside a round (a panel request, another page): same as an auth error
     let last=null;try{last=localStorage.getItem(AUTH_USER_KEY)}catch(e){}
-    if(last&&s.user&&s.user.id&&last!==s.user.id)return; // a session of another account than the one this device was linked to: never send these profiles to it
+    if(last&&s.user&&s.user.id&&last!==s.user.id){if(!final)hideClassProfiles();return 'skipped'} // a session of another account than the one this device was linked to (e.g. the admin page signed in on this origin): never send these profiles to it, and the class children it does not vouch for are hidden (not deleted)
     syncState='syncing';renderAcct();
+    const started=Date.now(); // the stamp of a complete round: progress made while it runs must not look sent
     const rank=k=>k==='auth'?3:k==='offline'?1:2;
     let worst=null,again=false;
-    for(const p of PROFILES.list){
-      if(!p.rid)continue;
+    for(const p of [...PROFILES.list]){ // a copy: a revoked class child leaves PROFILES.list mid-round, and iterating the live array would skip the next profile
+      if(!p.rid||p.hidden)continue;
       try{
-        const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:mergeMod.pickSynced(stateOf(p.id))});
-        const merged=storeState(p.id,r.data);
+        const dirty=!!p.kindDirty; // the adult switched the kind on this device: push it once, then the server's kind wins
+        const snap=syncedOf(stateOf(p.id));
+        const r=await sync.syncProfile({rid:p.rid,name:p.name,kind:p.kind,data:snap,kindChanged:dirty});
+        if(!PROFILES.list.includes(p))continue; // removed from this device while the request was in flight (purged, deleted): nothing is written back
+        if(r.revoked){ // removed from the class or deleted by someone else
+          if(p.via==='class'){const n=p.name;forgetRid(p.rid,{later:true});acctMsg('acctRevokedClass',{n});continue} // another family's child held for a class: nothing of it can be sent, it leaves this device
+          delete p.rid;p.noSync=true;saveProfiles();acctMsg('acctRevoked',{n:p.name});continue // the family's own copy: local progress stays
+        }
+        let ch=false;
+        if(dirty&&p.kind===r.kind){delete p.kindDirty;ch=true} // pushed (unless the adult switched it again meanwhile)
+        if(!p.kindDirty&&(r.kind==='pre'||r.kind==='reader')&&r.kind!==p.kind){p.kind=r.kind;ch=true} // the server's kind; the screen follows on the next load
+        if(ch)saveProfiles();
+        if(r.pruned){const kn=await knownStatKeys();if(!PROFILES.list.includes(p))continue;if(kn)pruneLocalStats(p.id,kn)}
+        const merged=storeState(p.id,r.data,snap);
         if(!mergeMod.sameData(merged,r.data))again=true; // the child progressed meanwhile: push that too
       }catch(e){const k=e&&e.kind||'error';if(!worst||rank(k)>rank(worst))worst=k} // one profile failing must not stop the others
     }
-    if(worst){syncState=worst==='offline'?'offline':'error';if(worst==='auth')acctMsg('acctExpired')}
-    else{syncState='idle';try{localStorage.setItem(SYNC_AT_KEY,String(Date.now()))}catch(e){}}
+    if(worst){syncState=worst==='offline'?'offline':'error';if(worst==='auth'){acctMsg('acctExpired');if(!final)hideClassProfiles()}}
+    else{syncState='idle';try{localStorage.setItem(SYNC_AT_KEY,String(started))}catch(e){}}
     if(again)schedSync();
-  }finally{syncBusy=false;renderAcct()}
+    return worst;
+  }finally{syncBusy=false;renderAcct();if(switchAfterRound&&!final&&!signingOut)switchNow({keepMsg:true})} // the final round, or any round while signing out or deleting the account, leaves it to them: after signOut and the purge
 }
+// The pending switch away from a revoked open profile. keepMsg: the account message survives the reload (shown once by the next page).
+const NOTE_KEY='leemos-acct-note';
+function switchNow({keepMsg=false}={}){
+  switchAfterRound=false;
+  if(keepMsg){try{const m=$('acctMsg').textContent;if(m)sessionStorage.setItem(NOTE_KEY,m)}catch(e){}}
+  switchProfile(PROFILES.active);
+}
+// ---------- teachers and classes (spec: docs/superpowers/specs/2026-11-13-teachers-classes-design.md §6) ----------
+let ROLE='parent'; // from whoami() after sign-in and at start; it only chooses what the panel offers, the database decides what is visible
+async function readRole(){
+  try{const r=await sync.me();ROLE=r&&(r.role==='teacher'||r.role==='admin')?r.role:'parent';return null}
+  catch(e){return e&&e.kind||'error'}
+}
+// Removes the profiles that came through a class, with their saved state. Returns whether the open profile was one of them.
+function dropClassProfiles(){
+  const gone=PROFILES.list.filter(p=>p.via==='class');
+  gone.forEach(p=>{try{localStorage.removeItem(keyFor(p.id))}catch(e){}});
+  for(let i=PROFILES.list.length-1;i>=0;i--)if(PROFILES.list[i].via==='class')PROFILES.list.splice(i,1);
+  const active=gone.some(p=>p.id===PROFILES.active);
+  if(active)purgedActive=true;
+  return active;
+}
+// A shared school tablet keeps no other family's child: their progress is on the server and comes back when the teacher opens them again.
+async function purgeClassProfiles(){
+  const had=PROFILES.list.some(p=>p.via==='class');
+  if(had&&dropClassProfiles()){switchAfterRound=false;switchProfile(fallbackId());return}
+  if(switchAfterRound){switchNow();return} // the open class profile was revoked in the last round: leave it only now
+  if(had)saveProfiles();
+}
+// The session is dead (auth error) and nobody can be asked: the class profiles are hidden, not deleted, until the next sign-in.
+function hideClassProfiles(){
+  const m=PROFILES.list.filter(p=>p.via==='class'&&!p.hidden);
+  if(!m.length)return;
+  m.forEach(p=>{p.hidden=true});
+  if(PROFILES.list.find(p=>p.id===PROFILES.active).hidden)switchProfile(fallbackId());else saveProfiles();
+}
+// ---------- parent and teacher panel (src/teach.js) ----------
+// Loaded with import() the first time the parents' panel is open with a signed-in account (not only for teachers: parents share from it).
+let teach=null,teachP=null;
+function loadTeach(){
+  if(teach)return Promise.resolve(teach);
+  return teachP||(teachP=(async()=>{
+    try{
+      const m=await (window.__leemosImport||(p=>import(p)))('./teach.js');
+      teach=m.createTeach({doc:document,root:$('teach'),sync,t,lang:()=>S.lang,role:()=>ROLE,setRole:r=>{ROLE=r==='teacher'||r==='admin'?r:'parent'},profiles:PROFILES,uuid,pct:pctOfData,
+        openChild,syncNow:()=>syncAll(),download:downloadJSON,forgetRid,resync:resyncProfile,confirm:(k,vars,yes)=>askChoice(k,yes||'teachYes','teachNo','teachConfirmTitle',vars)});
+      return teach;
+    }catch(e){teachP=null;return null}
+  })());
+}
+function showTeach(){if(sync&&$('parents').open&&sync.userId())loadTeach().then(x=>x&&x.refresh())}
+// Percentage of mastered items (syllables and words of every level) in the language on screen, for a child's server data.
+// That data comes from other accounts: read it through mergeData (numbers only, like every other consumer), never raw.
+function pctOfData(data){
+  const st=mergeMod?mergeMod.mergeData(data,{}).stats:{};let n=0,m=0;
+  LEVELS.forEach((_,i)=>[...itemsFor(i,'syl'),...itemsFor(i,'word')].forEach(x=>{n++;if(isMastered(st[x.key]))m++}));
+  return n?Math.round(100*m/n):0;
+}
+// "Abrir aquí": the local profile of an account child, created on demand with the id of its row. A child the account is not linked to
+// (it reaches it through a class) is marked via:'class' so that signing out removes it from this tablet. stay: do not switch to it.
+function openChild(row,{stay=false}={}){
+  let p=PROFILES.list.find(x=>x.rid===row.id);
+  if(!p){
+    const rn=remoteName(row);if(!rn)return false;
+    const base=profileSlug(rn)||'nino';let id=base,i=2;
+    while(PROFILES.list.some(x=>x.id===id)||localStorage.getItem(keyFor(id))!==null)id=base+'-'+i++;
+    p={id,name:rn,kind:row.kind==='pre'?'pre':'reader',rid:row.id};
+    if(!row.linked)p.via='class';
+    PROFILES.list.push(p);
+    try{localStorage.setItem(keyFor(id),JSON.stringify(mergeMod.applySynced({},row.data)))}catch(e){}
+  }else delete p.hidden;
+  if(!saveProfiles())return false;
+  if(!stay)switchProfile(p.id);
+  return true;
+}
+// Progress of a profile newer than the last complete sync (a stamp from a faster clock only means one question too many).
+function unsent(p){
+  let at=0;try{at=Number(localStorage.getItem(SYNC_AT_KEY))||0}catch(e){}
+  const st=stateOf(p.id);
+  return Math.max(Number(st.modAt)||0,Number(st.session&&st.session.at)||0)>at;
+}
+// Asks a yes/no question in the link sheet. Resolves true for yesKey; noKey, "Ahora no" and Escape resolve false.
+function askChoice(textKey,yesKey,noKey,titleKey='acctSignOut',vars){
+  return new Promise(resolve=>{
+    $('linkTitle').textContent=t(titleKey);$('linkAsk').textContent=t(textKey,vars);
+    const box=$('linkOpts');box.innerHTML='';
+    const onKey=e=>{if(e.key==='Escape')done(false)};
+    const done=v=>{document.removeEventListener('keydown',onKey);$('link').hidden=true;$('linkTitle').textContent=t('linkTitle');resolve(v)};
+    [[yesKey,true],[noKey,false]].forEach(([k,v])=>{const b=document.createElement('button');b.className='wbtn';b.textContent=t(k);b.onclick=()=>done(v);box.appendChild(b)});
+    $('linkCancel').onclick=()=>done(false);
+    document.addEventListener('keydown',onKey);
+    $('link').hidden=false;
+    box.lastChild.focus(); // the safe answer has the focus
+  });
+}
+// Sign out: one last sync, then the class profiles go. If that sync failed and a class profile has progress not yet sent, ask first.
+async function signOutAndClean(){
+  if(!sync)return;
+  signingOut=true; // before the wait: a background round in flight must not reload the page under it
+  try{await signOutSteps()}finally{signingOut=false;if(switchAfterRound)switchNow({keepMsg:true})} // every path (stay, failure) still leaves a revoked open profile
+}
+async function signOutSteps(){
+  const wait=Date.now()+(window.__leemosSignOutWait||10000);
+  while(syncBusy&&Date.now()<wait)await new Promise(r=>setTimeout(r,50)); // a sync in flight finishes first (if it does not, this round is 'busy': nothing counts as sent)
+  const fail=await syncAll({final:true});
+  // only when this last round failed and a class profile has progress not yet sent (one without rid can never send anything: it just goes)
+  const risky=PROFILES.list.some(p=>p.via==='class'&&p.rid&&fail&&unsent(p));
+  if(risky&&!await askChoice('acctUnsentAsk','acctUnsentOut','acctUnsentStay')){
+    if(fail==='auth'||!sync.userId())hideClassProfiles(); // staying without a session: the class children must not stay open on a shared tablet
+    renderAcct();
+    if(switchAfterRound)switchNow({keepMsg:true});
+    return;
+  }
+  await sync.signOut();
+  ROLE='parent';syncState='idle';acctMsg('');clearAcctForm();
+  await purgeClassProfiles();
+  renderAcct();
+}
+// The sign-in form keeps nothing of the adult who used it (shared tablet): email, code and consent go once they are signed in or out.
+function clearAcctForm(){$('acctEmail').value='';$('acctCode').value='';$('acctConsent').checked=false;$('acctCodeRow').hidden=true}
 function acctMsg(key,vars){$('acctMsg').textContent=key?t(key,vars):''}
+// ---------- privacy: export and deletion (spec section 8). The export is built in the browser: nothing is sent anywhere. ----------
+function downloadJSON(name,obj){
+  const url=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:'application/json'}));
+  const a=document.createElement('a');a.href=url;a.download=name;a.hidden=true;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+const acctErrKey=e=>e&&e.kind==='offline'?'acctNetwork':e&&e.kind==='auth'?'acctExpired':e&&e.message==='last_admin'?'acctLastAdmin':'acctError';
+// A child that was deleted on the server loses its link here; its local progress stays (it is the family's own copy).
+// later: inside a sync round, which switches away from a removed open profile only when the round is over (signOutAndClean: after the purge).
+function forgetRid(id,{later=false}={}){
+  const p=PROFILES.list.find(x=>x.rid===id);if(!p)return;
+  if(p.via==='class'){ // a class child held for a teacher: it goes from the device at once (purge only ever touches these)
+    try{localStorage.removeItem(keyFor(p.id))}catch(e){}
+    const was=p.id===PROFILES.active;
+    PROFILES.list.splice(PROFILES.list.indexOf(p),1);
+    if(was){purgedActive=true;PROFILES.active=fallbackId();saveProfiles();if(later)switchAfterRound=true;else switchProfile(PROFILES.active)}else saveProfiles();
+    return;
+  }
+  delete p.rid;p.noSync=true;saveProfiles(); // the family's own copy stays here, and is not uploaded again unless the adult asks
+}
+// "Volver a guardar en la cuenta": the adult's explicit choice to upload a profile whose server copy was deleted.
+function resyncProfile(id){
+  const p=PROFILES.list.find(x=>x.id===id);if(!p||!p.noSync)return false;
+  delete p.noSync;p.rid=uuid();saveProfiles();syncAll().then(r=>{if(r==='busy')schedSync()});return true; // a round in flight already passed this profile: go again after it
+}
+async function exportMine(){
+  if(!sync||!sync.userId())return;
+  try{const d=await sync.exportMyData();downloadJSON('leemos-mis-datos.json',{exported_at:new Date().toISOString(),...d});acctMsg('acctExported')}
+  catch(e){acctMsg(acctErrKey(e))}
+}
+// Two confirmations. Afterwards this device keeps the family's own progress; the class children it only held for a teacher go.
+async function deleteAccount(){
+  if(!sync||!sync.userId())return;
+  if(!await askChoice('acctDelAsk1','acctDelYes1','acctDelNo','acctDelTitle'))return;
+  if(!await askChoice('acctDelAsk2','acctDelYes2','acctDelNo','acctDelTitle'))return;
+  signingOut=true; // before the wait: a background round in flight must not reload the page before the deletion and its local cleanup
+  try{await deleteSteps()}finally{signingOut=false;if(switchAfterRound)switchNow({keepMsg:true})} // also after a failed deletion
+}
+async function deleteSteps(){
+  const wait=Date.now()+(window.__leemosSignOutWait||10000);
+  while(syncBusy&&Date.now()<wait)await new Promise(r=>setTimeout(r,50)); // a sync in flight finishes first
+  try{await sync.deleteMyAccount()}catch(e){acctMsg(acctErrKey(e));return}
+  [AUTH_USER_KEY,SYNC_AT_KEY,'leemos-auth'].forEach(k=>{try{localStorage.removeItem(k)}catch(e){}});
+  PROFILES.list.forEach(p=>{if(p.rid&&p.via!=='class')p.noSync=true;delete p.rid;delete p.hidden});
+  saveProfiles();
+  ROLE='parent';syncState='idle';clearAcctForm();
+  await purgeClassProfiles();
+  renderAcct();acctMsg('acctDeleted');
+}
 function renderAcct(){
   if(!sync)return;
   $('acct').hidden=false;
   let email='';try{const s=JSON.parse(localStorage.getItem('leemos-auth'));email=s&&s.user&&s.user.email||''}catch(e){}
   const signedIn=!!email&&!!sync.userId();
   $('acctOut').hidden=signedIn;$('acctIn').hidden=!signedIn;
-  if(!signedIn)return;
+  if(!signedIn){if(teach)teach.render();return} // signed out: the panel forgets the account's children and codes
   $('acctWho').textContent=t('acctWho',{e:email});
   let at=0;try{at=Number(localStorage.getItem(SYNC_AT_KEY))||0}catch(err){}
   const mins=Math.max(0,Math.round((Date.now()-at)/60000));
   $('acctStatus').textContent=syncState==='syncing'?t('acctSyncing'):syncState==='offline'?t('acctOffline'):!at?t('acctNever'):t('acctSynced',{m:mins<1?t('acctJustNow'):t('acctMinAgo',{n:mins})});
 }
-$('parents').addEventListener('toggle',async()=>{if($('parents').open&&await syncInit())renderAcct()});
+$('parents').addEventListener('toggle',async()=>{if($('parents').open&&await syncInit()){renderAcct();showTeach()}});
 $('acctSend').onclick=async()=>{
   const email=$('acctEmail').value.trim();
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){acctMsg('acctBadEmail');return}
@@ -778,12 +1017,14 @@ $('acctVerify').onclick=async()=>{
   const sy=await syncInit();if(!sy)return;
   try{
     const s=await sy.verifyCode($('acctEmail').value.trim(),$('acctCode').value);
-    acctMsg('');$('acctCode').value='';$('acctCodeRow').hidden=true;
+    acctMsg('');clearAcctForm(); // signed in: a session that later dies outside a round shows an empty form too
     await afterSignIn(s.user);
   }catch(e){acctMsg(e&&e.kind==='code'?'acctBadCode':e&&e.kind==='offline'?'acctNetwork':'acctError')}
 };
 $('acctSync').onclick=()=>syncAll();
-$('acctOutBtn').onclick=()=>{if(sync)sync.signOut();syncState='idle';acctMsg('');renderAcct()};
+$('acctOutBtn').onclick=()=>signOutAndClean();
+$('acctExport').onclick=()=>exportMine();
+$('acctDelete').onclick=()=>deleteAccount();
 // Asks which account profile (if any) a local profile is. Resolves with a remote id, or null for "add as a new child".
 // Closing the dialog ("Ahora no") rejects, and the caller leaves everything as it was.
 const remoteName=r=>typeof(r&&r.name)==='string'?r.name.trim().slice(0,20):''; // account data is untrusted: only a real, short string is a name
@@ -805,19 +1046,24 @@ function askLink(local,candidates){
 async function afterSignIn(user){
   let prev=null;try{prev=localStorage.getItem(AUTH_USER_KEY)}catch(err){}
   const snapshot=JSON.stringify(PROFILES.list);
+  let activeGone=false;
   try{
-    if(prev&&prev!==user.id)PROFILES.list.forEach(p=>{delete p.rid}); // another account used this tablet: never upload its children into this one unasked
+    if(prev&&prev!==user.id){
+      // another account used this tablet: nothing is uploaded into this one unasked, and its class children go once the sign-in is saved
+      PROFILES.list.forEach(p=>{delete p.rid});
+    }else PROFILES.list.forEach(p=>{delete p.hidden}); // the same account is back: its class profiles show again
+    await readRole();
     const remote=await sync.listProfiles();
     const known=new Set(remote.map(r=>r.id));
     const claimed=new Set(PROFILES.list.filter(p=>p.rid&&known.has(p.rid)).map(p=>p.rid));
-    for(const p of PROFILES.list.filter(x=>!x.rid)){
-      const cands=remote.filter(r=>!claimed.has(r.id)&&r.kind===p.kind); // only a child of the same kind can be the same child
+    for(const p of PROFILES.list.filter(x=>!x.rid&&x.via!=='class'&&!x.noSync)){ // a class child that lost its link is never uploaded as this account's own
+      const cands=remote.filter(r=>r.linked&&!claimed.has(r.id)&&r.kind===p.kind); // only the account's own children (never one seen through a class), of the same kind
       const pick=cands.length?await askLink(p,cands):null;
       p.rid=pick||uuid();
       if(pick){claimed.add(pick);const rn=remoteName(remote.find(r=>r.id===pick));if(rn)p.name=rn} // the account's name is the one that follows the child
     }
     for(const r of remote){
-      if(claimed.has(r.id)||PROFILES.list.some(p=>p.rid===r.id))continue;
+      if(!r.linked||claimed.has(r.id)||PROFILES.list.some(p=>p.rid===r.id))continue; // children of a class are opened on demand, not added here
       const rn=remoteName(r);
       if(!rn)continue; // a remote row without a usable name is skipped, never allowed to break the linking
       const base=profileSlug(rn)||'nino';let id=base,i=2;
@@ -828,22 +1074,29 @@ async function afterSignIn(user){
     }
     if(!saveProfiles())throw new Error('storage'); // if the list cannot be saved the links would be lost at the next load: undo, do not pretend
     try{localStorage.setItem(AUTH_USER_KEY,user.id)}catch(err){}
+    if(prev&&prev!==user.id&&PROFILES.list.some(p=>p.via==='class')){activeGone=dropClassProfiles();saveProfiles()} // also the hidden ones
   }catch(e){
     // cancelled or failed half way: nothing stays linked and the device is signed out again. The list is restored in place,
     // so PROFILE (the active entry) is still one of its objects and renaming the child keeps persisting.
     const keep=JSON.parse(snapshot);
     for(let i=PROFILES.list.length-1;i>=0;i--)if(!keep.some(k=>k.id===PROFILES.list[i].id))PROFILES.list.splice(i,1);
-    PROFILES.list.forEach(p=>{const k=keep.find(x=>x.id===p.id);delete p.rid;if(k&&k.rid)p.rid=k.rid;if(k)p.name=k.name});
-    sync.signOut();syncState='idle';
+    PROFILES.list.forEach(p=>{const k=keep.find(x=>x.id===p.id);delete p.rid;if(k&&k.rid)p.rid=k.rid;if(k)p.name=k.name;delete p.hidden;if(k&&k.hidden)p.hidden=true});
+    sync.signOut();syncState='idle';ROLE='parent';
     $('link').hidden=true;
     acctMsg(e&&e.kind==='offline'?'acctNetwork':e&&e.message==='cancelled'?'':'acctError');
     renderAcct();
     return;
   }
   await syncAll();
+  if(activeGone)switchProfile(fallbackId()); // the open profile was another account's class child
+  showTeach();
 }
+// A message the previous page left for this one (a revoked open profile switched the page): shown once.
+try{const m=sessionStorage.getItem(NOTE_KEY);if(m){sessionStorage.removeItem(NOTE_KEY);$('acctMsg').textContent=m}}catch(e){}
 // A session from an earlier visit: sync at start (only if signed in; otherwise nothing is loaded or sent).
-try{if(localStorage.getItem('leemos-auth'))syncInit().then(sy=>{if(sy){renderAcct();syncAll()}})}catch(e){}
+try{if(localStorage.getItem('leemos-auth'))syncInit().then(async sy=>{if(sy){renderAcct();let last=null;try{last=localStorage.getItem(AUTH_USER_KEY)}catch(e){}
+  if(!last||last===sy.userId())if(await readRole()==='auth')hideClassProfiles(); // the role first (one request at a time, so a refresh never races another); never for another account's session
+  syncAll()}})}catch(e){}
 
 // ---------- mascot, sound, rewards ----------
 const MASCOT_STATES=['cheer','tilt','dance'];
@@ -1140,6 +1393,7 @@ function updateProfileChip(){$('profileName').textContent=PROFILE.name}
 function renderProfiles(){
   const g=$('profileList');g.innerHTML='';
   PROFILES.list.forEach(p=>{
+    if(p.hidden)return; // a class profile hidden after an auth error is not listed (nor opened)
     const b=document.createElement('button');
     b.className='wbtn';b.setAttribute('aria-pressed',p.id===PROFILES.active);
     const ic=document.createElement('span');ic.textContent=p.kind==='pre'?'🔤':'📖';
@@ -1149,7 +1403,7 @@ function renderProfiles(){
   });
 }
 function renderSwitch(){$('pfSwitch').textContent=t(PROFILE.kind==='pre'?'pfToReader':'pfToPre')}
-$('pfSwitch').onclick=()=>{PROFILE.kind=PROFILE.kind==='pre'?'reader':'pre';switchProfile(PROFILE.id)}; // same progress, other screen; kind goes to the account on the next sync
+$('pfSwitch').onclick=()=>{PROFILE.kind=PROFILE.kind==='pre'?'reader':'pre';PROFILE.kindDirty=true;switchProfile(PROFILE.id)}; // same progress, other screen; kind goes to the account on the next sync (kindDirty)
 function openProfiles(){renderProfiles();renderSwitch();$('profiles').hidden=false;$('profilesClose').focus()}
 $('profileBtn').onclick=openProfiles;
 $('profileOpen').onclick=openProfiles;
@@ -1352,6 +1606,7 @@ function applyLang(){
   });
   $('langBtn').textContent=S.lang==='ca'?'CA':'ES';
   updateHello();renderLevels();renderPath();renderMode();renderHard();renderSession();renderAlbum();renderWorlds();updateRecInfo();
+  if(teach)try{teach.render()}catch(e){} // a panel failure must not cut the language switch short
   if(hasTTS)pickVoice();
   if(phase==='read'||phase==='judge')$('hint').textContent=hintFor(phase);
 }

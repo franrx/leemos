@@ -6,7 +6,9 @@ import { tmpdir, networkInterfaces } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { handleStatic } from '../scripts/lib/staticserver.mjs';
+import { startFakeServer, SEED } from '../scripts/fake-supabase-server.mjs';
 
 let failures = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`); if (!ok) failures++; };
@@ -100,6 +102,64 @@ if (lan) {
   check('dev server: by default it is NOT reachable through the LAN address', reachable === false, lan.address);
 } else console.log('SKIP  dev server: no LAN address to test');
 child.kill();
+
+
+// The development override of the sync config (QA against the fake backend): off by default, exact path only.
+const CFG_PATH = '/src/data/sync.config.json', CFG_JSON = '{"url":"http://127.0.0.1:5174","anonKey":"dev"}';
+({ s: server, port } = await serve({ overrides: { [CFG_PATH]: CFG_JSON } }));
+r = await call(port, CFG_PATH + '?x=1');
+check('static override: the configured path answers with the given JSON, uncached', r.status === 200 && r.body === CFG_JSON && /json/.test(r.headers['content-type']) && r.headers['cache-control'] === 'no-cache', r.body);
+r = await call(port, '/src/data/other.json');
+check('static override: any other path is untouched', r.status === 404);
+r = await call(port, '/.env');
+check('static override: dotfiles are still refused', r.status === 404 && !r.body.includes('SECRET'));
+server.close();
+({ s: server, port } = await serve({ localHostsOnly: true, overrides: { [CFG_PATH]: CFG_JSON } }));
+r = await call(port, CFG_PATH, { headers: { Host: 'evil.example' } });
+check('static override: the local-only Host guard still applies to it', r.status === 403 && !r.body.includes('anonKey'));
+server.close();
+
+const spawnDev = async (env) => {
+  const p2 = 30000 + Math.floor(Math.random() * 10000);
+  const c = spawn(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'dev-server.mjs')], { env: { ...process.env, PORT: String(p2), HOST: '', LEEMOS_SYNC_CONFIG_JSON: '', ...env }, stdio: 'ignore' });
+  let ok = false;
+  for (let i = 0; i < 50 && !ok; i++) { await sleep(100); try { ok = (await call(p2, '/index.html')).status === 200; } catch { /* not listening yet */ } }
+  return { c, p2, ok };
+};
+const committed = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'data', 'sync.config.json'), 'utf8');
+let dv = await spawnDev({});
+r = dv.ok ? await call(dv.p2, CFG_PATH) : { body: '' };
+check('dev server: without LEEMOS_SYNC_CONFIG_JSON it serves the committed sync config', dv.ok && r.body === committed, r.body.slice(0, 60));
+dv.c.kill();
+dv = await spawnDev({ LEEMOS_SYNC_CONFIG_JSON: CFG_JSON });
+r = dv.ok ? await call(dv.p2, CFG_PATH) : { body: '' };
+check('dev server: LEEMOS_SYNC_CONFIG_JSON replaces the sync config in the response only', dv.ok && r.body === CFG_JSON && readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'data', 'sync.config.json'), 'utf8') === committed, r.body.slice(0, 60));
+dv.c.kill();
+const bad = spawn(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'dev-server.mjs')], { env: { ...process.env, PORT: '0', LEEMOS_SYNC_CONFIG_JSON: '{nope' }, stdio: 'ignore' });
+const badCode = await new Promise((res) => { bad.on('exit', res); setTimeout(() => { bad.kill(); res('hung'); }, 5000); });
+check('dev server: an invalid LEEMOS_SYNC_CONFIG_JSON stops it with an error', badCode === 1, String(badCode));
+
+// The fake backend for QA: CORS, seeded accounts, the fixed code.
+{
+  const fx = await startFakeServer({ port: 0 });
+  const base = `http://127.0.0.1:${fx.port}`;
+  const pre = await fetch(base + '/rest/v1/rpc/whoami', { method: 'OPTIONS', headers: { Origin: 'http://localhost:5173', 'Access-Control-Request-Method': 'POST' } });
+  check('fake backend: answers the CORS preflight', pre.status === 204 && pre.headers.get('access-control-allow-origin') === '*' && /authorization/.test(pre.headers.get('access-control-allow-headers')));
+  const signIn = async (email, code = SEED.code) => {
+    await fetch(base + '/auth/v1/otp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+    return fetch(base + '/auth/v1/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, token: code, type: 'email' }) });
+  };
+  const bad2 = await signIn(SEED.teacher, '000000');
+  const ok = await signIn(SEED.teacher);
+  const sess = await ok.json();
+  const who = await (await fetch(base + '/rest/v1/rpc/whoami', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + sess.access_token }, body: '{}' })).json();
+  const cls = await (await fetch(base + '/rest/v1/classes?select=id,name', { headers: { Authorization: 'Bearer ' + sess.access_token } })).json();
+  check('fake backend: code 123456 signs a seeded teacher in (and a wrong one is refused)', bad2.status === 403 && ok.status === 200 && who.role === 'teacher' && !!who.teacher_ack_at && cls.length === 1 && cls[0].name === '3A', JSON.stringify({ who, cls }));
+  const adm = await (await signIn(SEED.admin)).json();
+  const aw = await (await fetch(base + '/rest/v1/rpc/whoami', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + adm.access_token }, body: '{}' })).json();
+  check('fake backend: the seeded admin and parent have their roles', aw.role === 'admin' && (await (await fetch(base + '/rest/v1/rpc/whoami', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (await (await signIn(SEED.parent)).json()).access_token }, body: '{}' })).json()).role === 'parent');
+  fx.server.close();
+}
 
 rmSync(parent, { recursive: true, force: true });
 console.log(failures ? `\n${failures} staticserver test(s) FAILED` : '\nAll staticserver tests passed');

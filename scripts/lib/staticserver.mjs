@@ -27,11 +27,21 @@ export function resolveFile(root, rawUrl) {
 }
 
 // localHostsOnly: refuse any Host header that is not localhost (blocks DNS rebinding from a web page).
-export function handleStatic(req, res, { root, localHostsOnly = false }) {
+// overrides: { '/exact/path': 'body' } answers those paths with the given JSON text instead of the file (development only: the dev server
+// uses it to point the app at a test backend without touching the committed config).
+export function handleStatic(req, res, { root, localHostsOnly = false, overrides = null }) {
   const end = (status, msg) => { res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end(msg); };
   try {
     if (localHostsOnly && !LOCAL_HOSTS.has((req.headers.host || '').replace(/:\d+$/, ''))) return end(403, 'Forbidden');
     if (req.method !== 'GET' && req.method !== 'HEAD') return end(405, 'Method not allowed');
+    if (overrides) {
+      let path = '';
+      try { path = new URL(req.url, 'http://x').pathname; } catch { /* a bad URL falls through to resolveFile's 400 */ }
+      if (Object.prototype.hasOwnProperty.call(overrides, path)) {
+        res.writeHead(200, { 'Content-Type': TYPES['.json'], 'Cache-Control': 'no-cache' });
+        return res.end(req.method === 'HEAD' ? undefined : overrides[path]);
+      }
+    }
     const r = resolveFile(root, req.url);
     if (r.status) return end(r.status, r.status === 400 ? 'Bad request' : 'Not found');
     const { file, size } = r;

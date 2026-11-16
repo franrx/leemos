@@ -75,11 +75,30 @@ check('applySynced: an empty remote name does not erase the local one', applySyn
 
 // bounds: hostile or broken numbers and keys cannot grow or freeze the data (review minor m5)
 const huge = mergeData({ resets: { es: 1e300, ca: 2 }, total: 1e300, stickers: Infinity, stats: { 's:ma': { ok: 1e300, fail: 3 }, evil: { ok: 5 }, ['s:' + 'x'.repeat(200)]: { ok: 5 }, 'w:ne-na': { ok: 1.9 }, 'snd:m': { ok: 1, [('f').repeat(50)]: 9 } }, modAt: 1e300 }, {});
-check('bounds: counters and resets are capped, so 1e300 cannot absorb later increments', huge.total === 1e6 && huge.resets.es === 1e6 && huge.stats['s:ma'].ok === 1e6 && huge.stickers === 0, JSON.stringify([huge.total, huge.resets, huge.stickers]));
+check('bounds: counters are capped, so 1e300 cannot absorb later increments', huge.total === 1e6 && huge.stats['s:ma'].ok === 1e6 && huge.stickers === 0, JSON.stringify([huge.total, huge.resets, huge.stickers]));
+// resets have no reachable cap (F001): the server lets them grow by 1 per write, so a cap could be reached by repetition and a reset
+// would then tie the planted stats. A value beyond any safe integer cannot come from the server: it is invalid, like a broken stamp.
+check('bounds: a reset counter beyond any safe integer is invalid', huge.resets.es === 0 && mergeData({ resets: { es: 2 ** 53 } }, {}).resets.es === 0 && mergeData({ resets: { es: 2 ** 53 - 1 } }, {}).resets.es === 2 ** 53 - 1, JSON.stringify(huge.resets));
+{
+  // a class teacher pushed resets.es to 1000005, one write at a time, with planted stats; the family pulls and taps «Borrar progreso»
+  const row = { resets: { es: 1000005, ca: 0 }, stats: { 's:ma': { ok: 1e6, fail: 0 } }, modAt: 10 };
+  const local = { ...row, resets: { es: 1000006, ca: 0 }, stats: {} };
+  const m = mergeData(pickSynced(local), row), m2 = mergeData(row, pickSynced(local));
+  check('resets: past 1e6 the family\'s reset still wins and planted stats do not come back', pickSynced(local).resets.es === 1000006 && m.resets.es === 1000006 && !m.stats['s:ma'] && !m2.stats['s:ma'], JSON.stringify([m.resets, m.stats]));
+  const applied = applySynced({}, m);
+  check('resets: a large counter survives applySynced', applied.resets.es === 1000006, JSON.stringify(applied.resets));
+}
 check('bounds: a reset counter at the cap is still just a counter', huge.resets.ca === 2);
 check('bounds: stats keys that are not item keys, or are too long, are dropped', !('evil' in huge.stats) && !Object.keys(huge.stats).some((k) => k.length > 44), Object.keys(huge.stats).join('|'));
 check('bounds: fractional counters become whole numbers', huge.stats['w:ne-na'].ok === 1);
 check('bounds: field names inside a stat are limited too', Object.keys(huge.stats['snd:m']).every((f) => f.length <= 16));
+{ // fix iteration (F001): what one planted key can carry into the family's next push is bounded: a name of at most 24 characters after
+  // the prefix (the longest real one has 12) and only the two fields the app writes (ok and fail)
+  const s24 = 'x'.repeat(24), s25 = 'x'.repeat(25);
+  const b = mergeData({ stats: { ['s:' + s24]: { ok: 1, fail: 2, junk: 3, okay: 4 }, ['s:' + s25]: { ok: 1 }, ['ca:snd:' + s24]: { ok: 1 }, ['ca:w:' + s25]: { ok: 1 } } }, {});
+  check('bounds: stat keys keep at most 24 characters after the prefix, and a stat keeps only ok and fail',
+    Object.keys(b.stats).sort().join('|') === ['ca:snd:' + s24, 's:' + s24].sort().join('|') && JSON.stringify(b.stats['s:' + s24]) === '{"ok":1,"fail":2}', JSON.stringify(b.stats));
+}
 check('bounds: an unsafe modAt counts as zero', huge.modAt === 0);
 
 // ---------- session in progress and preferences (spec: 2026-10-17-session-prefs-sync-design.md) ----------

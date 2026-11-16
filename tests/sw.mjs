@@ -46,5 +46,9 @@ const supaAnswer = await get('https://x.supabase.co/rest/v1/child_profiles?selec
 const authAnswer = await get('https://x.supabase.co/auth/v1/token?grant_type=refresh_token');
 check('sw: requests to the Supabase origin are left alone (never intercepted or cached)', supaAnswer === null && authAnswer === null && network.length === before && ![...store.keys()].some((k) => k.includes('supabase')));
 
+// teachers and classes: the teacher panel module and the privacy page are part of the offline shell; tools/admin.* are not
+const swSrc = readFileSync(join(ROOT, 'sw.js'), 'utf8');
+check('sw: SHELL lists src/teach.js and privacy.html and VERSION is a leemos-vN cache name', /'src\/teach\.js'/.test(swSrc) && /'privacy\.html'/.test(swSrc) && /VERSION = 'leemos-v\d+'/.test(swSrc) && !/tools\/admin/.test(swSrc));
+
 console.log(failures ? `\n${failures} sw test(s) FAILED` : '\nAll sw tests passed');
 process.exit(failures ? 1 : 0);

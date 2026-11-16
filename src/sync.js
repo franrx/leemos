@@ -7,8 +7,25 @@ export class SyncError extends Error {
 }
 
 const SESSION_KEY = 'leemos-auth';
+// The server keeps at most old + 1 resets per language and write, and 1000 on insert (trigger child_profiles_data). Push exactly what it
+// will store, so the data returned is the server's and the device settles on it in the same round: a higher local counter would later
+// wipe what another device played at the stored one. `old`: the row's cleaned data, or null for an insert.
+const capResets = (d, old) => { for (const L of ['es', 'ca']) d.resets[L] = Math.min(d.resets[L], old ? old.resets[L] + 1 : 1000); return d; };
 
-export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, storage = globalThis.localStorage, now = Date.now }) {
+// A write the server refuses with 23514 (data over the 200 KB check, more stat keys per language or more than 32 world ids in stk than
+// trigger child_profiles_data allows) carries keys somebody planted: they are shaped like the app's own, so the merge keeps them. Such a
+// write is retried once with the stats pruned to the keys this app can produce and stk to its worlds (whichever the app can tell). Only
+// that fallback prunes: an ordinary push keeps a newer device's new keys and worlds.
+const pruneData = (d, known, world) => {
+  const out = { ...d };
+  if (known) out.stats = Object.fromEntries(Object.entries(d.stats).filter(([k]) => known(k)));
+  if (world) { out.stk = Object.fromEntries(Object.entries(d.stk).filter(([k]) => world(k))); out.stickers = Object.values(out.stk).reduce((s, n) => s + n, 0); }
+  return out;
+};
+
+// knownKeys: async () => (statKey) => boolean, or null when the app cannot tell (no pruning of the stats then).
+// knownWorlds: (worldId) => boolean, the worlds of this app, or null (no pruning of stk then).
+export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, storage = globalThis.localStorage, now = Date.now, knownKeys = null, knownWorlds = null }) {
   // the project root: a URL copied with an API path (…/rest/v1/, …/auth/v1) or a trailing slash still works
   const base = String(url).trim().replace(/\/+$/, '').replace(/\/(rest|auth)\/v1$/, '').replace(/\/+$/, '');
   const read = (k) => { try { return JSON.parse(storage.getItem(k)); } catch (e) { return null; } };
@@ -78,39 +95,96 @@ export function createSync({ url, anonKey, fetch: doFetch = globalThis.fetch, st
     if (r.status === 401) { clearSession(); throw new SyncError('auth', 'not authorised', 401); }
     return r;
   }
+  const errCode = async (r) => { try { const j = await r.json(); return j && j.code; } catch (e) { return null; } };
+  const knownOf = async () => { try { return knownKeys ? await knownKeys() : null; } catch (e) { return null; } };
+  // the refused write, pruned with whatever the app can tell; null when it can tell nothing (no retry)
+  const pruned23514 = async (d) => { const known = await knownOf(); return known || knownWorlds ? pruneData(d, known, knownWorlds) : null; };
   const rows = async (r) => { try { const j = await r.json(); return Array.isArray(j) ? j : []; } catch (e) { return []; } };
-  const SELECT = 'select=id,name,kind,data,version';
+  const SELECT = 'select=id,name,kind,data,version,class_id,has_parent,child_links(user_id)'; // has_parent: a computed column (a boolean for rows the caller can read)
 
+  // ---------- RPCs (security definer functions): expected failures come back as a value, {error:'<code>'} ----------
+  async function rpc(name, args = {}) {
+    const r = await api('rpc/' + name, { method: 'POST', body: JSON.stringify(args) });
+    if (!r.ok) throw new SyncError('http', 'rpc ' + name + ' failed', r.status);
+    try { return await r.json(); } catch (e) { return {}; }
+  }
+  // An rpc whose {error} becomes a SyncError: invalid -> 'code', rate -> 'rate', anything else -> 'http' with the code as the message.
+  async function call(name, args) {
+    const j = await rpc(name, args);
+    if (j && j.error) throw new SyncError(j.error === 'invalid' ? 'code' : j.error === 'rate' ? 'rate' : 'http', j.error);
+    return j;
+  }
+  const me = () => call('whoami');
+  const ackTeacher = () => call('ack_teacher');
+  // `teaches`: the caller teaches the class (RLS on class_teachers returns only the caller's own rows). A class seen only through the
+  // caller's own child in a colleague's class is listed (its name names the chip) but is not one of theirs.
+  async function listClasses() {
+    const r = await api('classes?select=id,name,class_teachers(teacher_id)&order=name');
+    if (!r.ok) throw new SyncError('http', 'could not list classes', r.status);
+    return (await rows(r)).map(({ class_teachers, ...c }) => ({ ...c, teaches: Array.isArray(class_teachers) && class_teachers.length > 0 }));
+  }
+  const createInvite = (childId, kind) => call('create_invite', { p_child: childId, p_kind: kind });
+  const redeemInvite = (code, classId) => call('redeem_invite', { p_code: code, p_class: classId || null });
+  const leaveClass = (id) => call('leave_class', { p_child: id });
+  const unlinkMe = (id) => call('unlink_me', { p_child: id });
+  const deleteChild = (id) => call('delete_child', { p_child: id });
+  const exportMyData = () => call('export_my_data');
+  const deleteMyAccount = () => call('delete_my_account');
+
+  // `linked`: the caller has a parent link (RLS returns only the caller's own child_links row). A class child seen by its teacher is not.
   async function listProfiles() {
     const r = await api(`child_profiles?${SELECT}&order=id`);
     if (!r.ok) throw new SyncError('http', 'could not list profiles', r.status);
-    return rows(r);
+    const me_ = userId();
+    return (await rows(r)).map(({ child_links, ...p }) => ({ ...p, class_id: p.class_id || null, has_parent: p.has_parent === true, linked: !!me_ && Array.isArray(child_links) && child_links.some((l) => l && l.user_id === me_) }));
   }
   async function getProfile(rid) {
     const r = await api(`child_profiles?${SELECT}&id=eq.${encodeURIComponent(rid)}`);
     if (!r.ok) throw new SyncError('http', 'could not read the profile', r.status);
     return (await rows(r))[0] || null;
   }
+  // "New child in this class": an explicit insert with class_id, before the ordinary sync (whose create-on-missing would land it class-less).
+  async function createInClass({ id, name, kind, classId, data }) {
+    const c = await api('child_profiles', { method: 'POST', body: JSON.stringify({ id, name, kind, class_id: classId, data: mergeData(data, {}) }) });
+    if (!c.ok) throw new SyncError('http', 'could not create the child', c.status);
+    return (await rows(c))[0] || null;
+  }
 
-  // Pull, merge, push one profile. `data` is the local synced snapshot. Returns the merged data and the server version.
-  async function syncProfile({ rid, name, kind, data }) {
+  // Pull, merge, push one profile. `data` is the local synced snapshot. Returns {data, version, kind}, or {revoked:true} when the server
+  // no longer lets this account have the row. `kind` is pushed only with kindChanged (the adult changed it here); otherwise the server's wins.
+  async function syncProfile({ rid, name, kind, data, kindChanged = false }) {
     for (let attempt = 0; attempt < 5; attempt++) {
-      const row = await getProfile(rid);
+      let row = await getProfile(rid);
       if (!row) {
-        const c = await api('child_profiles', { method: 'POST', body: JSON.stringify({ id: rid, name, kind, data: mergeData(data, {}) }) });
-        if (c.status === 409) continue; // another device created it first: read it and merge
-        if (!c.ok) throw new SyncError('http', 'could not create the profile', c.status);
-        return { data: mergeData(data, {}), version: 1 };
+        let born = capResets(mergeData(data, {}), null), pruned = false;
+        const create = () => api('child_profiles', { method: 'POST', body: JSON.stringify({ id: rid, name, kind, data: born }) });
+        let c = await create();
+        if (c.status === 400 && (await errCode(c)) === '23514') { const p = await pruned23514(born); if (p) { born = p; pruned = true; c = await create(); } }
+        if (c.status === 403) return { revoked: true }; // the insert policy refuses (e.g. a deleted child's id)
+        if (c.status === 409) { // exists but not visible to us (revoked), or another device created it first
+          row = await getProfile(rid);
+          if (!row) return { revoked: true };
+        } else {
+          if (!c.ok) throw new SyncError('http', 'could not create the profile', c.status);
+          return { data: born, version: 1, kind, ...(pruned ? { pruned } : {}) };
+        }
       }
-      const merged = mergeData(data, row.data);
-      if (sameData(merged, mergeData(row.data, {})) && row.name === name) return { data: merged, version: row.version };
-      const p = await api(`child_profiles?id=eq.${encodeURIComponent(rid)}&version=eq.${row.version}`, { method: 'PATCH', body: JSON.stringify({ name, data: merged, version: row.version + 1 }) });
+      let merged = capResets(mergeData(data, row.data), mergeData(row.data, {})), pruned = false;
+      const push = kindChanged && kind !== row.kind;
+      const nextKind = push ? kind : row.kind;
+      if (sameData(merged, mergeData(row.data, {})) && row.name === name && !push) return { data: merged, version: row.version, kind: nextKind };
+      const write = (version) => api(`child_profiles?id=eq.${encodeURIComponent(rid)}&version=eq.${row.version}`, { method: 'PATCH', body: JSON.stringify({ name, data: merged, version, ...(push ? { kind } : {}) }) });
+      let next = row.version + 1, p = await write(next);
+      // a version at the integer maximum (planted before the server controlled it): version+1 overflows (22003). Start again at 1 under the same filter.
+      let code = p.status === 400 ? await errCode(p) : null;
+      if (code === '22003') { next = 1; p = await write(next); code = p.status === 400 ? await errCode(p) : null; }
+      if (code === '23514') { const d = await pruned23514(merged); if (d) { merged = d; pruned = true; p = await write(next); } }
       if (!p.ok) throw new SyncError('http', 'could not save the profile', p.status);
-      if ((await rows(p)).length) return { data: merged, version: row.version + 1 };
+      if ((await rows(p)).length) return { data: merged, version: next, kind: nextKind, ...(pruned ? { pruned } : {}) };
       // empty result: someone else wrote first, go again from the read
     }
     throw new SyncError('conflict', 'too many concurrent writes');
   }
 
-  return { requestCode, verifyCode, session, signOut, userId, listProfiles, syncProfile };
+  return { requestCode, verifyCode, session, signOut, userId, listProfiles, syncProfile, createInClass, rpc, me, ackTeacher, listClasses, createInvite, redeemInvite, leaveClass, unlinkMe, deleteChild, exportMyData, deleteMyAccount };
 }

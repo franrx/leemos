@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Leemos: privacidad / privadesa</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<style>
+:root{
+  --bg:#FFF3FA; --panel:#FFFFFF; --ink:#2A1A5E; --muted:#6A4F96; --line:#FFD1EC;
+  --warn-bg:#FFF1B8; --warn-ink:#4A3300; --warn-line:#E0A800; --link:#4326B4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15122B; --panel:#211D42; --ink:#F3F1FF; --muted:#B4B0D6; --line:#372F66;
+    --warn-bg:#4A3A00; --warn-ink:#FFE9A0; --warn-line:#C99A00; --link:#B9A8FF;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15122B; --panel:#211D42; --ink:#F3F1FF; --muted:#B4B0D6; --line:#372F66;
+  --warn-bg:#4A3A00; --warn-ink:#FFE9A0; --warn-line:#C99A00; --link:#B9A8FF;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:1.0625rem/1.55 Andika,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(24px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+main{max-width:46rem;margin:0 auto}
+h1{font-size:1.6rem;line-height:1.25;margin:.4em 0 .3em}
+h2{font-size:1.2rem;margin:1.6em 0 .4em}
+p,li{margin:.5em 0}
+ul{padding-left:1.3em}
+a{color:var(--link);text-underline-offset:3px}
+a:focus-visible,summary:focus-visible{outline:3px solid var(--link);outline-offset:3px;border-radius:4px}
+.langs{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 12px}
+.langs a{display:inline-flex;align-items:center;min-height:44px;padding:8px 16px;border:2px solid var(--line);border-radius:14px;background:var(--panel);font-weight:700;text-decoration:none}
+.banner{background:var(--warn-bg);color:var(--warn-ink);border:2px solid var(--warn-line);border-radius:14px;padding:12px 14px;margin:12px 0;font-weight:700}
+mark{background:var(--warn-bg);color:var(--warn-ink);border:1px solid var(--warn-line);border-radius:6px;padding:0 6px;font-weight:700}
+section.doc{background:var(--panel);border:2px solid var(--line);border-radius:22px;padding:6px 18px 18px;margin:16px 0}
+.back{display:inline-flex;align-items:center;min-height:44px}
+.small{color:var(--muted);font-size:.95rem}
+</style>
+</head>
+<body>
+<main>
+<p class="langs"><a href="#es" hreflang="es">Español</a><a href="#ca" hreflang="ca">Català</a></p>
+
+<section class="doc" id="es" lang="es" aria-labelledby="es-h1">
+  <h1 id="es-h1">Política de privacidad de Leemos</h1>
+  <p class="banner" role="note">Borrador sin revisión legal. Este texto describe lo que hace la aplicación hoy, pero aún no lo ha revisado una persona con formación jurídica. No lo des por definitivo.</p>
+
+  <h2>Quién es responsable</h2>
+  <p><mark>PENDIENTE: responsable del tratamiento</mark> (la persona o el centro que decide para qué se usan los datos).</p>
+  <p><mark>PENDIENTE: correo de contacto</mark> para ejercer tus derechos.</p>
+
+  <h2>Qué se guarda</h2>
+  <p>Sin cuenta, el progreso de los niños se queda en el dispositivo: Leemos no lo envía a ningún servidor.</p>
+  <p><mark>PENDIENTE: terceros al cargar la página</mark> La aplicación carga la tipografía Andika desde Google Fonts, así que Google recibe la dirección IP de quien la abre, y el sitio donde se aloja la aplicación (GitHub Pages) ve cada petición. Falta decidir si se aloja la tipografía en el propio sitio y describir al proveedor de alojamiento.</p>
+  <p>Si un adulto crea una cuenta, se guarda en un servidor:</p>
+  <ul>
+    <li>el correo del adulto, solo para entrar con un código que se le envía; el niño nunca inicia sesión;</li>
+    <li>por cada niño: el apodo que le pone el adulto, el nivel, el progreso (qué sílabas y palabras domina), las pegatinas y las preferencias de la aplicación;</li>
+    <li>si se comparte con una clase: a qué clase pertenece.</li>
+  </ul>
+  <p>No se guardan apellidos, fotos, grabaciones de voz ni el correo de ningún niño. La aplicación no usa analítica ni publicidad y no sigue a nadie. Las grabaciones de voz que haga la familia se quedan en el dispositivo.</p>
+  <p>Los datos del servidor se guardan en <mark>PENDIENTE: región del servidor (Supabase)</mark>.</p>
+
+  <h2>Quién puede verlos</h2>
+  <ul>
+    <li>La familia vinculada a cada niño.</li>
+    <li>Los profesores de la clase del niño, solo mientras el niño esté en esa clase y el profesor haya aceptado que es responsable de los niños de su clase y que solo los usará para enseñar.</li>
+    <li>Quien use un código para padres que da el profesor de la clase. El profesor elige a quién se lo da (en mano o por mensaje): el código no va unido a una persona, y quien lo usa queda como la familia del niño. Cada uso queda anotado en un registro del servidor, y si al profesor se le retira el rol, se le quita de la clase o borra su cuenta, la administración puede deshacer los vínculos que salieron de sus códigos (el niño sigue en su clase y se da un código nuevo a la familia correcta). <mark>PENDIENTE: revisar este punto en la revisión legal</mark></li>
+    <li>Las personas administradoras no pueden leer los datos de los niños. Aun así, una persona administradora es de plena confianza: podría invitar a un correo suyo como profesor y asignarlo a una clase, y así llegar a los niños de esa clase. Cada invitación, retirada de rol y asignación queda anotada en un registro del servidor.</li>
+    <li>El proveedor del servidor, que guarda los datos (<mark>PENDIENTE: papel del proveedor y contrato con él</mark>).</li>
+  </ul>
+  <p>Compartir un niño con una clase es siempre un paso aparte, con su propio aviso, y la familia puede sacarlo de la clase cuando quiera.</p>
+
+  <h2>Cuánto tiempo</h2>
+  <p>Hasta que se borre la cuenta o se borre el niño. <mark>PENDIENTE: plazos de conservación definitivos</mark></p>
+
+  <h2>Tus derechos</h2>
+  <ul>
+    <li><strong>Acceso y copia:</strong> en el panel de padres, «Descargar mis datos» (todo) o «Descargar» en cada niño. El archivo se crea en tu navegador y no se envía a nadie.</li>
+    <li><strong>Borrado de un niño:</strong> «Borrar los datos de este niño». Puede hacerlo la familia vinculada; si nadie de la familia lo ha vinculado todavía, el profesor de su clase. Se borra del servidor y no se puede deshacer; el progreso guardado en el dispositivo se queda solo allí y no se vuelve a subir salvo que el adulto lo decida. Un niño que un profesor solo tenía abierto en su dispositivo a través de la clase se quita también de ese dispositivo.</li>
+    <li><strong>Borrado de la cuenta:</strong> «Borrar mi cuenta», con doble confirmación. Los niños que solo están en tu cuenta se borran. Los que están en una clase siguen en ella, sin familia vinculada, y los profesores de esa clase podrán borrarlos. Un administrador único no puede borrar su cuenta.</li>
+    <li>Para rectificar, limitar u oponerte, escribe al contacto indicado arriba.</li>
+  </ul>
+
+  <h2>Menores</h2>
+  <p>Leemos es para niños, pero quien se registra es siempre un adulto (padre, madre, tutor o profesor). <mark>PENDIENTE: texto sobre la edad de consentimiento y la base legal cuando un profesor crea a un niño</mark></p>
+
+  <p><a class="back" href="./">Volver a Leemos</a></p>
+</section>
+
+<section class="doc" id="ca" lang="ca" aria-labelledby="ca-h1">
+  <h1 id="ca-h1">Política de privadesa de Leemos</h1>
+  <p class="banner" role="note">Esborrany sense revisió legal. Aquest text descriu el que fa l'aplicació avui, però encara no l'ha revisat una persona amb formació jurídica. No el donis per definitiu.</p>
+
+  <h2>Qui n'és el responsable</h2>
+  <p><mark>PENDIENTE: responsable del tractament</mark> (la persona o el centre que decideix per a què s'usen les dades).</p>
+  <p><mark>PENDIENTE: correu de contacte</mark> per exercir els teus drets.</p>
+
+  <h2>Què es guarda</h2>
+  <p>Sense compte, el progrés dels nens es queda en el dispositiu: Leemos no l'envia a cap servidor.</p>
+  <p><mark>PENDIENTE: tercers en carregar la pàgina</mark> L'aplicació carrega la tipografia Andika des de Google Fonts, de manera que Google rep l'adreça IP de qui l'obre, i el lloc on s'allotja l'aplicació (GitHub Pages) veu cada petició. Falta decidir si s'allotja la tipografia al mateix lloc i descriure el proveïdor d'allotjament.</p>
+  <p>Si un adult crea un compte, es guarda en un servidor:</p>
+  <ul>
+    <li>el correu de l'adult, només per entrar amb un codi que se li envia; el nen mai inicia sessió;</li>
+    <li>per cada nen: el sobrenom que li posa l'adult, el nivell, el progrés (quines síl·labes i paraules domina), les enganxines i les preferències de l'aplicació;</li>
+    <li>si es comparteix amb una classe: a quina classe pertany.</li>
+  </ul>
+  <p>No es guarden cognoms, fotos, gravacions de veu ni el correu de cap nen. L'aplicació no fa servir analítica ni publicitat i no segueix ningú. Les gravacions de veu que faci la família es queden en el dispositiu.</p>
+  <p>Les dades del servidor es guarden a <mark>PENDIENTE: regió del servidor (Supabase)</mark>.</p>
+
+  <h2>Qui les pot veure</h2>
+  <ul>
+    <li>La família vinculada a cada nen.</li>
+    <li>Els professors de la classe del nen, només mentre el nen sigui en aquesta classe i el professor hagi acceptat que és responsable dels nens de la seva classe i que només els farà servir per ensenyar.</li>
+    <li>Qui faci servir un codi per als pares que dona el professor de la classe. El professor tria a qui el dona (en mà o per missatge): el codi no va lligat a una persona, i qui el fa servir queda com la família del nen. Cada ús queda anotat en un registre del servidor, i si al professor se li retira el rol, se'l treu de la classe o esborra el seu compte, l'administració pot desfer els vincles que han sortit dels seus codis (el nen continua a la seva classe i es dona un codi nou a la família correcta). <mark>PENDIENTE: revisar aquest punt a la revisió legal</mark></li>
+    <li>Les persones administradores no poden llegir les dades dels nens. Tot i això, una persona administradora és de plena confiança: podria convidar un correu seu com a professor i assignar-lo a una classe, i així arribar als nens d'aquesta classe. Cada invitació, retirada de rol i assignació queda anotada en un registre del servidor.</li>
+    <li>El proveïdor del servidor, que guarda les dades (<mark>PENDIENTE: paper del proveïdor i contracte amb ell</mark>).</li>
+  </ul>
+  <p>Compartir un nen amb una classe és sempre un pas a part, amb el seu propi avís, i la família el pot treure de la classe quan vulgui.</p>
+
+  <h2>Quant de temps</h2>
+  <p>Fins que s'esborri el compte o s'esborri el nen. <mark>PENDIENTE: terminis de conservació definitius</mark></p>
+
+  <h2>Els teus drets</h2>
+  <ul>
+    <li><strong>Accés i còpia:</strong> al tauler de pares, «Descarrega les meves dades» (tot) o «Descarrega» a cada nen. El fitxer es crea al teu navegador i no s'envia a ningú.</li>
+    <li><strong>Esborrar un nen:</strong> «Esborra les dades d'aquest infant». Ho pot fer la família vinculada; si ningú de la família no l'ha vinculat encara, el professor de la seva classe. S'esborra del servidor i no es pot desfer; el progrés guardat al dispositiu es queda només allà i no es torna a pujar tret que l'adult ho decideixi. Un nen que un professor només tenia obert al seu dispositiu a través de la classe també es treu d'aquest dispositiu.</li>
+    <li><strong>Esborrar el compte:</strong> «Esborra el meu compte», amb doble confirmació. Els nens que només són al teu compte s'esborren. Els que són en una classe hi continuen, sense família vinculada, i els professors d'aquesta classe els podran esborrar. Un administrador únic no pot esborrar el seu compte.</li>
+    <li>Per rectificar, limitar o oposar-te, escriu al contacte indicat més amunt.</li>
+  </ul>
+
+  <h2>Menors</h2>
+  <p>Leemos és per a nens, però qui es registra és sempre un adult (pare, mare, tutor o professor). <mark>PENDIENTE: text sobre l'edat de consentiment i la base legal quan un professor crea un nen</mark></p>
+
+  <p><a class="back" href="./">Torna a Leemos</a></p>
+</section>
+</main>
+</body>
+</html>
